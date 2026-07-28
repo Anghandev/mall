@@ -27,6 +27,7 @@ import { PickupCodeScanner } from '../components/PickupCodeScanner';
 import { canExecuteOrderAction } from '../core-boundary';
 import { CoreApiError } from '../core-api';
 import { readableError, useCoreRuntime } from '../core-runtime';
+import { formatBnm, formatNpl, formatTokenAmount, formatUsdt, translateErrorMessage } from '../display';
 import { useSearchParams } from 'react-router-dom';
 
 type LoadState<T> =
@@ -57,12 +58,11 @@ type FilterDraft = Readonly<{
 }>;
 
 const bytes32Pattern = /^0x[0-9a-fA-F]{64}$/;
-const reasonCodePattern = /^[A-Z0-9_:-]{2,64}$/;
 const pickupCodePattern = /^[0-9]{6}$/;
 const orderKinds = ['ORDINARY', 'SECKILL', 'FALLBACK_RETAIL'] satisfies readonly OrderKind[];
 const emptyFilters: FilterDraft = { from: '', to: '', skuId: '', state: '', orderKind: '' };
-const deliveryColumns = ['订单号', '订单类型', 'SKU', '数量', '订单状态', '支付 TxHash', '下单时间', '支付最终性', '运单号', '操作'];
-const pickupColumns = ['订单号', '订单类型', 'SKU', '数量', '订单状态', '支付 TxHash', '下单时间', '核销门店', '完成时间', '支付最终性', '操作'];
+const deliveryColumns = ['订单号', '订单类型', '规格', '数量', '订单状态', '付款确认', '下单时间', '运单号', '操作'];
+const pickupColumns = ['订单号', '订单类型', '规格', '数量', '订单状态', '付款确认', '下单时间', '核销门店', '完成时间', '操作'];
 
 export function FulfillmentPage() {
   const { api, session } = useCoreRuntime();
@@ -168,7 +168,7 @@ export function FulfillmentPage() {
   const shipmentValid = logisticsCarrierCodes.includes(carrierCode)
     && /^[A-Za-z0-9\s-]{6,64}$/.test(trackingNumber.trim())
     && shipmentNote.trim().length <= 500;
-  const receiptValid = reasonCodePattern.test(receiptReasonCode);
+  const receiptValid = receiptReasonCode.trim().length >= 2 && receiptReasonCode.trim().length <= 120;
   const pickupValid = pickupCodePattern.test(pickupCode)
     && bytes32Pattern.test(pickupEvidenceHash)
     && selectedTarget?.fulfillmentMode === 'PICKUP';
@@ -289,24 +289,25 @@ export function FulfillmentPage() {
       }, session.token);
       setTrackingNumber('');
       setShipmentNote('');
-      return `发货证据已记录：${result.shipmentId}`;
+      return `发货证据已记录。编号：${shortId(result.shipmentId)}`;
     });
   }
 
   function submitForcedReceipt() {
     if (!session || !selectedOrder || !receiptAllowed || !receiptValid) return;
     void runCommand('forced-receipt', async (key) => {
+      const reasonCode = normalizeReasonCode(receiptReasonCode, 'MERCHANT_RECEIPT_REQUEST');
       const evidence = await api.createOrderActionEvidence(selectedOrder.orderId, {
         action: 'REQUEST_FORCED_RECEIPT',
-        reasonCode: receiptReasonCode,
+        reasonCode,
         idempotencyKey: `${key}-evidence`,
       }, session.token);
       const result = await api.requestForcedReceipt(selectedOrder.orderId, {
         idempotencyKey: key,
         evidenceHash: evidence.evidenceHash,
-        reasonCode: receiptReasonCode,
+        reasonCode,
       }, session.token);
-      return `平台审核申请已提交：${result.requestId}`;
+      return `平台审核申请已提交。编号：${shortId(result.requestId)}`;
     });
   }
 
@@ -356,7 +357,7 @@ export function FulfillmentPage() {
         setExportState({ phase: 'success', message: '当前筛选与页游标下没有可导出的订单。' });
       } else {
         await downloadMerchantOrderExport(result);
-        setExportState({ phase: 'success', message: `已下载 ${result.rowCount} 笔 Core 授权订单。` });
+          setExportState({ phase: 'success', message: `已下载 ${result.rowCount} 笔订单。` });
       }
       exportAttempt.current = undefined;
     } catch (error) {
@@ -373,7 +374,7 @@ export function FulfillmentPage() {
             <button className="button primary" disabled={!session || ordersState.phase === 'loading'} onClick={() => void loadOrders()} type="button"><RefreshCw aria-hidden="true" size={16} /> 刷新订单</button>
           </div>
         )}
-        description="秒杀与常规订单统一履约。商家不能改价、退款或直接完成签收。"
+        description="秒杀与常规订单统一履约。商家只需要按订单发货或核销，不能改价、退款或直接完成签收。"
         eyebrow="03 / 订单与发货"
         title="履约交付"
       />
@@ -383,16 +384,16 @@ export function FulfillmentPage() {
           <button aria-controls="fulfillment-orders" aria-pressed={tab === 'delivery'} className={tab === 'delivery' ? 'active' : undefined} id="delivery-tab" onClick={() => changeTab('delivery')} type="button"><Box aria-hidden="true" size={17} /> 快递邮寄</button>
           <button aria-controls="fulfillment-orders" aria-pressed={tab === 'pickup'} className={tab === 'pickup' ? 'active' : undefined} id="pickup-tab" onClick={() => changeTab('pickup')} type="button"><ScanLine aria-hidden="true" size={17} /> 到店自提</button>
         </div>
-        <div className="section-heading"><div><p className="eyebrow">Merchant-scoped orders</p><h2 id="orders-title">商家履约订单</h2></div><span>{ordersState.phase === 'ready' ? `${visibleOrders.length} 笔` : '实时 Core 读取'}</span></div>
-        <p className="section-intro">筛选、订单分类、数量、支付 TxHash、下单时间和可执行动作均来自 Core `.5`。浏览器只提交筛选条件，不重算或补写订单字段。</p>
+        <div className="section-heading"><div><p className="eyebrow">订单列表</p><h2 id="orders-title">商家履约订单</h2></div><span>{ordersState.phase === 'ready' ? `${visibleOrders.length} 笔` : '读取订单中'}</span></div>
+        <p className="section-intro">筛选、订单分类、数量、付款确认和可执行动作都以系统返回为准。商家只处理发货或核销，不改订单金额和状态。</p>
         {exportState.phase === 'success' ? <p className="form-success export-feedback" role="status">{exportState.message}</p> : null}
         {exportState.phase === 'error' ? <p className="form-error export-feedback" role="alert">{exportState.message}</p> : null}
         <form className="filter-bar" aria-label="订单筛选" onSubmit={(event) => { event.preventDefault(); applyFilters(); }}>
           <label><span>开始时间</span><input aria-label="开始时间" disabled={!session} onChange={(event) => setFilterDraft((value) => ({ ...value, from: event.target.value }))} type="datetime-local" value={filterDraft.from} /></label>
           <label><span>结束时间</span><input aria-label="结束时间" disabled={!session} onChange={(event) => setFilterDraft((value) => ({ ...value, to: event.target.value }))} type="datetime-local" value={filterDraft.to} /></label>
-          <label><span>SKU</span><input aria-label="SKU 筛选" disabled={!session} onChange={(event) => setFilterDraft((value) => ({ ...value, skuId: event.target.value }))} placeholder="精确 SKU ID" type="text" value={filterDraft.skuId} /></label>
-          <label><span>订单状态</span><select aria-label="订单状态" disabled={!session} onChange={(event) => setFilterDraft((value) => ({ ...value, state: event.target.value as FilterDraft['state'] }))} value={filterDraft.state}><option value="">全部状态</option>{orderProjectionStates.map((state) => <option key={state} value={state}>{state}</option>)}</select></label>
-          <label><span>订单类型</span><select aria-label="订单类型" disabled={!session} onChange={(event) => setFilterDraft((value) => ({ ...value, orderKind: event.target.value as FilterDraft['orderKind'] }))} value={filterDraft.orderKind}><option value="">全部类型</option>{orderKinds.map((kind) => <option key={kind} value={kind}>{kind}</option>)}</select></label>
+          <label><span>规格编号</span><input aria-label="规格编号筛选" disabled={!session} onChange={(event) => setFilterDraft((value) => ({ ...value, skuId: event.target.value }))} placeholder="输入完整规格编号" type="text" value={filterDraft.skuId} /></label>
+          <label><span>订单状态</span><select aria-label="订单状态" disabled={!session} onChange={(event) => setFilterDraft((value) => ({ ...value, state: event.target.value as FilterDraft['state'] }))} value={filterDraft.state}><option value="">全部状态</option>{orderProjectionStates.map((state) => <option key={state} value={state}>{orderStateLabel(state)}</option>)}</select></label>
+          <label><span>订单类型</span><select aria-label="订单类型" disabled={!session} onChange={(event) => setFilterDraft((value) => ({ ...value, orderKind: event.target.value as FilterDraft['orderKind'] }))} value={filterDraft.orderKind}><option value="">全部类型</option>{orderKinds.map((kind) => <option key={kind} value={kind}>{orderKindLabel(kind)}</option>)}</select></label>
           <div className="filter-actions"><button className="button primary" disabled={!session || (Boolean(filterDraft.from && filterDraft.to && filterDraft.from > filterDraft.to))} type="submit"><ListFilter aria-hidden="true" size={16} /> 应用筛选</button><button className="button secondary" disabled={!session} onClick={resetFilters} type="button">重置</button></div>
         </form>
         {filterDraft.from && filterDraft.to && filterDraft.from > filterDraft.to ? <p className="form-error filter-error" role="alert">开始时间不能晚于结束时间。</p> : null}
@@ -421,11 +422,11 @@ export function FulfillmentPage() {
           <span>第 {pageIndex + 1} 页 · 选择单笔订单处理履约</span>
           <div className="button-group"><button className="button secondary" disabled={pageIndex === 0 || ordersState.phase === 'loading'} onClick={goToPreviousPage} type="button">上一页</button><button className="button secondary" disabled={ordersState.phase !== 'ready' || !ordersState.value.nextCursor} onClick={goToNextPage} type="button">下一页</button></div>
         </div>
-        <p className="panel-note">Excel 由 Core 在商家租户范围内解密 PII、审计并生成；首发发货仅使用单订单手工履约。</p>
+        <p className="panel-note">导出文件只包含当前商家有权限查看的订单；首发发货仅使用单订单手工履约。</p>
       </section>
 
       <section className="section-block order-check" aria-labelledby="order-check-title">
-        <div className="section-heading"><div><p className="eyebrow">Fulfillment checkpoint</p><h2 id="order-check-title">单订单履约控制</h2></div><span>{selectedOrder ? selectedOrder.fulfillmentMode : '尚未选择'}</span></div>
+        <div className="section-heading"><div><p className="eyebrow">履约处理</p><h2 id="order-check-title">单订单履约控制</h2></div><span>{selectedOrder ? fulfillmentModeLabel(selectedOrder.fulfillmentMode) : '尚未选择'}</span></div>
         {!selectedOrder ? <EmptyState description="从上方列表选择一笔订单，读取门店/地址快照和实时可执行动作。" title="选择订单后继续" /> : (
           <>
             <OrderSummary order={selectedOrder} />
@@ -433,7 +434,7 @@ export function FulfillmentPage() {
               <TargetPanel state={targetState} />
               <BalancePanel order={selectedOrder} />
             </div>
-            {targetState.phase === 'ready' && !targetMatchesOrder ? <p className="form-error" role="alert">订单履约方式与 Core 目标快照不一致，所有命令已关闭。</p> : null}
+            {targetState.phase === 'ready' && !targetMatchesOrder ? <p className="form-error" role="alert">订单履约方式与目标快照不一致，所有命令已关闭。</p> : null}
             <AllowedActionsTable actions={selectedOrder.allowedActions} />
           </>
         )}
@@ -442,18 +443,18 @@ export function FulfillmentPage() {
       {selectedOrder?.fulfillmentMode === 'DELIVERY' ? (
         <div>
           <form className="section-block compact-section" onSubmit={(event) => { event.preventDefault(); submitShipment(); }}>
-            <div className="section-heading"><div><p className="eyebrow">Shipment evidence</p><h2>提交发货证据</h2></div><PackageCheck aria-hidden="true" size={19} /></div>
+            <div className="section-heading"><div><p className="eyebrow">发货</p><h2>提交发货证据</h2></div><PackageCheck aria-hidden="true" size={19} /></div>
             <div className="field"><label htmlFor="carrier-code">快递公司</label><select disabled={!shipmentAllowed || submitting} id="carrier-code" onChange={(event) => updateCommandInput('shipment', () => setCarrierCode(event.target.value as (typeof logisticsCarrierCodes)[number]))} value={carrierCode}>{logisticsCarrierCodes.map((code) => <option key={code} value={code}>{carrierLabel(code)}</option>)}</select></div>
-            <div className="field"><label htmlFor="tracking-number">运单号</label><input autoComplete="off" disabled={!shipmentAllowed || submitting} id="tracking-number" maxLength={64} onChange={(event) => updateCommandInput('shipment', () => setTrackingNumber(event.target.value))} placeholder="输入快递单上的运单号" value={trackingNumber} /><span className="field-help">原始运单号由 Core 加密保存，页面不计算哈希。</span></div>
+            <div className="field"><label htmlFor="tracking-number">运单号</label><input autoComplete="off" disabled={!shipmentAllowed || submitting} id="tracking-number" maxLength={64} onChange={(event) => updateCommandInput('shipment', () => setTrackingNumber(event.target.value))} placeholder="输入快递单上的运单号" value={trackingNumber} /><span className="field-help">原始运单号会加密保存。</span></div>
             <div className="field"><label htmlFor="shipment-note">发货备注 / 凭证说明</label><textarea disabled={!shipmentAllowed || submitting} id="shipment-note" maxLength={500} onChange={(event) => updateCommandInput('shipment', () => setShipmentNote(event.target.value))} placeholder="可选：包裹数量、交接情况或其他发货凭证说明" value={shipmentNote} /></div>
             <button className="button primary wide" disabled={!shipmentAllowed || !shipmentValid || submitting} type="submit"><Send aria-hidden="true" size={16} /> 提交发货证据</button>
             <ActionBlockReason action="RECORD_SHIPMENT" actions={allowedActions} enabled={shipmentAllowed} />
-            <p className="panel-note">发货只提交幂等履约证据，不代表签收或资产结算。</p>
+            <p className="panel-note">提交发货不代表买家已签收，也不会立即结算货款。</p>
           </form>
           <form className="section-block compact-section" onSubmit={(event) => { event.preventDefault(); submitForcedReceipt(); }}>
-            <div className="section-heading"><div><p className="eyebrow">Receipt review</p><h2>申请平台确认签收</h2></div></div>
-            <p>物流确认送达满 7 天后，商家仅可提交证据申请，由平台审核。仲裁期间资产继续 Locked。</p>
-            <div className="field"><label htmlFor="receipt-reason-code">申请原因代码</label><input autoComplete="off" disabled={!receiptAllowed || submitting} id="receipt-reason-code" onChange={(event) => updateCommandInput('forced-receipt', () => setReceiptReasonCode(event.target.value.toUpperCase()))} pattern="[A-Z0-9_:-]{2,64}" placeholder="平台约定的原因代码" value={receiptReasonCode} /></div>
+            <div className="section-heading"><div><p className="eyebrow">签收审核</p><h2>申请平台确认签收</h2></div></div>
+            <p>物流确认送达满 7 天后，商家可提交申请，由平台审核。仲裁期间货款继续锁定。</p>
+            <div className="field"><label htmlFor="receipt-reason-code">申请原因</label><input autoComplete="off" disabled={!receiptAllowed || submitting} id="receipt-reason-code" maxLength={120} onChange={(event) => updateCommandInput('forced-receipt', () => setReceiptReasonCode(event.target.value))} placeholder="例如：买家已送达 7 天仍未确认" value={receiptReasonCode} /><span className="field-help">可以直接写中文，系统会自动转换为后台原因代码。</span></div>
             <button className="button secondary wide" disabled={!receiptAllowed || !receiptValid || submitting} type="submit">申请平台审核</button>
             <ActionBlockReason action="REQUEST_FORCED_RECEIPT" actions={allowedActions} enabled={receiptAllowed} />
             <p className="panel-note">本工作台没有“商家强制签收”或直接完成订单的操作。</p>
@@ -464,19 +465,20 @@ export function FulfillmentPage() {
       {selectedOrder?.fulfillmentMode === 'PICKUP' ? (
         <div className="two-panel-grid">
           <form className="section-block compact-section" onSubmit={(event) => { event.preventDefault(); submitPickup(); }}>
-            <div className="section-heading"><div><p className="eyebrow">Pickup verification</p><h2>门店核销自提</h2></div><ScanLine aria-hidden="true" size={19} /></div>
-            <div className="field"><label htmlFor="pickup-store-id">订单绑定门店</label><input id="pickup-store-id" readOnly value={selectedTarget?.fulfillmentMode === 'PICKUP' ? selectedTarget.storeId : '读取中'} /></div>
+            <div className="section-heading"><div><p className="eyebrow">到店自提</p><h2>门店核销自提</h2></div><ScanLine aria-hidden="true" size={19} /></div>
+            <div className="field"><label htmlFor="pickup-store-id">订单绑定门店</label><input id="pickup-store-id" readOnly value={selectedTarget?.fulfillmentMode === 'PICKUP' ? selectedTarget.payload.name : '读取中'} />{selectedTarget?.fulfillmentMode === 'PICKUP' ? <span className="field-help">门店编号在高级信息里，核销时不用手填。</span> : null}</div>
+            {selectedTarget?.fulfillmentMode === 'PICKUP' ? <details className="technical-details compact"><summary>高级门店编号</summary><code>{selectedTarget.storeId}</code></details> : null}
             <PickupCodeScanner key={selectedOrder.orderId} disabled={!pickupAllowed || submitting} onCode={(code) => updateCommandInput('pickup', () => setPickupCode(code))} />
             <div className="field"><label htmlFor="pickup-code">六位核销码</label><input autoComplete="one-time-code" disabled={!pickupAllowed || submitting} id="pickup-code" inputMode="numeric" maxLength={6} onChange={(event) => updateCommandInput('pickup', () => setPickupCode(event.target.value.replace(/[^0-9]/g, '')))} pattern="[0-9]{6}" placeholder="000000" value={pickupCode} /><span className="field-help">相机不可用或权限被拒绝时，可直接手工输入。</span></div>
-            <div className="field"><label htmlFor="pickup-evidence-hash">门店核销证据哈希</label><input autoComplete="off" disabled={!pickupAllowed || submitting} id="pickup-evidence-hash" onChange={(event) => updateCommandInput('pickup', () => setPickupEvidenceHash(event.target.value))} pattern="0x[0-9a-fA-F]{64}" placeholder="0x + 64 位十六进制" value={pickupEvidenceHash} /></div>
+            <div className="field"><label htmlFor="pickup-evidence-hash">核销凭证编号（高级）</label><input autoComplete="off" disabled={!pickupAllowed || submitting} id="pickup-evidence-hash" onChange={(event) => updateCommandInput('pickup', () => setPickupEvidenceHash(event.target.value))} pattern="0x[0-9a-fA-F]{64}" placeholder="系统生成的 0x 凭证编号" value={pickupEvidenceHash} /><span className="field-help">从系统核销凭证复制；没有编号不要手填。</span></div>
             <button className="button primary wide" disabled={!pickupAllowed || !pickupValid || submitting} type="submit">确认门店核销</button>
             <ActionBlockReason action="VERIFY_PICKUP" actions={allowedActions} enabled={pickupAllowed} />
-            <p className="panel-note">Core 绑定订单快照门店并持久化失败尝试；本页不能更换 storeId，也不能离线提交。</p>
+            <p className="panel-note">订单绑定的门店不能在这里更换，也不能离线提交。</p>
           </form>
         </div>
       ) : null}
 
-      {commandState.phase === 'submitting' ? <div className="system-notice" role="status"><RefreshCw aria-hidden="true" size={18} /><div><strong>正在提交 Core</strong><span>使用稳定幂等键等待权威响应。</span></div></div> : null}
+      {commandState.phase === 'submitting' ? <div className="system-notice" role="status"><RefreshCw aria-hidden="true" size={18} /><div><strong>正在提交</strong><span>请等待系统确认，不要重复点击。</span></div></div> : null}
       {commandState.phase === 'success' ? <div className="system-notice ready" role="status"><PackageCheck aria-hidden="true" size={18} /><div><strong>履约命令已确认</strong><span>{commandState.message}</span></div></div> : null}
       {commandState.phase === 'error' ? <p className="form-error" role="alert">{commandState.message}</p> : null}
 
@@ -500,12 +502,12 @@ function OrderRow({
   const latestShipment = order.shipments.at(-1);
   const pickupStore = target?.fulfillmentMode === 'PICKUP' ? target.payload.name : '选择后读取';
   const shared = [
-    <td key="order"><code className="hash-value">{order.orderId}</code></td>,
-    <td key="type"><span className="state-text">{order.orderKind}</span></td>,
-    <td key="sku">{order.skuId}</td>,
+    <td key="order"><code className="hash-value" title={order.orderId}>{friendlyOrderId(order.orderId)}</code></td>,
+    <td key="type"><span className="state-text">{orderKindLabel(order.orderKind)}</span></td>,
+    <td key="sku" title={order.skuId}>{friendlySpecId(order.skuId)}</td>,
     <td className="numeric-cell" key="quantity">{order.quantity}</td>,
-    <td key="state"><span className="state-text">{order.state}</span></td>,
-    <td key="tx">{order.paymentTxHash ? <code className="hash-value">{order.paymentTxHash}</code> : '—'}</td>,
+    <td key="state"><span className="state-text">{orderStateLabel(order.state)}</span></td>,
+    <td key="finality"><span className={order.finalityStatus === 'FINAL' ? 'state-text success' : 'state-text blocked'}>{finalityLabel(order.finalityStatus)}</span></td>,
     <td key="created">{timestamp(order.createdAt)}</td>,
   ];
   return (
@@ -513,14 +515,12 @@ function OrderRow({
       {shared}
       {order.fulfillmentMode === 'DELIVERY' ? (
         <>
-          <td><span className={order.finalityStatus === 'FINAL' ? 'state-text success' : 'state-text blocked'}>{order.finalityStatus}</span></td>
           <td>{latestShipment?.trackingNumber ?? '—'}</td>
         </>
       ) : (
         <>
           <td>{pickupStore}</td>
           <td>{timestamp(order.fulfilledAt)}</td>
-          <td><span className={order.finalityStatus === 'FINAL' ? 'state-text success' : 'state-text blocked'}>{order.finalityStatus}</span></td>
         </>
       )}
       <td><button aria-label={`处理订单 ${order.orderId}`} className={selected ? 'button primary' : 'button secondary'} disabled={selectionDisabled} onClick={onSelect} type="button">{selected ? '处理中' : '选择'}</button></td>
@@ -530,19 +530,28 @@ function OrderRow({
 
 function OrderSummary({ order }: { order: FulfillmentOrder }) {
   return (
-    <div className="table-wrap compact-table">
-      <table>
-        <thead><tr><th scope="col">订单号</th><th scope="col">类型</th><th scope="col">SKU</th><th scope="col">数量</th><th scope="col">支付 TxHash</th><th scope="col">状态</th><th scope="col">支付最终性</th><th scope="col">付款最终确认</th><th scope="col">履约完成</th></tr></thead>
-        <tbody><tr><td><code className="hash-value">{order.orderId}</code></td><td>{order.orderKind}</td><td>{order.skuId}</td><td>{order.quantity}</td><td>{order.paymentTxHash ? <code className="hash-value">{order.paymentTxHash}</code> : '—'}</td><td>{order.state}</td><td>{order.finalityStatus}</td><td>{timestamp(order.paymentFinalizedAt)}</td><td>{timestamp(order.fulfilledAt)}</td></tr></tbody>
-      </table>
-    </div>
+    <>
+      <div className="table-wrap compact-table">
+        <table>
+          <thead><tr><th scope="col">订单号</th><th scope="col">类型</th><th scope="col">规格</th><th scope="col">数量</th><th scope="col">状态</th><th scope="col">付款确认</th><th scope="col">付款确认时间</th><th scope="col">履约完成</th></tr></thead>
+          <tbody><tr><td><code className="hash-value" title={order.orderId}>{friendlyOrderId(order.orderId)}</code></td><td>{orderKindLabel(order.orderKind)}</td><td title={order.skuId}>{friendlySpecId(order.skuId)}</td><td>{order.quantity}</td><td>{orderStateLabel(order.state)}</td><td>{finalityLabel(order.finalityStatus)}</td><td>{timestamp(order.paymentFinalizedAt)}</td><td>{timestamp(order.fulfilledAt)}</td></tr></tbody>
+        </table>
+      </div>
+      <details className="technical-details compact">
+        <summary>付款记录</summary>
+        <dl className="balance-list">
+          <div><dt>订单编号</dt><dd>{order.orderId}</dd></div>
+          <div><dt>付款记录</dt><dd><code title={order.paymentTxHash ?? undefined}>{shortId(order.paymentTxHash) || '—'}</code></dd></div>
+        </dl>
+      </details>
+    </>
   );
 }
 
 function TargetPanel({ state }: { state: LoadState<FulfillmentTarget> }) {
   return (
     <section className="fulfillment-detail-panel" aria-labelledby="target-title">
-      <div className="section-heading"><div><p className="eyebrow">Immutable snapshot</p><h2 id="target-title">履约目标快照</h2></div></div>
+      <div className="section-heading"><div><p className="eyebrow">履约目标</p><h2 id="target-title">履约目标快照</h2></div></div>
       {state.phase === 'loading' ? <LoadingRows count={3} /> : null}
       {state.phase === 'error' ? <p className="form-error" role="alert">{state.message}</p> : null}
       {state.phase === 'idle' ? <p>选择订单后读取。</p> : null}
@@ -557,7 +566,7 @@ function TargetPanel({ state }: { state: LoadState<FulfillmentTarget> }) {
       {state.phase === 'ready' && state.value.fulfillmentMode === 'PICKUP' ? (
         <dl className="balance-list">
           <div><dt>门店</dt><dd>{state.value.payload.name}</dd></div>
-          <div><dt>Store ID</dt><dd>{state.value.storeId}</dd></div>
+          <div><dt>门店编号</dt><dd>{shortId(state.value.storeId)}</dd></div>
           <div><dt>地址</dt><dd>{state.value.payload.address}</dd></div>
           <div><dt>行政区</dt><dd>{state.value.payload.regionCode}</dd></div>
           <div><dt>状态</dt><dd>{state.value.payload.status}</dd></div>
@@ -570,34 +579,138 @@ function TargetPanel({ state }: { state: LoadState<FulfillmentTarget> }) {
 function BalancePanel({ order }: { order: FulfillmentOrder }) {
   return (
     <section className="fulfillment-detail-panel" aria-labelledby="balance-title">
-      <div className="section-heading"><div><p className="eyebrow">Core balances</p><h2 id="balance-title">履约资产状态</h2></div></div>
+      <div className="section-heading"><div><p className="eyebrow">资金状态</p><h2 id="balance-title">履约资产状态</h2></div></div>
       <div className="table-wrap compact-table">
         <table>
-          <thead><tr><th scope="col">资产</th><th scope="col">状态</th><th scope="col">原子金额</th></tr></thead>
-          <tbody>{order.balances.map((balance) => <tr key={`${balance.asset}:${balance.state}`}><td>{balance.asset}</td><td>{balance.state}</td><td className="numeric-cell">{balance.amount}</td></tr>)}</tbody>
+          <thead><tr><th scope="col">资产</th><th scope="col">状态</th><th scope="col">金额</th></tr></thead>
+          <tbody>{order.balances.map((balance) => <tr key={`${balance.asset}:${balance.state}`}><td>{balance.asset === 'BNM_POINTS' ? 'BNM' : balance.asset}</td><td>{balanceStateLabel(balance.state)}</td><td className="numeric-cell">{formatFulfillmentAmount(balance.amount, balance.asset)}</td></tr>)}</tbody>
         </table>
       </div>
-      <p className="panel-note">BNM 仅展示后台积分 Locked/Available，不提供 Token、Claim 或钱包转账。</p>
+      <p className="panel-note">BNM 仅展示锁定/可用积分，不提供链上领取或钱包转账。</p>
     </section>
   );
 }
 
+
+
+function friendlyOrderId(value: string | null | undefined) {
+  if (!value) return '';
+  const tail = value.length > 6 ? value.slice(-6) : value;
+  return `订单 #${tail}`;
+}
+
+function friendlySpecId(value: string | null | undefined) {
+  if (!value) return '';
+  const tail = value.length > 6 ? value.slice(-6) : value;
+  return `规格 #${tail}`;
+}
+
+function fulfillmentModeLabel(value: string) {
+  return ({
+    DELIVERY: '快递邮寄',
+    PICKUP: '到店自提',
+  } as Record<string, string>)[value] ?? value;
+}
+
+function formatFulfillmentAmount(amount: string, asset: string) {
+  if (asset === 'USDT') return formatUsdt(amount);
+  if (asset === 'NPL') return formatNpl(amount);
+  if (asset === 'BNM' || asset === 'BNM_POINTS') return formatBnm(amount);
+  return formatTokenAmount(amount, asset);
+}
+
+function shortId(value: string | null | undefined) {
+  if (!value) return '';
+  return value.length > 18 ? `${value.slice(0, 8)}…${value.slice(-6)}` : value;
+}
+
+function orderKindLabel(value: string) {
+  return ({
+    ORDINARY: '普通订单',
+    SECKILL: '秒杀订单',
+    FALLBACK_RETAIL: '普通价成交',
+  } as Record<string, string>)[value] ?? value;
+}
+
+function orderStateLabel(value: string) {
+  return ({
+    CREATED: '已创建',
+    PAID: '已付款',
+    READY_TO_SHIP: '待发货',
+    SHIPPED: '已发货',
+    DELIVERED: '已送达',
+    FULFILLED: '已履约',
+    DISPUTED: '仲裁中',
+    TAKEOVER: '平台接管',
+    CANCELLED: '已取消',
+  } as Record<string, string>)[value] ?? value;
+}
+
+function finalityLabel(value: string) {
+  return ({
+    FINAL: '已最终确认',
+    PENDING: '确认中',
+    NOT_SUBMITTED: '未提交',
+    REORGED: '已回滚',
+    FAILED: '确认失败',
+  } as Record<string, string>)[value] ?? value;
+}
+
+function balanceStateLabel(value: string) {
+  return ({
+    LOCKED: '锁定中',
+    AVAILABLE: '可用',
+    REQUESTED: '已申请',
+    SUBMITTED: '已提交',
+    SETTLED: '已结算',
+    DISPUTED: '仲裁中',
+  } as Record<string, string>)[value] ?? value;
+}
+
+function actionLabel(value: string) {
+  return ({
+    RECORD_SHIPMENT: '提交发货',
+    REQUEST_FORCED_RECEIPT: '申请平台确认签收',
+    VERIFY_PICKUP: '门店核销',
+  } as Record<string, string>)[value] ?? value;
+}
+
+function reasonLabel(value: string | null | undefined) {
+  if (!value) return '—';
+  return ({
+    STATE_NOT_ALLOWED: '当前订单状态不允许',
+    FULFILLMENT_MODE_MISMATCH: '履约方式不匹配',
+    WAITING_FINALITY: '等待付款最终确认',
+    DEADLINE_NOT_REACHED: '还没到可申请时间',
+    DISPUTED: '订单仲裁中',
+  } as Record<string, string>)[value] ?? value;
+}
+
 function AllowedActionsTable({ actions }: { actions: readonly AllowedAction[] }) {
+  const enabledActions = actions.filter((action) => action.enabled);
   return (
-    <div aria-live="polite" className="table-wrap compact-table">
-      <table>
-        <thead><tr><th scope="col">操作</th><th scope="col">Core 判定</th><th scope="col">原因</th><th scope="col">截止时间</th></tr></thead>
-        <tbody>
-          {actions.map((action) => (
-            <tr key={action.action}>
-              <td><code>{action.action}</code></td>
-              <td><span className={action.enabled ? 'state-text success' : 'state-text blocked'}>{action.enabled ? '允许' : '阻断'}</span></td>
-              <td>{action.reasonCode ?? '—'}</td>
-              <td>{action.deadline ?? '—'}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div aria-live="polite" className="action-summary">
+      <p className={enabledActions.length ? 'panel-note action-summary__ready' : 'panel-note'}>
+        当前可做：{enabledActions.length ? enabledActions.map((action) => actionLabel(action.action)).join('、') : '暂无可操作按钮，请按订单状态等待或刷新。'}
+      </p>
+      <details className="technical-details compact">
+        <summary>查看系统判断明细</summary>
+        <div className="table-wrap compact-table">
+          <table>
+            <thead><tr><th scope="col">操作</th><th scope="col">系统判断</th><th scope="col">原因</th><th scope="col">截止时间</th></tr></thead>
+            <tbody>
+              {actions.map((action) => (
+                <tr key={action.action}>
+                  <td>{actionLabel(action.action)}</td>
+                  <td><span className={action.enabled ? 'state-text success' : 'state-text blocked'}>{action.enabled ? '允许' : '阻断'}</span></td>
+                  <td>{reasonLabel(action.reasonCode)}</td>
+                  <td>{timestamp(action.deadline)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </details>
     </div>
   );
 }
@@ -613,15 +726,34 @@ function ActionBlockReason({
 }) {
   if (enabled) return null;
   const item = actions?.find((candidate) => candidate.action === action);
-  return <p className="panel-note" role="status">Core 阻断：{item?.reasonCode ?? '当前订单状态未授权此操作'}</p>;
+  return <p className="panel-note" role="status">暂不能操作：{reasonLabel(item?.reasonCode) || '当前订单状态未授权此操作'}</p>;
 }
 
-function timestamp(value: string | null) {
-  return value ? <time dateTime={value}>{value}</time> : '—';
+function timestamp(value: string | null | undefined) {
+  if (!value) return '—';
+  const date = new Date(value);
+  const label = Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat('zh-CN', { dateStyle: 'short', timeStyle: 'short' }).format(date);
+  return <time dateTime={value}>{label}</time>;
 }
 
 function carrierLabel(code: (typeof logisticsCarrierCodes)[number]) {
   return ({ SF: '顺丰', JD: '京东物流', YTO: '圆通', ZTO: '中通', STO: '申通', EMS: 'EMS' } as const)[code];
+}
+
+function normalizeReasonCode(value: string, fallback: string) {
+  const trimmed = value.trim();
+  const direct = trimmed.toUpperCase().replace(/[^A-Z0-9_:-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 64);
+  if (/^[A-Z0-9_:-]{2,64}$/.test(direct)) return direct;
+  return `${fallback}_${reasonHash(trimmed)}`.slice(0, 64);
+}
+
+function reasonHash(value: string) {
+  let hash = 2166136261;
+  for (const char of value) {
+    hash ^= char.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36).toUpperCase();
 }
 
 function localDateTimeToIso(value: string) {
@@ -717,10 +849,10 @@ async function downloadMerchantOrderExport(result: MerchantOrderExport) {
 
 function exportErrorMessage(error: unknown) {
   if (error instanceof CoreApiError && error.status === 403) {
-    return `导出权限被拒绝（403）：${error.message}`;
+    return `导出权限被拒绝：${translateErrorMessage(error.message)}`;
   }
   if (error instanceof CoreApiError && error.status === 409) {
-    return `导出状态已变化（409）：${error.message}`;
+    return `导出状态已变化：${translateErrorMessage(error.message)}`;
   }
   return readableError(error);
 }

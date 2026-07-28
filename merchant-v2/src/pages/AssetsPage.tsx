@@ -26,6 +26,7 @@ import { rewardSubtypes } from '@abu24k/core-artifacts';
 import { CoreApiError } from '../core-api';
 import { readableError, useCoreRuntime } from '../core-runtime';
 import { EmptyState, LoadingRows, Metric, PageHeader } from '../components/ui';
+import { formatBnm, formatNpl, formatTokenAmount, formatUsdt, parseUsdtInput } from '../display';
 
 type LoadState<T> =
   | { phase: 'idle' | 'loading' }
@@ -40,8 +41,6 @@ type CommandState =
 
 const payableStates = ['LOCKED', 'AVAILABLE', 'REQUESTED', 'SUBMITTED', 'SETTLED'] as const;
 const bnmPointStates = ['LOCKED', 'AVAILABLE'] as const;
-const positiveAtomicPattern = /^[1-9][0-9]*$/;
-const bytes32Pattern = /^0x[0-9a-fA-F]{64}$/;
 
 export function AssetsPage() {
   const { api, session, signSettlementTypedData } = useCoreRuntime();
@@ -53,12 +52,7 @@ export function AssetsPage() {
   const [receivablePageError, setReceivablePageError] = useState<string>();
   const [settlementAmount, setSettlementAmount] = useState('');
   const [settlementCommand, setSettlementCommand] = useState<CommandState>({ phase: 'idle' });
-  const [depositPolicyVersion, setDepositPolicyVersion] = useState('');
-  const [depositAmount, setDepositAmount] = useState('');
-  const [depositTransactionHash, setDepositTransactionHash] = useState('');
-  const [depositCommand, setDepositCommand] = useState<CommandState>({ phase: 'idle' });
   const settlementKey = useRef<string | undefined>(undefined);
-  const depositKey = useRef<string | undefined>(undefined);
   const sessionTokenRef = useRef(session?.token);
   sessionTokenRef.current = session?.token;
 
@@ -154,7 +148,7 @@ export function AssetsPage() {
   const disputedMerchantBalances = merchantBalances.filter((balance) => balance.state === 'DISPUTED');
   const financeAllowsSettlement = finance?.allowedActions.includes('REQUEST_MERCHANT_USDT') === true;
   const hasAvailableMerchantBalance = merchantBalances.some((balance) => balance.state === 'AVAILABLE');
-  const settlementValid = positiveAtomicPattern.test(settlementAmount);
+  const settlementValid = isPositiveUsdtInput(settlementAmount);
   const settlementSubmitting = settlementCommand.phase === 'submitting';
   const canRequestSettlement = Boolean(
     session
@@ -164,22 +158,9 @@ export function AssetsPage() {
     && settlementValid
     && !settlementSubmitting,
   );
-  const depositValid = positiveAtomicPattern.test(depositPolicyVersion)
-    && positiveAtomicPattern.test(depositAmount)
-    && bytes32Pattern.test(depositTransactionHash);
-  const depositSubmitting = depositCommand.phase === 'submitting';
-  const canSubmitDeposit = Boolean(session && finance && depositValid && !depositSubmitting);
-  const operationsWallet = finance?.guarantee?.backing_wallet_address
-    ?? finance?.guaranteeDeposits[0]?.operations_wallet_address;
-
   function resetSettlementAttempt() {
     settlementKey.current = undefined;
     setSettlementCommand({ phase: 'idle' });
-  }
-
-  function resetDepositAttempt() {
-    depositKey.current = undefined;
-    setDepositCommand({ phase: 'idle' });
   }
 
   async function loadMoreReceivableStatements() {
@@ -219,7 +200,7 @@ export function AssetsPage() {
     try {
       const projection = await api.createSettlementIntent({
         rail: 'MERCHANT_USDT',
-        amount: settlementAmount,
+        amount: parseUsdtInput(settlementAmount, '结算申请金额', true),
         idempotencyKey,
       }, token);
       if (projection.intent.wallet.toLowerCase() !== session.walletAddress.toLowerCase()) {
@@ -235,40 +216,10 @@ export function AssetsPage() {
       }
       settlementKey.current = undefined;
       setSettlementAmount('');
-      setSettlementCommand({ phase: 'success', message: `结算请求已进入 ${request.state}：${request.request_id}` });
+      setSettlementCommand({ phase: 'success', message: `结算请求已提交，状态：${statusLabel(request.state)}，编号：${shortId(request.request_id)}` });
       void loadData(true);
     } catch (error) {
       setSettlementCommand({ phase: 'error', message: readableError(error) });
-    }
-  }
-
-  async function submitDeposit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!session || !canSubmitDeposit) return;
-    const idempotencyKey = depositKey.current ?? createIdempotencyKey('guarantee-deposit');
-    depositKey.current = idempotencyKey;
-    setDepositCommand({ phase: 'submitting' });
-    try {
-      const result = await api.submitGuaranteeDeposit({
-        policyVersion: depositPolicyVersion,
-        expectedAmountUsdt: depositAmount,
-        transactionHash: depositTransactionHash,
-        idempotencyKey,
-      }, session.token);
-      if (finance && result.merchantId !== finance.merchant.merchant_id) {
-        throw new CoreApiError('InvalidResponse', '保证金提交返回了其他商家。');
-      }
-      depositKey.current = undefined;
-      setDepositPolicyVersion('');
-      setDepositAmount('');
-      setDepositTransactionHash('');
-      setDepositCommand({
-        phase: 'success',
-        message: `保证金证据已受理：${result.depositId}（${result.state} / ${result.confirmations} 确认）`,
-      });
-      void loadData(true);
-    } catch (error) {
-      setDepositCommand({ phase: 'error', message: readableError(error) });
     }
   }
 
@@ -277,10 +228,10 @@ export function AssetsPage() {
       <PageHeader
         actions={(
           <button className="button quiet" disabled={!session} onClick={() => void loadData()} type="button">
-            <RefreshCw aria-hidden="true" size={16} /> 刷新 Core 证据
+            <RefreshCw aria-hidden="true" size={16} /> 刷新数据
           </button>
         )}
-        description="USDT 商家货款、NPL 奖励与 BNM 积分分轨展示；商家只签结算申请，Core 依据普通执行钱包的链上证据确认最终性。"
+        description="这里看货款、奖励和积分。商家只需要签名申请结算；最终到账以系统确认的链上记录为准。"
         eyebrow="05 / 财务与收益"
         title="资产清算中心"
       />
@@ -290,24 +241,24 @@ export function AssetsPage() {
       <section aria-labelledby="proceeds-title">
         <div className="section-label">
           <div><CircleDollarSign aria-hidden="true" size={18} /><h2 id="proceeds-title">USDT 商家货款</h2></div>
-          <span>MERCHANT_RECEIVABLE / Core 原子单位</span>
+          <span>系统账本</span>
         </div>
         <div className="metric-grid finance-intro-grid">
           <Metric
             hint={dashboard
               ? `${dashboard.timezone} / ${dashboard.window.start} 至 ${dashboard.window.end}`
               : dashboardState.phase === 'loading'
-                ? '正在读取 Core 权威自然日聚合'
+                ? '正在读取今日销售数据'
                 : dashboardState.phase === 'error'
                   ? dashboardState.message
                   : '需要已验证的商家会话'}
-            label="今日销售总价（USDT atomic）"
-            value={dashboard?.sales.listPriceUsdt}
+            label="今日销售总价"
+            value={formatUsdt(dashboard?.sales.listPriceUsdt)}
           />
           <article className="metric finance-identity">
             <p>结算钱包</p>
-            <strong>{finance ? finance.merchant.settlement_wallet : '--'}</strong>
-            <span>{finance ? `${finance.merchant.merchant_id} / ${finance.merchant.status}` : '商家财务投影不可用'}</span>
+            <strong>{finance ? shortAddress(finance.merchant.settlement_wallet) : '--'}</strong>
+            <span>{finance ? `${shortId(finance.merchant.merchant_id)} / ${merchantStatusLabel(finance.merchant.status)}` : '商家财务信息不可用'}</span>
           </article>
         </div>
         <ProjectionState state={settlementsState}>
@@ -315,7 +266,7 @@ export function AssetsPage() {
           {disputedMerchantBalances.length > 0 ? (
             <div className="inline-warning finance-warning" role="status">
               <AlertTriangle aria-hidden="true" size={17} />
-              <span>Disputed 仲裁锁定：{disputedMerchantBalances.map((item) => `${item.amount} ${item.asset}`).join(' / ')}</span>
+              <span>仲裁锁定：{disputedMerchantBalances.map((item) => formatAssetAmount(item.amount, item.asset)).join(' / ')}</span>
             </div>
           ) : null}
         </ProjectionState>
@@ -324,13 +275,13 @@ export function AssetsPage() {
       <section className="section-block finance-section" aria-labelledby="receivable-statements-title">
         <div className="section-heading">
           <div>
-            <p className="eyebrow">Order journal / USDT atomic</p>
+            <p className="eyebrow">订单应收账本</p>
             <h2 id="receivable-statements-title">逐单应收账单</h2>
           </div>
           <CircleDollarSign aria-hidden="true" size={19} />
         </div>
         <p className="section-intro">
-          每笔订单的冻结金额、当前余额、账本生命周期和逐笔结算引用均直接来自 Core；本页不重算净应收或结算金额。
+          每笔订单的冻结金额、当前余额、账本生命周期和逐笔结算引用均直接来自系统；本页只展示系统返回的金额，不手动改账。
         </p>
         <ProjectionState state={receivableStatementsState}>
           {receivableStatements?.statements.length ? (
@@ -340,7 +291,7 @@ export function AssetsPage() {
               ))}
             </div>
           ) : (
-            <EmptyState description="Core 尚未返回该商家的逐单应收记录。" title="暂无逐单应收" />
+            <EmptyState description="系统还没有该商家的逐单应收记录。" title="暂无逐单应收" />
           )}
           {receivableStatements ? (
             <div className="receivable-pagination">
@@ -362,124 +313,61 @@ export function AssetsPage() {
 
       <section className="section-block finance-section" aria-labelledby="settlement-request-title">
         <div className="section-heading">
-          <div><p className="eyebrow">EIP-712 / Gasless</p><h2 id="settlement-request-title">签名结算申请</h2></div>
+          <div><p className="eyebrow">免手续费签名</p><h2 id="settlement-request-title">签名结算申请</h2></div>
           <WalletCards aria-hidden="true" size={19} />
         </div>
         <form className="finance-command-form" onSubmit={(event) => void submitSettlement(event)}>
           <div className="field">
-            <label htmlFor="settlement-amount">申请金额（USDT 最小单位）</label>
+            <label htmlFor="settlement-amount">申请金额（USDT）</label>
             <input
               autoComplete="off"
               id="settlement-amount"
-              inputMode="numeric"
+              inputMode="decimal"
               onChange={(event) => {
                 resetSettlementAttempt();
                 setSettlementAmount(event.target.value.trim());
               }}
-              pattern="[1-9][0-9]*"
-              placeholder="例如 1000000000000000000"
+              placeholder="例如 2.00"
               value={settlementAmount}
             />
-            <span className="field-help">可申请来源和精确金额由 Core 校验；商家钱包仅签名，转账 Gas 由对应普通执行钱包承担。</span>
+            <span className="field-help">系统会校验可申请金额；商家只需要钱包签名，到账转账由平台执行。</span>
           </div>
           <button className="button primary" disabled={!canRequestSettlement} type="submit">
             {settlementSubmitting ? <LoaderCircle aria-hidden="true" className="spin" size={16} /> : <WalletCards aria-hidden="true" size={16} />}
-            {settlementSubmitting ? '等待钱包与 Core 确认' : '签名并提交结算申请'}
+            {settlementSubmitting ? '等待钱包与系统确认' : '签名并提交结算申请'}
           </button>
         </form>
         {!financeAllowsSettlement && finance ? (
-          <p className="command-block-reason" role="status">当前 {finance.merchant.status} / {finance.merchant.guarantee_status}，Core 未授权新商家结算申请。</p>
+          <p className="command-block-reason" role="status">当前商家状态为 {merchantStatusLabel(finance.merchant.status)}，系统暂不允许申请结算。请联系平台确认商家状态。</p>
         ) : !hasAvailableMerchantBalance && settlements ? (
-          <p className="command-block-reason" role="status">Core 未返回 Available 商家货款。</p>
+          <p className="command-block-reason" role="status">当前没有可申请结算的货款。</p>
         ) : null}
         <CommandNotice state={settlementCommand} />
       </section>
 
       <section className="section-block finance-section" aria-labelledby="settlement-history-title">
         <div className="section-heading">
-          <div><p className="eyebrow">EOA settlement</p><h2 id="settlement-history-title">结算申请与逐笔转账</h2></div>
+          <div><p className="eyebrow">打款记录</p><h2 id="settlement-history-title">结算申请与逐笔转账</h2></div>
           <Landmark aria-hidden="true" size={19} />
         </div>
         <ProjectionState state={settlementsState}>
           <div className="table-wrap">
             <table>
-              <thead><tr><th scope="col">申请时间</th><th scope="col">轨道 / 资产</th><th scope="col">精确金额</th><th scope="col">状态</th><th scope="col">执行钱包 / Transfer ID</th><th scope="col">最终执行 TxHash</th></tr></thead>
+              <thead><tr><th scope="col">申请时间</th><th scope="col">类型 / 资产</th><th scope="col">金额</th><th scope="col">状态</th><th scope="col">平台打款</th><th scope="col">到账</th></tr></thead>
               <tbody>
                 {settlements?.requests.length ? settlements.requests.map((request) => (
                   <tr key={request.request_id}>
-                    <td><time dateTime={request.requested_at}>{request.requested_at}</time></td>
-                    <td><strong>{request.rail}</strong><small>{request.asset}</small></td>
-                    <td className="mono-value">{request.amount}</td>
+                    <td><time dateTime={request.requested_at}>{formatDateTime(request.requested_at)}</time></td>
+                    <td><strong>{railLabel(request.rail)}</strong><small>{assetLabel(request.asset)}</small></td>
+                    <td className="mono-value">{formatAssetAmount(request.amount, request.asset)}</td>
                     <td><StatusText state={request.state} /></td>
-                    <td className="mono-value"><strong>{request.executor_wallet}</strong><small>{request.transfer_ids.join(', ') || '--'}</small></td>
+                    <td><strong>{shortAddress(request.executor_wallet)}</strong><details className="technical-details compact"><summary>查看高级编号</summary><small>{request.transfer_ids.map(shortId).join(', ') || '--'}</small></details></td>
                     <td>{request.final_execution_tx_hashes.length
-                      ? request.final_execution_tx_hashes.map((txHash) => <ExplorerHash hash={txHash} key={txHash} />)
-                      : '--'}</td>
+                      ? <details className="technical-details compact"><summary>{request.final_execution_tx_hashes.length} 笔已到账</summary>{request.final_execution_tx_hashes.map((txHash) => <ExplorerHash hash={txHash} key={txHash} />)}</details>
+                      : '未到账'}</td>
                   </tr>
                 )) : (
-                  <tr><td colSpan={6}><EmptyState description="Core 尚未返回该钱包的结算申请。" title="暂无结算记录" /></td></tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </ProjectionState>
-      </section>
-
-      <section className="section-block finance-section" aria-labelledby="guarantee-title">
-        <div className="section-heading">
-          <div><p className="eyebrow">Operations wallet</p><h2 id="guarantee-title">商家保证金与链上最终性</h2></div>
-          <ShieldCheck aria-hidden="true" size={19} />
-        </div>
-        <ProjectionState state={financeState}>
-          <dl className="finance-summary">
-            <div><dt>保证金状态</dt><dd>{finance?.merchant.guarantee_status ?? '--'}</dd></div>
-            <div><dt>当前余额</dt><dd>{finance?.guarantee?.balance_usdt ?? '--'} <small>USDT atomic</small></dd></div>
-            <div><dt>最低要求</dt><dd>{finance?.guarantee?.minimum_usdt ?? '--'} <small>USDT atomic</small></dd></div>
-            <div><dt>运营与保证金钱包</dt><dd className="mono-value">{operationsWallet ?? '--'}</dd></div>
-          </dl>
-          <form className="finance-command-form guarantee-form" onSubmit={(event) => void submitDeposit(event)}>
-            <div className="field">
-              <label htmlFor="deposit-policy-version">Policy version</label>
-              <input id="deposit-policy-version" inputMode="numeric" onChange={(event) => {
-                resetDepositAttempt();
-                setDepositPolicyVersion(event.target.value.trim());
-              }} pattern="[1-9][0-9]*" value={depositPolicyVersion} />
-            </div>
-            <div className="field">
-              <label htmlFor="deposit-amount">预期金额（USDT 最小单位）</label>
-              <input id="deposit-amount" inputMode="numeric" onChange={(event) => {
-                resetDepositAttempt();
-                setDepositAmount(event.target.value.trim());
-              }} pattern="[1-9][0-9]*" value={depositAmount} />
-            </div>
-            <div className="field transaction-field">
-              <label htmlFor="deposit-transaction-hash">BSC Transfer TxHash</label>
-              <input id="deposit-transaction-hash" onChange={(event) => {
-                resetDepositAttempt();
-                setDepositTransactionHash(event.target.value.trim());
-              }} pattern="0x[0-9a-fA-F]{64}" value={depositTransactionHash} />
-            </div>
-            <button className="button primary" disabled={!canSubmitDeposit} type="submit">
-              {depositSubmitting ? <LoaderCircle aria-hidden="true" className="spin" size={16} /> : <ShieldCheck aria-hidden="true" size={16} />}
-              {depositSubmitting ? '正在验证链上证据' : '提交保证金交易证据'}
-            </button>
-          </form>
-          <CommandNotice state={depositCommand} />
-          <div className="table-wrap">
-            <table>
-              <thead><tr><th scope="col">提交时间</th><th scope="col">金额 / 政策</th><th scope="col">状态</th><th scope="col">确认</th><th scope="col">链上交易</th><th scope="col">最终证据</th></tr></thead>
-              <tbody>
-                {finance?.guaranteeDeposits.length ? finance.guaranteeDeposits.map((deposit) => (
-                  <tr key={deposit.deposit_id}>
-                    <td><time dateTime={deposit.created_at}>{deposit.created_at}</time></td>
-                    <td><strong>{deposit.expected_amount_usdt}</strong><small>policy {deposit.policy_version}</small></td>
-                    <td><StatusText state={deposit.state} /></td>
-                    <td>{deposit.confirmations} / 15</td>
-                    <td><ExplorerHash hash={deposit.transaction_hash} /></td>
-                    <td className="mono-value">{deposit.transfer_evidence_hash ?? '--'}</td>
-                  </tr>
-                )) : (
-                  <tr><td colSpan={6}><EmptyState description="Core 尚未返回保证金提交记录。" title="暂无保证金记录" /></td></tr>
+                  <tr><td colSpan={6}><EmptyState description="系统还没有该钱包的结算申请。" title="暂无结算记录" /></td></tr>
                 )}
               </tbody>
             </table>
@@ -489,32 +377,31 @@ export function AssetsPage() {
 
       <section className="section-block finance-section" aria-labelledby="takeover-title">
         <div className="section-heading">
-          <div><p className="eyebrow">Takeover liability</p><h2 id="takeover-title">接管、商家债务与未来货款</h2></div>
+          <div><p className="eyebrow">接管债务</p><h2 id="takeover-title">接管、商家债务与未来货款</h2></div>
           <AlertTriangle aria-hidden="true" size={19} />
         </div>
         <ProjectionState state={financeState}>
           <dl className="finance-summary debt-summary">
-            <div><dt>累计债务</dt><dd>{finance?.debt?.incurred_usdt ?? '--'}</dd></div>
-            <div><dt>已追偿</dt><dd>{finance?.debt?.recovered_usdt ?? '--'}</dd></div>
-            <div><dt>未偿债务</dt><dd>{finance?.debt?.outstanding_usdt ?? '--'}</dd></div>
-            <div><dt>最新证据</dt><dd className="mono-value">{finance?.debt?.latest_evidence_hash ?? '--'}</dd></div>
+            <div><dt>累计债务</dt><dd>{formatUsdt(finance?.debt?.incurred_usdt)}</dd></div>
+            <div><dt>已追偿</dt><dd>{formatUsdt(finance?.debt?.recovered_usdt)}</dd></div>
+            <div><dt>未偿债务</dt><dd>{formatUsdt(finance?.debt?.outstanding_usdt)}</dd></div>
+            <div><dt>最新处理记录</dt><dd className="mono-value" title={finance?.debt?.latest_evidence_hash ?? undefined}>{shortId(finance?.debt?.latest_evidence_hash) || '--'}</dd></div>
           </dl>
           <div className="table-wrap">
             <table>
-              <thead><tr><th scope="col">案例 / 订单</th><th scope="col">状态</th><th scope="col">需求金额</th><th scope="col">保证金</th><th scope="col">冻结应收</th><th scope="col">未来货款</th><th scope="col">平台垫付 / 债务</th></tr></thead>
+              <thead><tr><th scope="col">案例 / 订单</th><th scope="col">状态</th><th scope="col">需求金额</th><th scope="col">冻结应收</th><th scope="col">未来货款</th><th scope="col">平台垫付 / 债务</th></tr></thead>
               <tbody>
                 {finance?.takeovers.length ? finance.takeovers.map((takeover) => (
                   <tr key={takeover.case_id}>
                     <td><strong>{takeover.case_id}</strong><small className="mono-value">{takeover.order_id}</small></td>
                     <td><StatusText state={takeover.state} /></td>
-                    <td>{takeover.required_usdt ?? '--'}</td>
-                    <td>{takeover.guarantee_used_usdt ?? '--'}</td>
-                    <td>{takeover.merchant_available_used_usdt ?? '--'}</td>
-                    <td>{takeover.future_proceeds_used_usdt ?? '--'}</td>
-                    <td>{takeover.platform_advance_usdt ?? '--'} / {takeover.merchant_debt_usdt ?? '--'}</td>
+                    <td>{formatUsdt(takeover.required_usdt)}</td>
+                    <td>{formatUsdt(takeover.merchant_available_used_usdt)}</td>
+                    <td>{formatUsdt(takeover.future_proceeds_used_usdt)}</td>
+                    <td>{formatUsdt(takeover.platform_advance_usdt)} / {formatUsdt(takeover.merchant_debt_usdt)}</td>
                   </tr>
                 )) : (
-                  <tr><td colSpan={7}><EmptyState description="Core 尚未返回接管与债务案例。" title="暂无接管债务" /></td></tr>
+                  <tr><td colSpan={6}><EmptyState description="系统还没有接管与债务案例。" title="暂无接管债务" /></td></tr>
                 )}
               </tbody>
             </table>
@@ -524,13 +411,13 @@ export function AssetsPage() {
 
       <div className="reward-grid">
         <section className="section-block reward-section" aria-labelledby="npl-title">
-          <div className="section-heading"><div><p className="eyebrow">NPL reward wallet</p><h2 id="npl-title">NPL 收益子类</h2></div><Coins aria-hidden="true" size={19} /></div>
+          <div className="section-heading"><div><p className="eyebrow">NPL 奖励</p><h2 id="npl-title">NPL 收益子类</h2></div><Coins aria-hidden="true" size={19} /></div>
           <ProjectionState state={settlementsState} compact>
             <RewardSubtypeGrid balances={nplBalances} />
           </ProjectionState>
         </section>
         <section className="section-block reward-section" aria-labelledby="bnm-title">
-          <div className="section-heading"><div><p className="eyebrow">BNM / Backend points</p><h2 id="bnm-title">BNM 积分总额</h2></div><LockKeyhole aria-hidden="true" size={19} /></div>
+          <div className="section-heading"><div><p className="eyebrow">BNM 积分</p><h2 id="bnm-title">BNM 积分总额</h2></div><LockKeyhole aria-hidden="true" size={19} /></div>
           <ProjectionState state={settlementsState} compact>
             <BnmPointsGrid points={bnmPoints} />
           </ProjectionState>
@@ -545,8 +432,8 @@ function MerchantReceivableStatementRow({ statement }: { statement: MerchantRece
     <details className="receivable-statement">
       <summary>
         <span className="receivable-order-identity">
-          <strong className="mono-value">{statement.orderId}</strong>
-          <small>{statement.productId} / {statement.skuId} / 数量 {statement.quantity}</small>
+          <strong className="mono-value">{shortId(statement.orderId)}</strong>
+          <small>{shortId(statement.productId)} / {shortId(statement.skuId)} / 数量 {statement.quantity}</small>
         </span>
         <span className="receivable-order-state">
           <StatusText state={statement.orderKind} />
@@ -554,31 +441,31 @@ function MerchantReceivableStatementRow({ statement }: { statement: MerchantRece
         </span>
         <span className="receivable-order-amount">
           <small>冻结净应收 / 当前应收</small>
-          <strong>{statement.frozenAmounts.merchantNetReceivableUsdt} / {statement.currentReceivableUsdt}</strong>
+          <strong>{formatUsdt(statement.frozenAmounts.merchantNetReceivableUsdt)} / {formatUsdt(statement.currentReceivableUsdt)}</strong>
         </span>
       </summary>
       <div className="receivable-statement-body">
         <dl className="receivable-order-facts">
-          <div><dt>创建时间</dt><dd><time dateTime={statement.createdAt}>{statement.createdAt}</time></dd></div>
-          <div><dt>支付最终性</dt><dd><time dateTime={statement.paymentFinalizedAt}>{statement.paymentFinalizedAt}</time></dd></div>
-          <div><dt>履约最终性</dt><dd>{statement.fulfilledAt ? <time dateTime={statement.fulfilledAt}>{statement.fulfilledAt}</time> : '--'}</dd></div>
-          <div><dt>支付 TxHash</dt><dd><ExplorerHash hash={statement.paymentTxHash} /></dd></div>
+          <div><dt>创建时间</dt><dd><time dateTime={statement.createdAt}>{formatDateTime(statement.createdAt)}</time></dd></div>
+          <div><dt>付款确认</dt><dd><time dateTime={statement.paymentFinalizedAt}>{formatDateTime(statement.paymentFinalizedAt)}</time></dd></div>
+          <div><dt>履约确认</dt><dd>{statement.fulfilledAt ? <time dateTime={statement.fulfilledAt}>{formatDateTime(statement.fulfilledAt)}</time> : '--'}</dd></div>
+          <div><dt>付款记录</dt><dd><details className="technical-details compact"><summary>查看付款记录</summary><ExplorerHash hash={statement.paymentTxHash} /></details></dd></div>
         </dl>
 
         <section aria-label={`订单 ${statement.orderId} 冻结应收`} className="receivable-evidence-block">
           <h3>冻结金额快照</h3>
           <dl className="receivable-amount-grid">
-            <div><dt>商品总价</dt><dd>{statement.frozenAmounts.listPriceUsdt}</dd></div>
-            <div><dt>商品 USDT</dt><dd>{statement.frozenAmounts.productUsdtPaymentAmount}</dd></div>
-            <div><dt>平台技术服务费</dt><dd>{statement.frozenAmounts.platformServiceFeeUsdt}</dd></div>
-            <div><dt>Custody 商品 USDT</dt><dd>{statement.frozenAmounts.custodyProductUsdt}</dd></div>
-            <div><dt>运费 USDT</dt><dd>{statement.frozenAmounts.freightUsdt}</dd></div>
-            <div><dt>买家实付 USDT</dt><dd>{statement.frozenAmounts.buyerPaidUsdt}</dd></div>
-            <div><dt>基础应收</dt><dd>{statement.frozenAmounts.merchantBaseReceivableUsdt}</dd></div>
-            <div><dt>商家让利</dt><dd>{statement.frozenAmounts.merchantConcessionAmount}</dd></div>
-            <div><dt>净应收</dt><dd>{statement.frozenAmounts.merchantNetReceivableUsdt}</dd></div>
-            <div><dt>当前应收</dt><dd>{statement.currentReceivableUsdt}</dd></div>
-            <div><dt>已移出应收</dt><dd>{statement.removedFromReceivableUsdt}</dd></div>
+            <div><dt>商品总价</dt><dd>{formatUsdt(statement.frozenAmounts.listPriceUsdt)}</dd></div>
+            <div><dt>商品 USDT</dt><dd>{formatUsdt(statement.frozenAmounts.productUsdtPaymentAmount)}</dd></div>
+            <div><dt>平台服务费</dt><dd>{formatUsdt(statement.frozenAmounts.platformServiceFeeUsdt)}</dd></div>
+            <div><dt>商家货款 USDT</dt><dd>{formatUsdt(statement.frozenAmounts.custodyProductUsdt)}</dd></div>
+            <div><dt>运费 USDT</dt><dd>{formatUsdt(statement.frozenAmounts.freightUsdt)}</dd></div>
+            <div><dt>买家实付 USDT</dt><dd>{formatUsdt(statement.frozenAmounts.buyerPaidUsdt)}</dd></div>
+            <div><dt>基础应收</dt><dd>{formatUsdt(statement.frozenAmounts.merchantBaseReceivableUsdt)}</dd></div>
+            <div><dt>商家让利</dt><dd>{formatUsdt(statement.frozenAmounts.merchantConcessionAmount)}</dd></div>
+            <div><dt>净应收</dt><dd>{formatUsdt(statement.frozenAmounts.merchantNetReceivableUsdt)}</dd></div>
+            <div><dt>当前应收</dt><dd>{formatUsdt(statement.currentReceivableUsdt)}</dd></div>
+            <div><dt>已移出应收</dt><dd>{formatUsdt(statement.removedFromReceivableUsdt)}</dd></div>
           </dl>
         </section>
 
@@ -586,13 +473,13 @@ function MerchantReceivableStatementRow({ statement }: { statement: MerchantRece
           <h3>应收生命周期</h3>
           <div className="table-wrap">
             <table>
-              <thead><tr><th scope="col">状态</th><th scope="col">金额</th><th scope="col">Journal IDs</th></tr></thead>
+              <thead><tr><th scope="col">状态</th><th scope="col">金额</th><th scope="col">账本记录</th></tr></thead>
               <tbody>
                 {statement.receivableLifecycle.length ? statement.receivableLifecycle.map((entry) => (
                   <tr key={`${entry.state}:${entry.journalIds.join(':')}`}>
                     <td><StatusText state={entry.state} /></td>
-                    <td className="mono-value">{entry.amount}</td>
-                    <td className="mono-value">{entry.journalIds.length ? entry.journalIds.join(' / ') : '--'}</td>
+                    <td className="mono-value">{formatUsdt(entry.amount)}</td>
+                    <td className="mono-value">{entry.journalIds.length ? entry.journalIds.map(shortId).join(' / ') : '--'}</td>
                   </tr>
                 )) : <tr><td colSpan={3}>该订单暂无应收生命周期记录。</td></tr>}
               </tbody>
@@ -600,45 +487,45 @@ function MerchantReceivableStatementRow({ statement }: { statement: MerchantRece
           </div>
         </section>
 
-        <section aria-label={`订单 ${statement.orderId} journal evidence`} className="receivable-evidence-block">
-          <h3>Journal evidence</h3>
+        <section aria-label={`订单 ${statement.orderId} 高级账本证据`} className="receivable-evidence-block">
+          <h3>高级账本证据</h3>
           <div className="table-wrap">
             <table>
-              <thead><tr><th scope="col">Journal / 时间</th><th scope="col">事件 / 状态</th><th scope="col">Delta</th><th scope="col">来源 / Reference hash</th></tr></thead>
+              <thead><tr><th scope="col">账本 / 时间</th><th scope="col">事件 / 状态</th><th scope="col">变动金额</th><th scope="col">来源 / 证据</th></tr></thead>
               <tbody>
                 {statement.journalEvidence.length ? statement.journalEvidence.map((evidence) => (
                   <tr key={evidence.journalId}>
-                    <td><strong className="mono-value">{evidence.journalId}</strong><small><time dateTime={evidence.createdAt}>{evidence.createdAt}</time></small></td>
-                    <td><strong>{evidence.eventType}</strong><small><StatusText state={evidence.state} /></small></td>
-                    <td className="mono-value">{evidence.delta}</td>
-                    <td><strong>{evidence.sourceKind}</strong><small className="mono-value">{evidence.sourceReferenceHash}</small></td>
+                    <td><strong className="mono-value">{shortId(evidence.journalId)}</strong><small><time dateTime={evidence.createdAt}>{formatDateTime(evidence.createdAt)}</time></small></td>
+                    <td><strong>{eventTypeLabel(evidence.eventType)}</strong><small><StatusText state={evidence.state} /></small></td>
+                    <td className="mono-value">{formatSignedUsdt(evidence.delta)}</td>
+                    <td><strong>{sourceKindLabel(evidence.sourceKind)}</strong><small className="mono-value">{shortId(evidence.sourceReferenceHash)}</small></td>
                   </tr>
-                )) : <tr><td colSpan={4}>该订单暂无 journal evidence。</td></tr>}
+                )) : <tr><td colSpan={4}>该订单暂无高级账本证据。</td></tr>}
               </tbody>
             </table>
           </div>
         </section>
 
-        <section aria-label={`订单 ${statement.orderId} settlement refs`} className="receivable-evidence-block">
-          <h3>Settlement request / transfer / EOA finality</h3>
+        <section aria-label={`订单 ${statement.orderId} 结算关联记录`} className="receivable-evidence-block">
+          <h3>高级结算记录</h3>
           <div className="table-wrap">
             <table>
-              <thead><tr><th scope="col">Request / 金额</th><th scope="col">状态 / Transfer</th><th scope="col">Journal linkage</th><th scope="col">最终执行 TxHash</th><th scope="col">时间</th></tr></thead>
+              <thead><tr><th scope="col">申请 / 金额</th><th scope="col">状态 / 转账</th><th scope="col">账本关联</th><th scope="col">到账记录</th><th scope="col">时间</th></tr></thead>
               <tbody>
                 {statement.settlementRefs.length ? statement.settlementRefs.map((reference) => (
                   <tr key={reference.requestId}>
-                    <td><strong className="mono-value">{reference.requestId}</strong><small>{reference.amount} USDT atomic</small></td>
-                    <td><StatusText state={reference.state} /><small className="mono-value">{reference.transferId ?? '--'}</small></td>
+                    <td><strong className="mono-value">{shortId(reference.requestId)}</strong><small>{formatUsdt(reference.amount)}</small></td>
+                    <td><StatusText state={reference.state} /><small className="mono-value">{shortId(reference.transferId) || '--'}</small></td>
                     <td className="mono-value">
-                      <strong>{reference.journals.requested}</strong>
-                      <small>{reference.journals.submitted ?? '--'} / {reference.journals.settled ?? '--'}</small>
+                      <strong>{shortId(reference.journals.requested)}</strong>
+                      <small>{shortId(reference.journals.submitted) || '--'} / {shortId(reference.journals.settled) || '--'}</small>
                     </td>
                     <td>
-                      {reference.finalExecutionTxHash ? <ExplorerHash hash={reference.finalExecutionTxHash} /> : '--'}
+                      {reference.finalExecutionTxHash ? <details className="technical-details compact"><summary>查看到账记录</summary><ExplorerHash hash={reference.finalExecutionTxHash} /></details> : '--'}
                     </td>
                     <td>
-                      <time dateTime={reference.requestedAt}>{reference.requestedAt}</time>
-                      <small>{reference.submittedAt ?? '--'} / {reference.settledAt ?? '--'}</small>
+                      <time dateTime={reference.requestedAt}>{formatDateTime(reference.requestedAt)}</time>
+                      <small>{formatDateTime(reference.submittedAt) || '--'} / {formatDateTime(reference.settledAt) || '--'}</small>
                     </td>
                   </tr>
                 )) : <tr><td colSpan={5}>该订单尚未关联结算申请。</td></tr>}
@@ -669,7 +556,7 @@ function RewardSubtypeGrid({ balances }: { balances: readonly SettlementBalance[
       {unclassified ? (
         <div className="inline-warning finance-warning" role="alert">
           <AlertTriangle aria-hidden="true" size={17} />
-          <span>Core 返回了未分类的 NPL 奖励余额，已失败关闭该行展示。</span>
+          <span>系统返回了未分类的 NPL 奖励余额，已停止展示该行。</span>
         </div>
       ) : null}
       <div aria-label="NPL 奖励收益子类" className="reward-subtype-grid">
@@ -677,14 +564,13 @@ function RewardSubtypeGrid({ balances }: { balances: readonly SettlementBalance[
           const rows = balances.filter((balance) => balance.rewardSubtype === subtype);
           return (
             <article key={subtype}>
-              <header><h3>{rewardSubtypeLabel(subtype)}</h3><span>{subtype}</span></header>
+              <header><h3>{rewardSubtypeLabel(subtype)}</h3></header>
               {rows.length ? rows.map((row) => (
                 <div className="reward-subtype-balance" key={`${subtype}:${row.state}`}>
                   <span><StatusText state={row.state} /></span>
-                  <strong>{row.amount}</strong>
-                  <small>NPL atomic</small>
+                  <strong>{formatNpl(row.amount)}</strong>
                 </div>
-              )) : <p>Core 未返回余额</p>}
+              )) : <p>暂无余额</p>}
             </article>
           );
         })}
@@ -696,24 +582,24 @@ function RewardSubtypeGrid({ balances }: { balances: readonly SettlementBalance[
 function BnmPointsGrid({ points }: { points: readonly BnmPointsBalance[] }) {
   return (
     <div className="bnm-points-block">
-      <div aria-label="BNM Locked/Available 聚合" className="bnm-points-grid">
+      <div aria-label="BNM 锁定和可用汇总" className="bnm-points-grid">
         {bnmPointStates.map((state) => {
           const rows = points.filter((pointsBalance) => pointsBalance.state === state);
           return (
             <article key={state}>
-              <h3>{state === 'LOCKED' ? 'Locked 锁定总额' : 'Available 可用总额'}</h3>
+              <h3>{state === 'LOCKED' ? '锁定总额' : '可用总额'}</h3>
               {rows.length ? rows.map((row) => (
                 <div className="state-balance" key={`${row.purpose}:${row.state}`}>
-                  <strong>{row.amount}</strong>
-                  <span>BNM points</span>
-                  <small>{row.purpose}</small>
+                  <strong>{formatBnm(row.amount)}</strong>
+                  <span>BNM</span>
+                  <small>{purposeLabel(row.purpose)}</small>
                 </div>
-              )) : <p>Core 未返回总额</p>}
+              )) : <p>暂无总额</p>}
             </article>
           );
         })}
       </div>
-      <p className="bnm-transfer-boundary"><LockKeyhole aria-hidden="true" size={15} />BNM 是不可转移的后台积分，本页不提供结算、钱包转账或链上 Claim 操作。</p>
+      <p className="bnm-transfer-boundary"><LockKeyhole aria-hidden="true" size={15} />BNM 是后台积分，不能转账，也不能在链上领取。</p>
     </div>
   );
 }
@@ -742,8 +628,8 @@ function ProjectionState<T>({
   compact?: boolean;
 }) {
   if (state.phase === 'loading') return <LoadingRows count={compact ? 2 : 3} />;
-  if (state.phase === 'error') return <EmptyState blocked description={state.message} title="Core 投影加载失败" />;
-  if (state.phase === 'idle') return <EmptyState blocked description="需要已验证的商家会话。" title="商家会话不可用" />;
+  if (state.phase === 'error') return <EmptyState blocked description={state.message} title="系统数据加载失败" />;
+  if (state.phase === 'idle') return <EmptyState blocked description="请先连接商家钱包。" title="商家钱包未连接" />;
   return children;
 }
 
@@ -765,11 +651,11 @@ function AssetStateGrid({
             <h3>{stateLabel(state)}</h3>
             {rows.length ? rows.map((row) => (
               <div className="state-balance" key={`${row.asset}:${row.purpose}:${row.state}`}>
-                <strong>{row.amount}</strong>
-                <span>{row.asset} atomic</span>
-                <small>{row.purpose}</small>
+                <strong>{formatAssetAmount(row.amount, row.asset)}</strong>
+                <span>{assetLabel(row.asset)}</span>
+                <small>{purposeLabel(row.purpose)}</small>
               </div>
-            )) : <p>Core 未返回余额</p>}
+            )) : <p>暂无余额</p>}
           </article>
         );
       })}
@@ -782,7 +668,7 @@ function FinanceRestriction({ finance }: { finance: MerchantFinanceProjection })
     return (
       <div className="system-notice ready" role="status">
         <ShieldCheck aria-hidden="true" size={18} />
-        <div><strong>商家财务资格正常</strong><span>APPROVED / READY，结算仍由 Core 按可用来源逐笔校验。</span></div>
+        <div><strong>商家财务资格正常</strong><span>商家已满足财务要求，结算仍按每笔可用货款校验。</span></div>
       </div>
     );
   }
@@ -792,7 +678,7 @@ function FinanceRestriction({ finance }: { finance: MerchantFinanceProjection })
         <ShieldCheck aria-hidden="true" size={18} />
         <div>
           <strong>仅授权受控主网微测</strong>
-          <span>正式保证金状态仍为 {finance.merchant.guarantee_status}；只能结算 Core 绑定的测试商品应收，资格到期即自动失效。</span>
+          <span>只能结算系统绑定的测试商品应收，资格到期自动失效。</span>
         </div>
       </div>
     );
@@ -802,10 +688,63 @@ function FinanceRestriction({ finance }: { finance: MerchantFinanceProjection })
       <AlertTriangle aria-hidden="true" size={18} />
       <div>
         <strong>商家财务操作受限</strong>
-        <p>{finance.merchant.status} / {finance.merchant.guarantee_status}：新商品、新订单与新结算申请必须失败关闭；履约、接管、对账和最终性同步保持可用。</p>
+        <p>当前商家状态为 {merchantStatusLabel(finance.merchant.status)}，新结算申请暂时不能提交；履约、接管、对账仍可查看和处理。</p>
       </div>
     </div>
   );
+}
+
+
+
+
+function formatDateTime(value: string | null | undefined) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat('zh-CN', { dateStyle: 'short', timeStyle: 'short' }).format(date);
+}
+
+function formatSignedUsdt(amount: string) {
+  const sign = amount.startsWith('-') ? '-' : amount.startsWith('+') ? '+' : '';
+  const raw = sign ? amount.slice(1) : amount;
+  const formatted = formatUsdt(raw);
+  return formatted === '--' ? '--' : `${sign}${formatted}`;
+}
+
+function formatAssetAmount(amount: string | null | undefined, asset: string) {
+  if (asset === 'USDT') return formatUsdt(amount);
+  if (asset === 'NPL') return formatNpl(amount);
+  if (asset === 'BNM' || asset === 'BNM_POINTS') return formatBnm(amount);
+  return formatTokenAmount(amount, asset);
+}
+
+function assetLabel(asset: string) {
+  if (asset === 'BNM_POINTS') return 'BNM';
+  return asset;
+}
+
+function railLabel(rail: string) {
+  return ({
+    MERCHANT_USDT: '商家货款',
+    REWARD_NPL: 'NPL 奖励',
+    PRIZE_USDT: '秒杀大奖',
+  } as Record<string, string>)[rail] ?? rail;
+}
+
+function purposeLabel(purpose: string | null | undefined) {
+  if (!purpose) return '';
+  return ({
+    MERCHANT_RECEIVABLE: '商家货款',
+    REWARD_LIABILITY: '奖励',
+  } as Record<string, string>)[purpose] ?? purpose;
+}
+
+function isPositiveUsdtInput(value: string) {
+  try {
+    return BigInt(parseUsdtInput(value, '金额', true)) > 0n;
+  } catch {
+    return false;
+  }
 }
 
 function CommandNotice({ state }: { state: CommandState }) {
@@ -814,24 +753,24 @@ function CommandNotice({ state }: { state: CommandState }) {
 }
 
 function StatusText({ state }: { state: string }) {
-  return <span className={`status-text status-${state.toLowerCase()}`}>{state}</span>;
+  return <span className={`status-text status-${state.toLowerCase()}`}>{statusLabel(state)}</span>;
 }
 
 function ExplorerHash({ hash }: { hash: string }) {
   return (
-    <a className="explorer-hash mono-value" href={`https://bscscan.com/tx/${hash}`} rel="noreferrer" target="_blank">
-      {hash}<ExternalLink aria-hidden="true" size={14} />
+    <a className="explorer-hash mono-value" href={`https://bscscan.com/tx/${hash}`} rel="noreferrer" target="_blank" title={hash}>
+      {shortId(hash)}<ExternalLink aria-hidden="true" size={14} />
     </a>
   );
 }
 
 function stateLabel(state: BalanceState) {
   const labels: Record<(typeof payableStates)[number], string> = {
-    LOCKED: 'Locked 锁定中',
-    AVAILABLE: 'Available 可申请',
-    REQUESTED: 'Requested 已申请',
-    SUBMITTED: 'Submitted 已提交',
-    SETTLED: 'Settled 已结算',
+    LOCKED: '锁定中',
+    AVAILABLE: '可申请',
+    REQUESTED: '已申请',
+    SUBMITTED: '已提交',
+    SETTLED: '已结算',
   };
   return state in labels ? labels[state as keyof typeof labels] : state;
 }
@@ -841,4 +780,61 @@ function createIdempotencyKey(kind: string) {
     ? globalThis.crypto.randomUUID()
     : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   return `merchant-${kind}-${random}`;
+}
+
+function shortId(value: string | null | undefined) {
+  if (!value) return '';
+  return value.length > 18 ? `${value.slice(0, 8)}…${value.slice(-6)}` : value;
+}
+
+function shortAddress(value: string | null | undefined) {
+  if (!value) return '—';
+  return value.length > 12 ? `${value.slice(0, 6)}…${value.slice(-4)}` : value;
+}
+
+function merchantStatusLabel(value: string | null | undefined) {
+  return ({
+    APPROVED: '已入驻',
+    PENDING: '待审核',
+    REJECTED: '已拒绝',
+    SUSPENDED: '已暂停',
+  } as Record<string, string>)[value ?? ''] ?? (value || '--');
+}
+
+function statusLabel(value: string) {
+  return ({
+    LOCKED: '锁定中',
+    AVAILABLE: '可申请',
+    REQUESTED: '已申请',
+    SUBMITTED: '已提交',
+    SETTLED: '已结算',
+    DISPUTED: '仲裁中',
+    FINAL: '已确认',
+    MINED: '确认中',
+    PENDING: '处理中',
+    FAILED: '失败',
+    REORGED: '已回滚',
+    ORDINARY: '普通订单',
+    SECKILL: '秒杀订单',
+    FALLBACK_RETAIL: '常规兜底订单',
+  } as Record<string, string>)[value] ?? value;
+}
+
+function eventTypeLabel(value: string) {
+  return ({
+    MERCHANT_RECEIVABLE_LOCKED: '货款锁定',
+    MERCHANT_RECEIVABLE_AVAILABLE: '货款可结算',
+    SETTLEMENT_REQUESTED: '发起结算',
+    SETTLEMENT_SUBMITTED: '提交转账',
+    SETTLEMENT_SETTLED: '已到账',
+  } as Record<string, string>)[value] ?? value;
+}
+
+function sourceKindLabel(value: string) {
+  return ({
+    ORDER: '订单',
+    SETTLEMENT_REQUEST: '结算申请',
+    SETTLEMENT_TRANSFER: '结算转账',
+    TAKEOVER: '接管',
+  } as Record<string, string>)[value] ?? value;
 }

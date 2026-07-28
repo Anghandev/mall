@@ -296,7 +296,7 @@ export function SettingsPage() {
         feedback = { tone: 'info', message: '该时间范围没有可导出的商家范围审计记录。' };
       } else {
         downloadCsv(result.filename, result.contentType, result.csv);
-        feedback = { tone: 'success', message: `已下载 ${result.entryCount} 条 Core 返回的商家范围记录。` };
+        feedback = { tone: 'success', message: `已下载 ${result.entryCount} 条商家范围记录。` };
       }
       await loadAudit(appliedFilters);
       setAuditFeedback(feedback);
@@ -363,8 +363,8 @@ export function SettingsPage() {
                     </button>
                   </div>
                 </div>
-                <FieldHelp>Logo 必须通过 Core 发布的 `MERCHANT_LOGO` 写一次上传、存储封存和钱包归属校验。</FieldHelp>
-                {logoAssetId ? <code className="profile-asset-id">{logoAssetId}</code> : null}
+                <FieldHelp>Logo 会经过系统上传、存储封存和钱包归属校验。</FieldHelp>
+                {logoAssetId ? <details className="technical-details compact"><summary>高级 Logo 凭证</summary><code className="profile-asset-id" title={logoAssetId}>{shortHash(logoAssetId)}</code></details> : null}
                 {logoError ? <p className="form-error" role="alert">Logo 读取失败：{logoError}</p> : null}
               </fieldset>
               {profileFeedback ? <p className={`command-notice ${profileFeedback.tone}`} role={profileFeedback.tone === 'error' ? 'alert' : 'status'}>{profileFeedback.message}</p> : null}
@@ -374,13 +374,13 @@ export function SettingsPage() {
         </form>
 
         <section className="section-block wallet-panel" aria-labelledby="wallet-title">
-          <div className="section-heading"><div><p className="eyebrow">Settlement identity</p><h2 id="wallet-title">绑定结算钱包</h2></div><WalletCards aria-hidden="true" size={19} /></div>
+          <div className="section-heading"><div><p className="eyebrow">结算身份</p><h2 id="wallet-title">绑定结算钱包</h2></div><WalletCards aria-hidden="true" size={19} /></div>
           {profile.phase === 'loading' ? <LoadingRows count={2} /> : null}
           {profile.phase === 'error' ? <EmptyState blocked description={profile.message} title="结算身份不可用" /> : null}
           {profile.phase === 'ready' ? (
             <>
-              <div className="wallet-address"><span>常驻结算钱包</span><strong>{profile.value.settlementWallet}</strong><small>商家 ID：{profile.value.merchantId}</small></div>
-              <div className="governance-note"><KeyRound aria-hidden="true" size={18} /><div><strong>普通编辑不可更换</strong><p>该地址仅由 Core 返回，不进入资料 PUT body。钱包变更必须走治理迁移。</p></div></div>
+              <div className="wallet-address"><span>常驻结算钱包</span><strong title={profile.value.settlementWallet}>{shortAddress(profile.value.settlementWallet)}</strong><small title={profile.value.merchantId}>商家编号：{shortHash(profile.value.merchantId)}</small></div>
+              <div className="governance-note"><KeyRound aria-hidden="true" size={18} /><div><strong>普通编辑不可更换</strong><p>该地址由系统锁定展示，普通资料编辑不能修改。钱包变更必须走治理迁移。</p></div></div>
               <dl className="profile-meta"><div><dt>资料版本</dt><dd>{profile.value.version}</dd></div><div><dt>更新时间</dt><dd>{formatDate(profile.value.updatedAt)}</dd></div></dl>
             </>
           ) : null}
@@ -389,7 +389,7 @@ export function SettingsPage() {
 
       <section className="section-block audit-section" aria-labelledby="audit-title">
         <div className="section-heading">
-          <div><p className="eyebrow">Security audit</p><h2 id="audit-title">操作日志</h2></div>
+          <div><p className="eyebrow">安全日志</p><h2 id="audit-title">操作日志</h2></div>
           <div className="audit-tools">
             <button className="button quiet" disabled={audit.phase === 'loading' || Boolean(auditBusy)} onClick={() => void loadAudit(appliedFilters)} type="button"><RefreshCw aria-hidden="true" size={16} /> 刷新</button>
             <button className="button secondary" disabled={Boolean(auditBusy) || !filters.from || !filters.to || profile.phase !== 'ready' || audit.phase !== 'ready' || auditScopeMismatch} onClick={() => void exportAudit()} type="button"><Download aria-hidden="true" size={16} /> {auditBusy === 'export' ? '导出中…' : '导出 CSV'}</button>
@@ -400,27 +400,27 @@ export function SettingsPage() {
           <label><span>起始时间</span><input onChange={(event) => setFilters((current) => ({ ...current, from: event.target.value }))} type="datetime-local" value={filters.from} /></label>
           <label><span>结束时间</span><input onChange={(event) => setFilters((current) => ({ ...current, to: event.target.value }))} type="datetime-local" value={filters.to} /></label>
           <label><span>日志流</span><select onChange={(event) => setFilters((current) => ({ ...current, streamName: event.target.value as AuditFilters['streamName'] }))} value={filters.streamName}><option value="">全部</option>{auditStreamNames.map((stream) => <option key={stream} value={stream}>{streamLabels[stream]}</option>)}</select></label>
-          <label><span>操作类型</span><input maxLength={128} onChange={(event) => setFilters((current) => ({ ...current, eventType: event.target.value }))} placeholder="精确 eventType" value={filters.eventType} /></label>
-          <label><span>影响模块</span><input maxLength={128} onChange={(event) => setFilters((current) => ({ ...current, resourceType: event.target.value }))} placeholder="精确 resourceType" value={filters.resourceType} /></label>
+          <label><span>操作类型</span><input maxLength={128} onChange={(event) => setFilters((current) => ({ ...current, eventType: event.target.value }))} placeholder="精确操作名" value={filters.eventType} /></label>
+          <label><span>影响模块</span><input maxLength={128} onChange={(event) => setFilters((current) => ({ ...current, resourceType: event.target.value }))} placeholder="精确模块名" value={filters.resourceType} /></label>
           <div className="filter-actions"><button className="button primary" disabled={Boolean(auditBusy)} type="submit">应用筛选</button><button className="button quiet" disabled={Boolean(auditBusy)} onClick={() => { setFilters(emptyFilters); void loadAudit(emptyFilters); }} type="button">重置</button></div>
         </form>
 
         <div className="audit-scope-notice" role="status">
           <ShieldCheck aria-hidden="true" size={17} />
-          <div><strong>商家范围条目哈希</strong><span>`PARTIAL_PRE_MERCHANT_SCOPE`：早于 merchant scope 字段的历史可能不完整。当前数量不代表全局链证明。</span></div>
+          <div><strong>商家范围说明</strong><span>较早的历史日志可能不完整；当前数量只代表本商家页面已读取的记录。</span></div>
         </div>
-        <div className="external-block-note" role="status"><Printer aria-hidden="true" size={17} /><span>实体打印机与设备验收仍为 ExternalBlocked，本页只下载 Core 返回的 CSV，不会发送打印任务。</span></div>
+        <div className="external-block-note" role="status"><Printer aria-hidden="true" size={17} /><span>实体打印机与设备验收暂未开放，本页只下载 CSV，不会发送打印任务。</span></div>
         {auditFeedback ? <p className={`command-notice audit-feedback ${auditFeedback.tone}`} role={auditFeedback.tone === 'error' ? 'alert' : 'status'}>{auditFeedback.message}</p> : null}
 
         {audit.phase === 'loading' ? <LoadingRows count={5} /> : null}
         {audit.phase === 'error' ? <EmptyState blocked description={audit.message} title="审计日志加载失败" /> : null}
-        {auditScopeMismatch ? <EmptyState blocked description="Core 返回的审计 merchantId 与当前资料不一致，已停止展示。" title="商家范围不匹配" /> : null}
+        {auditScopeMismatch ? <EmptyState blocked description="系统返回的审计商家编号与当前资料不一致，已停止展示。" title="商家范围不匹配" /> : null}
         {audit.phase === 'ready' && !auditScopeMismatch ? (
           <>
-            <div className="audit-summary"><span>当前已加载 {audit.value.entries.length} 条</span><span>本页 Core scoped count：{audit.value.chainProof.entries}</span><span>范围：{audit.value.chainProof.merchantId}</span></div>
+            <div className="audit-summary"><span>当前已加载 {audit.value.entries.length} 条</span><span>系统记录数：{audit.value.chainProof.entries}</span><span title={audit.value.chainProof.merchantId}>范围：{shortHash(audit.value.chainProof.merchantId)}</span></div>
             <div className="table-wrap audit-table-wrap">
               <table>
-                <thead><tr><th scope="col">操作时间</th><th scope="col">操作类型</th><th scope="col">影响模块</th><th scope="col">操作详情</th><th scope="col">签名哈希</th><th scope="col">链上 TxHash</th></tr></thead>
+                <thead><tr><th scope="col">操作时间</th><th scope="col">操作类型</th><th scope="col">影响模块</th><th scope="col">操作详情</th><th scope="col">签名凭证</th><th scope="col">钱包记录</th></tr></thead>
                 <tbody>
                   {audit.value.entries.length === 0 ? (
                     <tr><td colSpan={6}><EmptyState description="当前商家范围和筛选条件下没有记录。" title="暂无审计日志" /></td></tr>
@@ -429,9 +429,9 @@ export function SettingsPage() {
                       <td className="audit-time">{formatDate(entry.operationTime)}</td>
                       <td><strong>{entry.operationType}</strong></td>
                       <td>{entry.module}</td>
-                      <td className="audit-detail"><span>{entry.detail}</span><small>条目哈希 {shortHash(entry.entryHash)}</small></td>
+                      <td className="audit-detail"><span>{entry.detail}</span><small title={entry.entryHash}>日志编号 {shortHash(entry.entryHash)}</small></td>
                       <td><HashValue value={entry.signatureHash} /></td>
-                      <td>{entry.chainTxHash ? <a className="hash-link" href={`https://bscscan.com/tx/${entry.chainTxHash}`} rel="noreferrer" target="_blank">{shortHash(entry.chainTxHash)}</a> : <span className="muted-value">无</span>}</td>
+                      <td>{entry.chainTxHash ? <details className="technical-details compact"><summary>查看高级记录</summary><a className="hash-link" href={`https://bscscan.com/tx/${entry.chainTxHash}`} rel="noreferrer" target="_blank">{shortHash(entry.chainTxHash)}</a></details> : <span className="muted-value">无</span>}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -507,6 +507,10 @@ function HashValue({ value }: { value: string | null }) {
 
 function shortHash(value: string) {
   return value.length > 22 ? `${value.slice(0, 10)}…${value.slice(-8)}` : value;
+}
+
+function shortAddress(value: string) {
+  return value.length > 14 ? `${value.slice(0, 8)}…${value.slice(-6)}` : value;
 }
 
 function formatDate(value: string) {

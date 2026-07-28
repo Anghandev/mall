@@ -434,6 +434,46 @@ describe('settlement-admin.16 Core HTTP consumer', () => {
     }));
   });
 
+  it('submits a public merchant application without exposing a settlement wallet field', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({
+      artifactVersion,
+      merchant: {
+        merchantId: 'merchant-public',
+        settlementWallet: '0x1111111111111111111111111111111111111111',
+        status: 'PENDING',
+        shopName: '阿步金店',
+      },
+    }, 201));
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    const result = await createCoreApi().submitMerchantApplication({
+      message: 'merchant.test wants you to sign in',
+      signature: '0xsigned',
+      shopName: '阿步金店',
+      legalName: '阿步公司',
+      legalId: 'PUBLIC123456',
+      contactPhone: '13800138000',
+      idempotencyKey: 'merchant-public-application-1',
+    });
+
+    expect(result).toEqual({
+      merchantId: 'merchant-public',
+      settlementWallet: '0x1111111111111111111111111111111111111111',
+      status: 'PENDING',
+      shopName: '阿步金店',
+    });
+    const firstRequest = fetchMock.mock.calls[0] as unknown as [string, { body?: BodyInit | null }];
+    expect(JSON.parse(String(firstRequest[1].body))).toEqual({
+      message: 'merchant.test wants you to sign in',
+      signature: '0xsigned',
+      shopName: '阿步金店',
+      legalName: '阿步公司',
+      legalId: 'PUBLIC123456',
+      contactPhone: '13800138000',
+      idempotencyKey: 'merchant-public-application-1',
+    });
+  });
+
   it('consumes versioned merchant profile and tenant audit routes with exact request fields', async () => {
     const updatedProfile = { ...merchantProfile, shopName: '阿步新金店', version: 4 };
     const cursor = { createdAt: '2026-07-15T09:30:00.000Z', entryId: 'audit-merchant-1' };
@@ -693,7 +733,7 @@ describe('settlement-admin.16 Core HTTP consumer', () => {
     expect((await api.createMerchantConcessionPreview(productId, {
       merchantConcessionBps: 2500,
       idempotencyKey: 'merchant-preview-1',
-    }, 'merchant-session')).payload.items[0]?.merchantNetReceivableUsdt).toBe('518');
+    }, 'merchant-session')).payload.items[0]?.merchantNetReceivableUsdt).toBe('517500000000000000000');
     expect((await api.submitMerchantProductReview(productId, {
       previewId: concessionPreview.previewId,
       idempotencyKey: 'merchant-review-1',
@@ -1077,16 +1117,16 @@ describe('settlement-admin.16 Core HTTP consumer', () => {
     expect(firstPage.statements[0]).toMatchObject({
       orderKind: 'SECKILL',
       frozenAmounts: {
-        productUsdtPaymentAmount: '8400',
-        platformServiceFeeUsdt: '120',
-        custodyProductUsdt: '8280',
-        freightUsdt: '500',
-        merchantBaseReceivableUsdt: '8280',
-        merchantConcessionAmount: '828',
-        merchantNetReceivableUsdt: '7452',
+        productUsdtPaymentAmount: '8400000000000000000000',
+        platformServiceFeeUsdt: '120000000000000000000',
+        custodyProductUsdt: '8280000000000000000000',
+        freightUsdt: '500000000000000000000',
+        merchantBaseReceivableUsdt: '8280000000000000000000',
+        merchantConcessionAmount: '828000000000000000000',
+        merchantNetReceivableUsdt: '7452000000000000000000',
       },
       currentReceivableUsdt: '0',
-      removedFromReceivableUsdt: '7952',
+      removedFromReceivableUsdt: '7952000000000000000000',
     });
     expect(firstPage.statements[0]?.journalEvidence[0]?.journalId).toBe('journal:a:lifecycle');
     expect(firstPage.statements[0]?.settlementRefs[0]?.finalExecutionTxHash).toBe(`0x${'b'.repeat(64)}`);

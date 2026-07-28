@@ -16,6 +16,7 @@ export const operationsWallet = '0x3333333333333333333333333333333333333333';
 export const usdtAddress = '0x55d398326f99059ff775485246999027b3197955';
 
 const hash = (character: string) => `0x${character.repeat(64)}`;
+const usdt = (whole: string | number) => `${whole}000000000000000000`;
 
 export const requestedSettlement = settlementRequest({
   requestId: 'settlement-request-requested',
@@ -68,7 +69,7 @@ export const seckillReceivableStatement = receivableStatement({
   orderKind: 'SECKILL',
   orderState: 'FULFILLED',
   currentReceivableUsdt: '0',
-  removedFromReceivableUsdt: '7952',
+  removedFromReceivableUsdt: usdt(7952),
   lifecycleState: 'SETTLED',
   settlementState: 'SETTLED',
   finalExecutionTxHash: hash('b'),
@@ -78,7 +79,7 @@ export const ordinaryReceivableStatement = receivableStatement({
   hashCharacter: 'c',
   orderKind: 'ORDINARY',
   orderState: 'SHIPPED',
-  currentReceivableUsdt: '7952',
+  currentReceivableUsdt: usdt(7952),
   removedFromReceivableUsdt: '0',
   lifecycleState: 'LOCKED',
 });
@@ -87,7 +88,7 @@ export const fallbackReceivableStatement = receivableStatement({
   hashCharacter: 'd',
   orderKind: 'FALLBACK_RETAIL',
   orderState: 'FULFILLED',
-  currentReceivableUsdt: '7952',
+  currentReceivableUsdt: usdt(7952),
   removedFromReceivableUsdt: '0',
   lifecycleState: 'AVAILABLE',
 });
@@ -386,15 +387,15 @@ function receivableStatement(input: {
         : '2026-07-13T07:59:00.000Z',
     orderKind: input.orderKind,
     frozenAmounts: {
-      listPriceUsdt: '12000',
-      productUsdtPaymentAmount: '8400',
-      platformServiceFeeUsdt: '120',
-      custodyProductUsdt: '8280',
-      freightUsdt: '500',
-      buyerPaidUsdt: '8900',
-      merchantBaseReceivableUsdt: '8280',
-      merchantConcessionAmount: '828',
-      merchantNetReceivableUsdt: '7452',
+      listPriceUsdt: usdt(12000),
+      productUsdtPaymentAmount: usdt(8400),
+      platformServiceFeeUsdt: usdt(120),
+      custodyProductUsdt: usdt(8280),
+      freightUsdt: usdt(500),
+      buyerPaidUsdt: usdt(8900),
+      merchantBaseReceivableUsdt: usdt(8280),
+      merchantConcessionAmount: usdt(828),
+      merchantNetReceivableUsdt: usdt(7452),
     },
     currentReceivableUsdt: input.currentReceivableUsdt,
     removedFromReceivableUsdt: input.removedFromReceivableUsdt,
@@ -407,14 +408,14 @@ function receivableStatement(input: {
       journalId: lifecycleJournalId,
       eventType: input.lifecycleState === 'LOCKED' ? 'PAYMENT_FINAL' : 'FULFILLMENT_FINAL',
       state: input.lifecycleState,
-      delta: input.lifecycleState === 'SETTLED' ? '-7952' : '7952',
+      delta: input.lifecycleState === 'SETTLED' ? `-${usdt(7952)}` : usdt(7952),
       sourceKind: 'ORDER',
       sourceReferenceHash: orderId,
       createdAt: '2026-07-15T09:00:00.000Z',
     }],
     settlementRefs: input.settlementState ? [{
       requestId: settlementRequestId,
-      amount: '7952',
+      amount: usdt(7952),
       state: input.settlementState,
       transferId: hash('6'),
       finalExecutionTxHash: input.finalExecutionTxHash ?? null,

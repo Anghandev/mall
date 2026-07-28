@@ -7,6 +7,7 @@ import { DashboardPage } from './pages/DashboardPage';
 import { FulfillmentPage } from './pages/FulfillmentPage';
 import { HelpPage } from './pages/HelpPage';
 import { LoginPage } from './pages/LoginPage';
+import { MerchantApplyPage } from './pages/MerchantApplyPage';
 import { ProductPage } from './pages/ProductPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { StoresPage } from './pages/StoresPage';
@@ -34,6 +35,7 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/" element={session ? <Navigate replace to="/dashboard" /> : <LoginPage />} />
+      <Route path="/apply" element={session ? <Navigate replace to="/dashboard" /> : <MerchantApplyPage />} />
       {workspaceRoutes.map(({ path, element }) => (
         <Route
           element={canEnterWorkspace ? <WorkspaceShell>{element}</WorkspaceShell> : <Navigate replace to="/" />}

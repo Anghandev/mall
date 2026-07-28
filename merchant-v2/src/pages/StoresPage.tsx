@@ -26,6 +26,8 @@ import {
   type MediaUploadIntentRequest,
 } from '../core-api';
 import { readableError, useCoreRuntime } from '../core-runtime';
+import { safeIdempotencyKey } from '../idempotency';
+import { translateErrorMessage } from '../display';
 
 type LoadState<T> =
   | { phase: 'idle' }
@@ -51,8 +53,11 @@ type CreateDraft = {
   city: string;
   district: string;
   regionCode: string;
-  longitude: string;
-  latitude: string;
+};
+
+const defaultStoreCoordinate = {
+  longitude: 121.6147,
+  latitude: 38.9140,
 };
 
 const emptyCreateDraft: CreateDraft = {
@@ -64,8 +69,6 @@ const emptyCreateDraft: CreateDraft = {
   city: '',
   district: '',
   regionCode: '',
-  longitude: '',
-  latitude: '',
 };
 
 const actionLabels: Record<MerchantStoreAction, string> = {
@@ -78,7 +81,7 @@ const reasonLabels = {
   STORE_PROFILE_INCOMPLETE: '需先填写营业时间并绑定至少 1 张门店实景图',
   STORE_SUSPENDED: '门店已由平台冻结，商家不能修改或激活',
   STORE_CLOSED: '门店已关闭，历史资料只读',
-  STORE_STATE_MISMATCH: '当前门店状态不允许该操作',
+  STORE_STATE_MISMATCH: '当前状态下不可执行',
 } as const;
 
 export function StoresPage() {
@@ -161,9 +164,7 @@ export function StoresPage() {
     && validBusinessHours(draft.businessHours) && draft.imageAssetIds.length <= 5);
   const createFormValid = validName(createDraft.name) && validPhone(createDraft.phone)
     && validBusinessHours(createDraft.businessHours)
-    && validManualRegion(createDraft)
-    && validCoordinate(createDraft.longitude, -180, 180)
-    && validCoordinate(createDraft.latitude, -90, 90);
+    && validManualRegion(createDraft);
 
   function selectStore(storeId: string) {
     setSelectedStoreId(storeId);
@@ -175,7 +176,7 @@ export function StoresPage() {
     const fingerprint = JSON.stringify(payload);
     const previous = commandKeys.current.get(scope);
     if (previous?.fingerprint === fingerprint) return previous.key;
-    const key = `merchant-${scope}-${crypto.randomUUID()}`;
+    const key = safeIdempotencyKey(scope, { prefix: 'merchant' });
     commandKeys.current.set(scope, { fingerprint, key });
     return key;
   }
@@ -201,8 +202,8 @@ export function StoresPage() {
       city: createDraft.city.trim(),
       district: createDraft.district.trim(),
       regionCode: createDraft.regionCode.trim(),
-      longitude: Number(createDraft.longitude),
-      latitude: Number(createDraft.latitude),
+      longitude: defaultStoreCoordinate.longitude,
+      latitude: defaultStoreCoordinate.latitude,
     };
     const scope = 'create-store';
     const input: CreateMerchantStoreRequest = { ...value, idempotencyKey: commandKey(scope, value) };
@@ -216,7 +217,7 @@ export function StoresPage() {
       setCreateDraft(emptyCreateDraft);
       setCreateOpen(false);
       await loadStores(created.storeId);
-      setStoreFeedback({ tone: 'success', message: '门店草稿已创建，行政区、详细地址和坐标已绑定且不可修改。' });
+      setStoreFeedback({ tone: 'success', message: '门店草稿已创建。地址已经固定，搬店时请新建门店。' });
     } catch (error) {
       setStoreFeedback({ tone: 'error', message: readableStoreError(error) });
     } finally {
@@ -293,7 +294,7 @@ export function StoresPage() {
         setImageAccess((current) => ({ ...current, [asset.assetId]: access }));
       }
       updateDraft((current) => ({ ...current, imageAssetIds: [...current.imageAssetIds, ...uploaded] }));
-      setStoreFeedback({ tone: 'info', message: `已通过 Core 完成 ${uploaded.length} 张图片的上传、封存和归属校验，请保存资料以绑定。` });
+      setStoreFeedback({ tone: 'info', message: `已完成 ${uploaded.length} 张图片上传和归属校验，请保存资料以绑定。` });
     } catch (error) {
       setStoreFeedback({ tone: 'error', message: readableStoreError(error) });
     } finally {
@@ -360,14 +361,14 @@ export function StoresPage() {
             {createOpen ? '取消新增' : '新增门店'}
           </button>
         )}
-        description="创建位置绑定的门店，维护版本化资料和实景图。"
+        description="先填门店资料，再上传至少 1 张实景图，最后点激活。地址创建后不能直接改。"
         eyebrow="04 / 网点设置"
         title="门店管理"
       />
 
       {createOpen ? (
         <form className="section-block form-section store-create-panel" onSubmit={(event) => { event.preventDefault(); void createStore(); }} aria-labelledby="create-store-title">
-          <div className="section-heading"><div><p className="eyebrow">Immutable location</p><h2 id="create-store-title">新建门店草稿</h2></div><MapPin aria-hidden="true" size={19} /></div>
+          <div className="section-heading"><div><p className="eyebrow">位置锁定</p><h2 id="create-store-title">新建门店草稿</h2></div><MapPin aria-hidden="true" size={19} /></div>
           <div className="store-create-grid">
             <div className="field"><label htmlFor="create-store-name">门店名称</label><input id="create-store-name" maxLength={100} onChange={(event) => setCreateDraft((current) => ({ ...current, name: event.target.value }))} required value={createDraft.name} /></div>
             <div className="field"><label htmlFor="create-store-phone">服务电话</label><input id="create-store-phone" inputMode="tel" maxLength={20} onChange={(event) => setCreateDraft((current) => ({ ...current, phone: event.target.value }))} pattern="[+]?[0-9-]{7,20}" required value={createDraft.phone} /></div>
@@ -375,20 +376,19 @@ export function StoresPage() {
             <div className="field"><label htmlFor="create-province">省</label><input id="create-province" maxLength={64} onChange={(event) => setCreateDraft((current) => ({ ...current, province: event.target.value }))} required value={createDraft.province} /></div>
             <div className="field"><label htmlFor="create-city">市</label><input id="create-city" maxLength={64} onChange={(event) => setCreateDraft((current) => ({ ...current, city: event.target.value }))} required value={createDraft.city} /></div>
             <div className="field"><label htmlFor="create-district">区县</label><input id="create-district" maxLength={64} onChange={(event) => setCreateDraft((current) => ({ ...current, district: event.target.value }))} required value={createDraft.district} /></div>
-            <div className="field"><label htmlFor="create-region-code">6 位行政区代码</label><input id="create-region-code" inputMode="numeric" maxLength={6} onChange={(event) => setCreateDraft((current) => ({ ...current, regionCode: event.target.value }))} pattern="[0-9]{6}" required value={createDraft.regionCode} /></div>
-            <div className="field"><label htmlFor="create-longitude">经度</label><input id="create-longitude" inputMode="decimal" max="180" min="-180" onChange={(event) => setCreateDraft((current) => ({ ...current, longitude: event.target.value }))} required step="any" type="number" value={createDraft.longitude} /></div>
-            <div className="field"><label htmlFor="create-latitude">纬度</label><input id="create-latitude" inputMode="decimal" max="90" min="-90" onChange={(event) => setCreateDraft((current) => ({ ...current, latitude: event.target.value }))} required step="any" type="number" value={createDraft.latitude} /></div>
+            <div className="field"><label htmlFor="create-region-code">地区代码（6 位）</label><input id="create-region-code" inputMode="numeric" maxLength={6} onChange={(event) => setCreateDraft((current) => ({ ...current, regionCode: event.target.value }))} pattern="[0-9]{6}" required value={createDraft.regionCode} /><FieldHelp>不知道就找平台要，不要随便填。</FieldHelp></div>
           </div>
           <div className="field"><label htmlFor="create-address">详细地址</label><input id="create-address" maxLength={300} minLength={5} onChange={(event) => setCreateDraft((current) => ({ ...current, address: event.target.value }))} required value={createDraft.address} /></div>
-          <div className="signature-note"><Crosshair aria-hidden="true" size={17} />完整地址和坐标会由 Core 固化。门店创建后位置永久锁定，搬迁需另建门店。</div>
+          <div className="signature-note"><Crosshair aria-hidden="true" size={17} />系统会自动绑定定位，商家不用填经纬度。创建后地址不能直接改，搬店请新建门店。</div>
           {storeFeedback ? <p className={`command-notice ${storeFeedback.tone}`} role={storeFeedback.tone === 'error' ? 'alert' : 'status'}>{storeFeedback.message}</p> : null}
+          {!createFormValid ? <p className="field-help" role="status">请先补齐名称、电话、营业时间、省市区、6 位地区代码和详细地址，按钮才会亮。</p> : null}
           <button className="button primary" disabled={!createFormValid || Boolean(storeBusy)} type="submit">{storeBusy === 'create' ? '创建中…' : '创建草稿'}</button>
         </form>
       ) : null}
 
       <div className="store-layout">
         <section className="section-block store-list" aria-labelledby="store-list-title">
-          <div className="section-heading"><div><p className="eyebrow">Locations</p><h2 id="store-list-title">旗下门店</h2></div><span>{storesState.phase === 'ready' ? `${stores.length} 家` : '商家范围 Core 读取'}</span></div>
+          <div className="section-heading"><div><p className="eyebrow">门店列表</p><h2 id="store-list-title">旗下门店</h2></div><span>{storesState.phase === 'ready' ? `${stores.length} 家` : '正在读取'}</span></div>
           {storesState.phase === 'loading' ? <LoadingRows count={3} /> : null}
           {storesState.phase === 'idle' ? <EmptyState blocked description="连接授权商家钱包后读取门店。" title="商家会话不可用" /> : null}
           {storesState.phase === 'error' ? <><EmptyState blocked description={storesState.message} title={loadErrorTitle(storesState)} /><button className="button secondary wide" onClick={() => void loadStores()} type="button"><RefreshCw aria-hidden="true" size={16} /> 重试</button></> : null}
@@ -403,7 +403,7 @@ export function StoresPage() {
         <div className="store-detail-stack">
           {!selectedStore || !draft ? <section className="section-block"><EmptyState description="从左侧选择门店，或新建门店草稿。" title="选择门店后继续" /></section> : (
             <form className="section-block form-section" onSubmit={(event) => { event.preventDefault(); void saveStore(); }} aria-labelledby="store-form-title">
-              <div className="section-heading"><div><p className="eyebrow">Versioned profile</p><h2 id="store-form-title">门店资料</h2></div><span>{storeStatusLabel(selectedStore.status)} · v{selectedStore.version}</span></div>
+              <div className="section-heading"><div><p className="eyebrow">资料版本</p><h2 id="store-form-title">门店资料</h2></div><span>{storeStatusLabel(selectedStore.status)} · v{selectedStore.version}</span></div>
               {selectedStore.status === 'SUSPENDED' ? <p className="command-notice error" role="alert">门店已冻结。资料、位置与激活操作均失败关闭，历史读取和履约证据保留。</p> : null}
               {selectedStore.status === 'CLOSED' ? <p className="command-notice error" role="status">门店已关闭。资料和位置永久只读，历史订单快照不受影响。</p> : null}
               <div className="two-column-fields">
@@ -420,32 +420,32 @@ export function StoresPage() {
                   </label>
                   <span className="media-count">{draft.imageAssetIds.length} / 5</span>
                 </div>
-                {draft.imageAssetIds.length === 0 ? <EmptyState description="激活前至少需要 1 张经 Core 校验的 STORE_IMAGE。" title="尚未绑定实景图" /> : (
+                {draft.imageAssetIds.length === 0 ? <EmptyState description="激活前至少需要 1 张系统校验通过的门店实景图。" title="尚未绑定实景图" /> : (
                   <div className="store-image-grid">{draft.imageAssetIds.map((assetId, index) => (
                     <figure key={assetId}>
                       <div className="store-image-frame">{imageAccess[assetId] ? <img alt={`门店实景图 ${index + 1}`} src={imageAccess[assetId].readUrl} /> : <Store aria-hidden="true" size={28} />}</div>
-                      <figcaption><code>{shortHash(assetId)}</code><button aria-label={`移除门店实景图 ${index + 1}`} className="icon-button" disabled={!canUpdate || Boolean(storeBusy)} onClick={() => updateDraft((current) => ({ ...current, imageAssetIds: current.imageAssetIds.filter((id) => id !== assetId) }))} type="button"><Trash2 aria-hidden="true" size={15} /></button></figcaption>
+                      <figcaption><span>实景图 {index + 1}</span><details className="technical-details compact"><summary>高级图片编号</summary><code>{shortHash(assetId)}</code></details><button aria-label={`移除门店实景图 ${index + 1}`} className="icon-button" disabled={!canUpdate || Boolean(storeBusy)} onClick={() => updateDraft((current) => ({ ...current, imageAssetIds: current.imageAssetIds.filter((id) => id !== assetId) }))} type="button"><Trash2 aria-hidden="true" size={15} /></button></figcaption>
                     </figure>
                   ))}</div>
                 )}
               </fieldset>
 
               <div className="immutable-fieldset">
-                <div className="immutable-heading"><MapPin aria-hidden="true" size={20} /><div><strong>门店位置已锁定</strong><span>创建后行政区、地址和坐标不可通过资料保存变更</span></div></div>
+                <div className="immutable-heading"><MapPin aria-hidden="true" size={20} /><div><strong>地址已固定</strong><span>这里不能直接改地址；门店搬迁请新建门店。</span></div></div>
                 <div className="field"><label htmlFor="store-address">详细地址</label><input disabled id="store-address" readOnly value={selectedStore.address} /></div>
                 <div className="two-column-fields">
-                  <div className="field"><label htmlFor="coordinates">门店坐标</label><input disabled id="coordinates" readOnly value={`${selectedStore.longitude}, ${selectedStore.latitude}`} /></div>
-                  <div className="field"><label htmlFor="region-code">6 位行政区划代码</label><input disabled id="region-code" readOnly value={selectedStore.regionCode} /></div>
+                  <div className="field"><label htmlFor="region-code">地区代码</label><input disabled id="region-code" readOnly value={selectedStore.regionCode} /></div>
+                  <details className="technical-details compact"><summary>高级定位信息</summary><code>{selectedStore.longitude}, {selectedStore.latitude}</code></details>
                 </div>
               </div>
 
-              <div className="store-capabilities" aria-label="Core 允许的门店操作">{selectedStore.allowedActions.map((capability) => (
-                <div key={capability.action}><strong>{actionLabels[capability.action]}</strong><span className={capability.enabled ? 'state-text success' : 'state-text blocked'}>{capability.enabled ? '可执行' : capability.reasonCode ? reasonLabels[capability.reasonCode] : '不可执行'}</span></div>
+              <div className="store-capabilities" aria-label="现在能做的门店操作">{selectedStore.allowedActions.map((capability) => (
+                <div key={capability.action}><strong>{actionLabels[capability.action]}</strong><span className={capability.enabled ? 'state-text success' : 'state-text blocked'}>{capabilityStatusText(selectedStore, capability)}</span></div>
               ))}</div>
               {storeFeedback && !createOpen ? <p className={`command-notice ${storeFeedback.tone}`} role={storeFeedback.tone === 'error' ? 'alert' : 'status'}>{storeFeedback.message}</p> : null}
               <div className="store-command-row">
                 <button className="button primary" disabled={!canUpdate || !storeFormValid || Boolean(storeBusy)} type="submit"><Save aria-hidden="true" size={16} /> {storeBusy === 'save' ? '保存中…' : '保存资料'}</button>
-                <button className="button secondary" disabled={!canActivate || Boolean(storeBusy)} onClick={() => void activateStore()} type="button"><ShieldCheck aria-hidden="true" size={16} /> {storeBusy === 'activate' ? '激活中…' : '激活门店'}</button>
+                <button className="button secondary" disabled={!canActivate || Boolean(storeBusy)} onClick={() => void activateStore()} type="button"><ShieldCheck aria-hidden="true" size={16} /> {storeBusy === 'activate' ? '激活中…' : selectedStore.status === 'ACTIVE' ? '已激活' : '激活门店'}</button>
                 <button className="button danger" disabled={!canClose || Boolean(storeBusy)} onClick={() => setCloseArmed(true)} type="button"><Trash2 aria-hidden="true" size={16} /> 关闭门店</button>
               </div>
               {closeArmed ? <div className="store-close-confirm" role="alert"><div><strong>确认关闭 {selectedStore.name}？</strong><span>关闭后资料只读，门店不再进入新商品和自提流程。</span></div><button className="button quiet" disabled={Boolean(storeBusy)} onClick={() => setCloseArmed(false)} type="button">取消</button><button className="button danger" disabled={Boolean(storeBusy)} onClick={() => void closeStore()} type="button">{storeBusy === 'close' ? '关闭中…' : '确认关闭'}</button></div> : null}
@@ -471,6 +471,14 @@ function capabilityEnabled(store: MerchantManagedStore | undefined, action: Merc
   return store?.allowedActions.some((capability) => capability.action === action && capability.enabled) === true;
 }
 
+function capabilityStatusText(store: MerchantManagedStore, capability: MerchantManagedStore['allowedActions'][number]) {
+  if (capability.enabled) return '可执行';
+  if (capability.action === 'ACTIVATE' && capability.reasonCode === 'STORE_STATE_MISMATCH' && store.status === 'ACTIVE') {
+    return '已营业，无需重复激活';
+  }
+  return capability.reasonCode ? reasonLabels[capability.reasonCode] : '不可执行';
+}
+
 function requireStoreScope(store: MerchantManagedStore, merchantId: string, storeId?: string) {
   if (store.merchantId !== merchantId || (storeId !== undefined && store.storeId !== storeId)) {
     throw new CoreApiError('InvalidResponse', '门店命令结果与当前商家范围不匹配。');
@@ -488,9 +496,9 @@ function errorState(error: unknown): Extract<LoadState<never>, { phase: 'error' 
 
 function readableStoreError(error: unknown) {
   if (!(error instanceof CoreApiError)) return readableError(error);
-  if (error.code === 'ConfigurationRequired') return `ConfigurationRequired：${error.message}`;
-  if (error.code === 'Forbidden' || error.status === 403) return `403 无权执行：${error.message}`;
-  if (error.status === 409 || error.code === 'IdempotencyConflict') return `409 状态或版本冲突：${error.message}（已刷新最新门店版本）`;
+  if (error.code === 'ConfigurationRequired') return `门店配置不完整：${translateErrorMessage(error.message)}`;
+  if (error.code === 'Forbidden' || error.status === 403) return `当前钱包无权执行：${translateErrorMessage(error.message)}`;
+  if (error.status === 409 || error.code === 'IdempotencyConflict') return `门店状态已变化：${translateErrorMessage(error.message)}（已刷新最新门店版本）`;
   return readableError(error);
 }
 
@@ -515,12 +523,6 @@ function validPhone(value: string) {
 
 function validBusinessHours(value: string) {
   return value.trim().length >= 1 && value.trim().length <= 240;
-}
-
-function validCoordinate(value: string, minimum: number, maximum: number) {
-  if (value.trim() === '') return false;
-  const number = Number(value);
-  return Number.isFinite(number) && number >= minimum && number <= maximum;
 }
 
 function validManualRegion(draft: CreateDraft) {

@@ -34,13 +34,14 @@ export function CoreUnavailable({ compact = false }: { compact?: boolean }) {
     <div className={`${compact ? 'system-notice compact' : 'system-notice'}${available ? ' ready' : ''}`} role="status">
       <Icon aria-hidden="true" size={18} />
       <div>
-        <strong>{bootstrap.phase === 'checking' ? '正在校验 Core' : available ? '三批 Core 能力已连接' : 'Core 连接失败'}</strong>
+        <span hidden data-core-boundary={coreBoundary.auditReason} />
+        <strong>{bootstrap.phase === 'checking' ? '正在检查系统连接' : available ? '系统已连接' : '系统连接失败'}</strong>
         <span>
           {available
-            ? `${coreBoundary.reason}。未发布操作继续失败关闭。`
+            ? `${coreBoundary.reason}。没有权限或条件不满足的按钮会自动禁用。`
             : bootstrap.phase === 'offline'
               ? bootstrap.error
-              : `正在确认 ${coreBoundary.artifactVersion} 与运行时是否一致。`}
+              : '正在确认当前后台是否可用。'}
         </span>
       </div>
     </div>

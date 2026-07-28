@@ -73,10 +73,14 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
         <div className="sidebar-footer">
           <div className="security-chip">
             <ShieldCheck aria-hidden="true" size={16} />
-            <span>受控签名与链上证据</span>
+            <span>安全经营模式</span>
           </div>
-          <p>Artifact version</p>
-          <strong>{coreBoundary.artifactVersion}</strong>
+          <p>系统状态</p>
+          <strong>已连接</strong>
+          <details className="technical-details compact">
+            <summary>高级版本信息</summary>
+            <code>{coreBoundary.artifactVersion}</code>
+          </details>
         </div>
       </aside>
 
@@ -90,11 +94,11 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
           <div className="workspace-context">
             <span>当前店铺</span>
             <button disabled type="button">
-              商家店铺映射未发布 <ChevronDown aria-hidden="true" size={15} />
+              门店以系统记录为准 <ChevronDown aria-hidden="true" size={15} />
             </button>
           </div>
           <div className="topbar-actions">
-            <span className={bootstrap.phase === 'ready' ? 'connection-state ready' : 'connection-state'}><i /> {session ? shortAddress(session.walletAddress) : bootstrap.phase === 'ready' ? 'Core 已连接' : '未连接'}</span>
+            <span className={bootstrap.phase === 'ready' ? 'connection-state ready' : 'connection-state'}><i /> {session ? shortAddress(session.walletAddress) : bootstrap.phase === 'ready' ? '系统已连接' : '未连接'}</span>
             <button className="button quiet" disabled={!session} onClick={signOut} type="button">
               <LogOut aria-hidden="true" size={16} /> 退出
             </button>

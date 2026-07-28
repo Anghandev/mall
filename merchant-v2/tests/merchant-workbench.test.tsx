@@ -5,14 +5,13 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   artifactVersion,
-  rewardSubtypes,
   type CatalogProduct,
   type ManagedCatalogProduct,
   type MerchantManagedStore,
 } from '@abu24k/core-artifacts';
 import { App } from '../src/App';
 import { productBaseline } from '../src/bootstrap';
-import { CoreApiError, type CoreApi, type CoreBootstrap } from '../src/core-api';
+import { CoreApiError, type CoreApi, type CoreBootstrap, type MediaUploadIntentRequest } from '../src/core-api';
 import { coreBoundary, canExecuteOrderAction } from '../src/core-boundary';
 import { CoreRuntimeProvider } from '../src/core-runtime';
 import { AssetsPage } from '../src/pages/AssetsPage';
@@ -77,7 +76,9 @@ const styles = readFileSync('src/styles.css', 'utf8');
 const walletAddress = '0x1111111111111111111111111111111111111111';
 const chainProductId = `0x${'a'.repeat(64)}`;
 const chainSkuId = `0x${'b'.repeat(64)}`;
+const guaranteeTransferTxHash = `0x${'9'.repeat(64)}`;
 const originalMediaDevices = Object.getOwnPropertyDescriptor(navigator, 'mediaDevices');
+const shortTestId = (value: string) => value.length > 18 ? `${value.slice(0, 8)}…${value.slice(-6)}` : value;
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -144,6 +145,12 @@ function createMockCoreApi(overrides: Partial<CoreApi> = {}): CoreApi {
       expiresAt: '2026-07-14T12:05:00.000Z',
     }),
     verifySiwe: async () => ({ token: 'test-session', walletAddress, roles: ['MERCHANT'], merchantId: 'merchant-1' }),
+    submitMerchantApplication: async (input) => ({
+      merchantId: 'merchant-public',
+      settlementWallet: walletAddress,
+      status: 'PENDING',
+      shopName: input.shopName,
+    }),
     listCatalog: async () => [catalogProduct],
     listCatalogCategories: async () => catalogCategories,
     listCatalogTags: async () => catalogTags,
@@ -317,6 +324,7 @@ function installWallet() {
     if (method === 'eth_chainId') return '0x38';
     if (method === 'personal_sign') return '0xsigned';
     if (method === 'eth_signTypedData_v4') return `0x${'12'.repeat(65)}`;
+    if (method === 'eth_sendTransaction') return guaranteeTransferTxHash;
     throw new Error(`Unexpected wallet method: ${method}`);
   });
   window.ethereum = { request };
@@ -327,7 +335,7 @@ async function enterFulfillment(client: CoreApi) {
   const user = userEvent.setup();
   installWallet();
   render(<MemoryRouter><App client={client} /></MemoryRouter>);
-  const connect = screen.getByRole('button', { name: '连接钱包' });
+  const connect = screen.getByRole('button', { name: /连接钱包/ });
   await waitFor(() => expect((connect as HTMLButtonElement).disabled).toBe(false));
   await user.click(connect);
   const navigation = await screen.findByRole('navigation', { name: '商家工作台导航' });
@@ -339,7 +347,7 @@ async function enterTakeovers(client: CoreApi) {
   const user = userEvent.setup();
   installWallet();
   render(<MemoryRouter><App client={client} /></MemoryRouter>);
-  const connect = screen.getByRole('button', { name: '连接钱包' });
+  const connect = screen.getByRole('button', { name: /连接钱包/ });
   await waitFor(() => expect((connect as HTMLButtonElement).disabled).toBe(false));
   await user.click(connect);
   const navigation = await screen.findByRole('navigation', { name: '商家工作台导航' });
@@ -351,7 +359,7 @@ async function enterStores(client: CoreApi) {
   const user = userEvent.setup();
   const walletRequest = installWallet();
   render(<MemoryRouter><App client={client} /></MemoryRouter>);
-  const connect = screen.getByRole('button', { name: '连接钱包' });
+  const connect = screen.getByRole('button', { name: /连接钱包/ });
   await waitFor(() => expect((connect as HTMLButtonElement).disabled).toBe(false));
   await user.click(connect);
   const navigation = await screen.findByRole('navigation', { name: '商家工作台导航' });
@@ -363,7 +371,7 @@ async function enterAssets(client: CoreApi) {
   const user = userEvent.setup();
   const walletRequest = installWallet();
   render(<MemoryRouter><App client={client} /></MemoryRouter>);
-  const connect = screen.getByRole('button', { name: '连接钱包' });
+  const connect = screen.getByRole('button', { name: /连接钱包/ });
   await waitFor(() => expect((connect as HTMLButtonElement).disabled).toBe(false));
   await user.click(connect);
   const navigation = await screen.findByRole('navigation', { name: '商家工作台导航' });
@@ -375,7 +383,7 @@ async function enterProduct(client: CoreApi) {
   const user = userEvent.setup();
   installWallet();
   render(<MemoryRouter><App client={client} /></MemoryRouter>);
-  const connect = screen.getByRole('button', { name: '连接钱包' });
+  const connect = screen.getByRole('button', { name: /连接钱包/ });
   await waitFor(() => expect((connect as HTMLButtonElement).disabled).toBe(false));
   await user.click(connect);
   const navigation = await screen.findByRole('navigation', { name: '商家工作台导航' });
@@ -387,7 +395,7 @@ async function enterSettings(client: CoreApi) {
   const user = userEvent.setup();
   installWallet();
   render(<MemoryRouter><App client={client} /></MemoryRouter>);
-  const connect = screen.getByRole('button', { name: '连接钱包' });
+  const connect = screen.getByRole('button', { name: /连接钱包/ });
   await waitFor(() => expect((connect as HTMLButtonElement).disabled).toBe(false));
   await user.click(connect);
   const navigation = await screen.findByRole('navigation', { name: '商家工作台导航' });
@@ -425,7 +433,7 @@ describe('00 wallet gateway', () => {
 
     render(<MemoryRouter><App client={client} /></MemoryRouter>);
 
-    const connect = screen.getByRole('button', { name: '连接钱包' });
+    const connect = screen.getByRole('button', { name: /连接钱包/ });
     await waitFor(() => expect((connect as HTMLButtonElement).disabled).toBe(false));
     await user.click(connect);
 
@@ -453,7 +461,7 @@ describe('00 wallet gateway', () => {
     render(<MemoryRouter><App client={createMockCoreApi()} /></MemoryRouter>);
 
     await user.click(screen.getByRole('button', { name: /OKX Wallet/ }));
-    const connect = screen.getByRole('button', { name: '连接钱包' });
+    const connect = screen.getByRole('button', { name: /连接钱包/ });
     await waitFor(() => expect((connect as HTMLButtonElement).disabled).toBe(false));
     await user.click(connect);
 
@@ -466,13 +474,44 @@ describe('00 wallet gateway', () => {
     delete window.okxwallet;
     renderPage(<LoginPage />);
 
-    expect(screen.getByText('24K商城 · Merchant')).toBeTruthy();
+    expect(screen.getByText('24K商城 · 商家工作台')).toBeTruthy();
     expect(document.body.textContent).not.toMatch(/阿步|Abu 24K|ABU 24K/);
     expect(screen.getByRole('heading', { name: '连接授权商家钱包' })).toBeTruthy();
     expect(screen.queryByLabelText(/密码/)).toBeNull();
-    const connect = screen.getByRole('button', { name: '连接钱包' }) as HTMLButtonElement;
+    const connect = screen.getByRole('button', { name: /连接钱包/ }) as HTMLButtonElement;
     await waitFor(() => expect(connect.disabled).toBe(true));
-    expect(screen.getByText(/Nonce、时间戳、授权商家校验/)).toBeTruthy();
+    expect(screen.getByText(/系统会自动确认钱包、网络和商家权限/)).toBeTruthy();
+  });
+
+  it('lets a new wallet submit a plain-language merchant application outside the login gate', async () => {
+    const user = userEvent.setup();
+    const walletRequest = installWallet();
+    const submitMerchantApplication = vi.fn(createMockCoreApi().submitMerchantApplication);
+    render(<MemoryRouter initialEntries={['/apply']}><App client={createMockCoreApi({ submitMerchantApplication })} /></MemoryRouter>);
+
+    expect(await screen.findByRole('heading', { name: '我要入驻商家' })).toBeTruthy();
+    await user.type(screen.getByLabelText('店铺名称'), '阿步金店');
+    await user.type(screen.getByLabelText('主体名称'), '阿步公司');
+    await user.type(screen.getByLabelText('证件编号'), 'PUBLIC123456');
+    await user.type(screen.getByLabelText('联系电话'), '13800138000');
+    const submit = screen.getByRole('button', { name: /提交申请/ });
+    await waitFor(() => expect((submit as HTMLButtonElement).disabled).toBe(false));
+    await user.click(submit);
+
+    expect(await screen.findByText('申请已提交')).toBeTruthy();
+    expect(submitMerchantApplication).toHaveBeenCalledWith(expect.objectContaining({
+      message: 'merchant.test wants you to sign in',
+      signature: '0xsigned',
+      shopName: '阿步金店',
+      legalName: '阿步公司',
+      legalId: 'PUBLIC123456',
+      contactPhone: '13800138000',
+    }));
+    expect(walletRequest.mock.calls.map(([request]) => request.method)).toEqual([
+      'eth_requestAccounts',
+      'eth_chainId',
+      'personal_sign',
+    ]);
   });
 
   it('rejects an authenticated wallet that lacks the merchant role', async () => {
@@ -483,12 +522,32 @@ describe('00 wallet gateway', () => {
     });
     render(<MemoryRouter><App client={client} /></MemoryRouter>);
 
-    const connect = screen.getByRole('button', { name: '连接钱包' });
+    const connect = screen.getByRole('button', { name: /连接钱包/ });
     await waitFor(() => expect((connect as HTMLButtonElement).disabled).toBe(false));
     await user.click(connect);
 
     expect((await screen.findByRole('alert')).textContent).toContain('没有商家工作台权限');
     expect(screen.getByRole('heading', { name: '连接授权商家钱包' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: '运营大盘' })).toBeNull();
+  });
+
+  it('shows a plain Chinese login error when a not-yet-approved wallet is rejected', async () => {
+    const user = userEvent.setup();
+    installWallet();
+    const client = createMockCoreApi({
+      verifySiwe: async () => {
+        throw new CoreApiError('Forbidden', 'Register this wallet in the existing BNM system before checkout');
+      },
+    });
+    render(<MemoryRouter><App client={client} /></MemoryRouter>);
+
+    const connect = screen.getByRole('button', { name: /连接钱包/ });
+    await waitFor(() => expect((connect as HTMLButtonElement).disabled).toBe(false));
+    await user.click(connect);
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('当前钱包还没有商家后台权限');
+    expect(alert.textContent).not.toMatch(/Register this wallet|BNM|checkout/i);
     expect(screen.queryByRole('heading', { name: '运营大盘' })).toBeNull();
   });
 
@@ -504,7 +563,7 @@ describe('00 wallet gateway', () => {
       }),
     });
     render(<MemoryRouter><App client={wrongWallet} /></MemoryRouter>);
-    const connect = screen.getByRole('button', { name: '连接钱包' });
+    const connect = screen.getByRole('button', { name: /连接钱包/ });
     await waitFor(() => expect((connect as HTMLButtonElement).disabled).toBe(false));
     await user.click(connect);
     expect((await screen.findByRole('alert')).textContent).toContain('实际签名钱包不一致');
@@ -515,10 +574,10 @@ describe('00 wallet gateway', () => {
       verifySiwe: async () => ({ token: 'unscoped-session', walletAddress, roles: ['MERCHANT'] }),
     });
     render(<MemoryRouter><App client={missingTenant} /></MemoryRouter>);
-    const retry = screen.getByRole('button', { name: '连接钱包' });
+    const retry = screen.getByRole('button', { name: /连接钱包/ });
     await waitFor(() => expect((retry as HTMLButtonElement).disabled).toBe(false));
     await user.click(retry);
-    expect((await screen.findByRole('alert')).textContent).toContain('缺少商家身份');
+    expect((await screen.findByRole('alert')).textContent).toContain('当前钱包没有绑定商家身份');
     expect(screen.queryByRole('heading', { name: '运营大盘' })).toBeNull();
   });
 
@@ -536,18 +595,18 @@ describe('01 authoritative dashboard', () => {
     const user = userEvent.setup();
     installWallet();
     render(<MemoryRouter><App client={createMockCoreApi({ getMerchantBusinessDashboard })} /></MemoryRouter>);
-    const connect = screen.getByRole('button', { name: '连接钱包' });
+    const connect = screen.getByRole('button', { name: /连接钱包/ });
     await waitFor(() => expect((connect as HTMLButtonElement).disabled).toBe(false));
     await user.click(connect);
 
-    expect(await screen.findByText('8000000000000000000000')).toBeTruthy();
-    expect(screen.getByText('5600000000000000000000')).toBeTruthy();
-    expect(screen.getByText('4800000000000000000000')).toBeTruthy();
-    expect(screen.getByText('3600000000000000000000')).toBeTruthy();
+    expect(await screen.findByText('8,000.00 USDT')).toBeTruthy();
+    expect(screen.getByText('5,600.00 USDT')).toBeTruthy();
+    expect(screen.getByText('4,800.00 USDT')).toBeTruthy();
+    expect(screen.getByText('3,600.00 USDT')).toBeTruthy();
     expect(screen.getByText('销售进行中')).toBeTruthy();
     expect(screen.getAllByText(/秒杀进行中/).length).toBeGreaterThan(0);
     expect(screen.getByText('Asia/Shanghai')).toBeTruthy();
-    expect(screen.getByText('5000 bps')).toBeTruthy();
+    expect(screen.getByText('50%')).toBeTruthy();
     expect(getMerchantBusinessDashboard).toHaveBeenCalledWith('test-session');
     expect(screen.getByRole('link', { name: /快递待发货订单3/ }).getAttribute('href')).toBe('/fulfillment');
   });
@@ -566,7 +625,7 @@ describe('01 authoritative dashboard', () => {
       listFulfillmentOrders,
       getOrderFulfillmentTarget,
     })} /></MemoryRouter>);
-    const connect = screen.getByRole('button', { name: '连接钱包' });
+    const connect = screen.getByRole('button', { name: /连接钱包/ });
     await waitFor(() => expect((connect as HTMLButtonElement).disabled).toBe(false));
     await user.click(connect);
 
@@ -597,11 +656,11 @@ describe('01 authoritative dashboard', () => {
       }),
       getMerchantBusinessDashboard,
     })} /></MemoryRouter>);
-    const connect = screen.getByRole('button', { name: '连接钱包' });
+    const connect = screen.getByRole('button', { name: /连接钱包/ });
     await waitFor(() => expect((connect as HTMLButtonElement).disabled).toBe(false));
     await user.click(connect);
 
-    expect(await screen.findByText('8000000000000000000000')).toBeTruthy();
+    expect(await screen.findByText('8,000.00 USDT')).toBeTruthy();
     expect(getMerchantBusinessDashboard).toHaveBeenCalledTimes(1);
     expect(screen.queryByText('SAFE_COVERAGE')).toBeNull();
   });
@@ -614,7 +673,7 @@ describe('01 authoritative dashboard', () => {
         throw new CoreApiError('NetworkUnavailable', 'dashboard offline');
       },
     })} /></MemoryRouter>);
-    const connect = screen.getByRole('button', { name: '连接钱包' });
+    const connect = screen.getByRole('button', { name: /连接钱包/ });
     await waitFor(() => expect((connect as HTMLButtonElement).disabled).toBe(false));
     await user.click(connect);
 
@@ -637,10 +696,10 @@ describe('02 one-product form', () => {
 
     expect(await screen.findByRole('heading', { name: '单品提报' })).toBeTruthy();
     expect((await screen.findByLabelText('商品标题') as HTMLInputElement).value).toBe('24K 足金金片');
-    expect(screen.getAllByText('690').length).toBeGreaterThan(0);
-    expect(screen.getByText('只读：Core 按 70% USDT 付款减 1% 服务费派生。')).toBeTruthy();
+    expect(screen.getAllByText('690.00 USDT').length).toBeGreaterThan(0);
+    expect(screen.getByText('只读：系统按 70% USDT 付款减 1% 服务费派生。')).toBeTruthy();
     expect((screen.getByLabelText('总库存') as HTMLInputElement).value).toBe('20');
-    expect(screen.getByText(/product-history-1/)).toBeTruthy();
+    expect(screen.getByText(/历史替代关系/)).toBeTruthy();
     expect(await screen.findByAltText('商品主图 1')).toBeTruthy();
     expect(screen.getByLabelText('商品视频')).toBeTruthy();
     expect(screen.queryByText('其他商家门店')).toBeNull();
@@ -690,7 +749,7 @@ describe('02 one-product form', () => {
         fulfillmentModes: ['DELIVERY', 'PICKUP'],
         skus: [expect.objectContaining({
           skuId: managedProduct.skus[0]!.skuId,
-          listPriceUsdt: '1000',
+          listPriceUsdt: '1000000000000000000000',
           stockTotal: 20,
           proposedSeckillInventory: 10,
         })],
@@ -699,13 +758,13 @@ describe('02 one-product form', () => {
       'test-session',
     );
 
-    await user.click(screen.getByRole('button', { name: '生成签名预览' }));
-    expect(await screen.findByRole('heading', { name: '商家让利预览' })).toBeTruthy();
-    expect(screen.getByText('秒杀奖池 45% / LOCKED')).toBeTruthy();
-    expect(screen.getByText('节点奖励池 45% / LOCKED')).toBeTruthy();
-    expect(screen.getByText('奖励预留池 10% / LOCKED')).toBeTruthy();
-    expect(screen.getByRole('cell', { name: '518' })).toBeTruthy();
-    expect(screen.getByText(/digest: 0x/)).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: '检查让利和应收' }));
+    expect(await screen.findByRole('heading', { name: '让利和应收检查' })).toBeTruthy();
+    expect(screen.getByText('秒杀奖池 45%')).toBeTruthy();
+    expect(screen.getByText('节点奖励池 45%')).toBeTruthy();
+    expect(screen.getByText('奖励预留池 10%')).toBeTruthy();
+    expect(screen.getByRole('cell', { name: '517.50 USDT' })).toBeTruthy();
+    expect(screen.getByText('高级签名凭证')).toBeTruthy();
     expect(createMerchantConcessionPreview).toHaveBeenCalledWith(
       managedProduct.productId,
       expect.objectContaining({ merchantConcessionBps: 2500 }),
@@ -718,8 +777,41 @@ describe('02 one-product form', () => {
       expect.objectContaining({ previewId: concessionPreview.previewId }),
       'test-session',
     ));
-    expect(await screen.findByText(/blockingResource: PRODUCT_STATE/)).toBeTruthy();
+    expect(await screen.findByText('商品暂时不能修改')).toBeTruthy();
+    expect(screen.getByText('高级锁定信息')).toBeTruthy();
     expect((screen.getByRole('button', { name: '保存草稿' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('keeps submit review disabled until a verified product image exists', async () => {
+    const productWithoutImages: ManagedCatalogProduct = {
+      ...managedProduct,
+      mainImageAssetIds: [],
+      videoAssetId: null,
+    };
+    const createMerchantConcessionPreview = vi.fn(async () => ({
+      ...concessionPreview,
+      productId: productWithoutImages.productId,
+      productVersion: productWithoutImages.version,
+    }));
+    const submitMerchantProductReview = vi.fn(async () => productWithoutImages);
+    const client = createMockCoreApi({
+      getMerchantProductSlot: async () => ({
+        ...productSlot,
+        product: productWithoutImages,
+        allowedActions: productWithoutImages.allowedActions,
+      }),
+      createMerchantConcessionPreview,
+      submitMerchantProductReview,
+    });
+    const user = await enterProduct(client);
+
+    await user.click(await screen.findByRole('button', { name: '检查让利和应收' }));
+
+    expect(await screen.findByText('待完成：商品主图 1 到 5 张')).toBeTruthy();
+    const submitButton = screen.getByRole('button', { name: '提交平台审核' }) as HTMLButtonElement;
+    expect(submitButton.disabled).toBe(true);
+    expect(submitButton.title).toBe('请先上传 1 到 5 张商品主图，然后保存草稿。');
+    expect(submitMerchantProductReview).not.toHaveBeenCalled();
   });
 
   it('renders the exact Core blocking resource and never unlocks a review product locally', async () => {
@@ -740,7 +832,8 @@ describe('02 one-product form', () => {
 
     await enterProduct(client);
 
-    expect(await screen.findByText('blockingResource: SECKILL_SESSION / session-24k-1 / LIVE')).toBeTruthy();
+    expect(await screen.findByText('商品暂时不能修改')).toBeTruthy();
+    expect(screen.getByText('高级锁定信息')).toBeTruthy();
     expect((screen.getByLabelText('商品标题') as HTMLInputElement).disabled).toBe(true);
     expect((screen.getByRole('button', { name: '保存草稿' }) as HTMLButtonElement).disabled).toBe(true);
   });
@@ -766,10 +859,14 @@ describe('02 one-product form', () => {
         resourceId: managedProduct.productId,
         contentType: 'image/webp',
         sizeBytes: 512,
+        idempotencyKey: expect.stringMatching(/^[A-Za-z0-9:_-]{8,128}$/),
       }),
       'test-session',
       walletAddress,
     );
+    const productUploadCalls = createMediaUploadIntent.mock.calls as unknown as Array<[MediaUploadIntentRequest, string, string]>;
+    const productUploadKey = productUploadCalls[0]?.[0].idempotencyKey;
+    expect(productUploadKey?.length).toBeLessThanOrEqual(128);
     expect(providerFetch).toHaveBeenCalledWith(mediaUploadIntent.uploadUrl, expect.objectContaining({ method: 'PUT' }));
     expect(await screen.findByText(/请保存草稿以绑定到商品/)).toBeTruthy();
   });
@@ -805,12 +902,12 @@ describe('03 fulfillment center', () => {
 
     expect(await screen.findByText('陈先生')).toBeTruthy();
     expect(screen.getByText('北京市东城区仓储路 24 号')).toBeTruthy();
-    expect(screen.getAllByText('BNM_POINTS').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('BNM').length).toBeGreaterThan(0);
     expect(screen.getByText('FinalityPending')).toBeTruthy();
     expect(getOrderFulfillmentTarget).toHaveBeenCalledWith(deliveryOrderId, 'test-session');
-    expect(screen.getAllByText('SECKILL').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('秒杀订单').length).toBeGreaterThan(0);
     expect(screen.getAllByText('2').length).toBeGreaterThan(0);
-    expect(screen.getAllByText(deliveryOrder.paymentTxHash!).length).toBeGreaterThan(0);
+    expect(document.querySelector(`[title="${deliveryOrder.paymentTxHash}"]`)).toBeTruthy();
   });
 
   it('serializes Core order filters and advances with the complete stable cursor', async () => {
@@ -823,7 +920,7 @@ describe('03 fulfillment center', () => {
       limit: 100,
       fulfillmentMode: 'DELIVERY',
     }));
-    await user.type(screen.getByLabelText('SKU 筛选'), 'sku-delivery');
+    await user.type(screen.getByLabelText('规格编号筛选'), 'sku-delivery');
     await user.selectOptions(screen.getByLabelText('订单状态'), 'DELIVERED');
     await user.selectOptions(screen.getByLabelText('订单类型'), 'SECKILL');
     await user.click(screen.getByRole('button', { name: '应用筛选' }));
@@ -868,7 +965,7 @@ describe('03 fulfillment center', () => {
 
     fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2026-07-01T00:00' } });
     fireEvent.change(screen.getByLabelText('结束时间'), { target: { value: '2026-07-15T00:00' } });
-    await user.type(screen.getByLabelText('SKU 筛选'), 'sku-delivery');
+    await user.type(screen.getByLabelText('规格编号筛选'), 'sku-delivery');
     await user.selectOptions(screen.getByLabelText('订单状态'), 'DELIVERED');
     await user.selectOptions(screen.getByLabelText('订单类型'), 'SECKILL');
     await user.click(screen.getByRole('button', { name: '应用筛选' }));
@@ -891,7 +988,7 @@ describe('03 fulfillment center', () => {
       limit: 1_000,
       idempotencyKey: expect.stringMatching(/^merchant-order-export-/),
     }), 'test-session'));
-    await screen.findByText('已下载 1 笔 Core 授权订单。');
+    await screen.findByText('已下载 1 笔订单。');
     expect(createObjectUrl).toHaveBeenCalledWith(expect.any(Blob));
     expect(click).toHaveBeenCalledTimes(1);
     expect(revokeObjectUrl).toHaveBeenCalledWith('blob:merchant-orders');
@@ -963,9 +1060,9 @@ describe('03 fulfillment center', () => {
     await screen.findByRole('button', { name: '导出 Excel' });
 
     await user.click(screen.getByRole('button', { name: '导出 Excel' }));
-    expect((await screen.findByRole('alert')).textContent).toContain('导出权限被拒绝（403）');
+    expect((await screen.findByRole('alert')).textContent).toContain('导出权限被拒绝：merchant export denied');
     await user.click(screen.getByRole('button', { name: '导出 Excel' }));
-    expect((await screen.findByRole('alert')).textContent).toContain('导出状态已变化（409）');
+    expect((await screen.findByRole('alert')).textContent).toContain('导出状态已变化：order changed during export');
     expect(exportMerchantOrders).toHaveBeenCalledTimes(2);
     expect(exportMerchantOrders.mock.calls[0]?.[0].idempotencyKey)
       .toBe(exportMerchantOrders.mock.calls[1]?.[0].idempotencyKey);
@@ -994,10 +1091,10 @@ describe('03 fulfillment center', () => {
     await user.click(await screen.findByRole('button', { name: `处理订单 ${deliveryOrderId}` }));
     await screen.findByText('陈先生');
 
-    await user.type(screen.getByLabelText('申请原因代码'), 'delivered_review');
+    await user.type(screen.getByLabelText('申请原因'), 'delivered_review');
     await user.click(screen.getByRole('button', { name: '申请平台审核' }));
 
-    expect(await screen.findByText(/forced-receipt-result/)).toBeTruthy();
+    expect(await screen.findByText(/平台审核申请已提交/)).toBeTruthy();
     expect(requestForcedReceipt).toHaveBeenCalledWith(
       deliveryOrderId,
       expect.objectContaining({
@@ -1066,11 +1163,11 @@ describe('03 fulfillment center', () => {
     const user = await enterFulfillment(client);
     await user.click(screen.getByRole('button', { name: '到店自提' }));
     await user.click(await screen.findByRole('button', { name: `处理订单 ${pickupOrderId}` }));
-    expect((await screen.findByDisplayValue(pickupTarget.storeId) as HTMLInputElement).readOnly).toBe(true);
+    expect((await screen.findByDisplayValue(pickupTarget.payload.name) as HTMLInputElement).readOnly).toBe(true);
     await user.click(screen.getByRole('button', { name: '启动相机扫码' }));
     expect((await screen.findByRole('alert')).textContent).toContain('请手工输入六位核销码');
     await user.type(screen.getByLabelText('六位核销码'), '123456');
-    await user.type(screen.getByLabelText('门店核销证据哈希'), evidenceHash);
+    await user.type(screen.getByLabelText('核销凭证编号（高级）'), evidenceHash);
     await user.click(screen.getByRole('button', { name: '确认门店核销' }));
 
     expect(await screen.findByText(/2026-07-14T12:05:00.000Z/)).toBeTruthy();
@@ -1129,7 +1226,7 @@ describe('03 fulfillment center', () => {
 
     await waitFor(() => expect((screen.getByLabelText('六位核销码') as HTMLInputElement).value).toBe('654321'));
     expect(stop).toHaveBeenCalledTimes(1);
-    await user.type(screen.getByLabelText('门店核销证据哈希'), evidenceHash);
+    await user.type(screen.getByLabelText('核销凭证编号（高级）'), evidenceHash);
     await user.click(screen.getByRole('button', { name: '确认门店核销' }));
     await waitFor(() => expect(verifyPickup).toHaveBeenCalledWith(
       pickupOrderId,
@@ -1152,7 +1249,7 @@ describe('03 fulfillment center', () => {
     const user = await enterFulfillment(client);
     await user.click(screen.getByRole('button', { name: '到店自提' }));
     await user.click(await screen.findByRole('button', { name: `处理订单 ${pickupOrderId}` }));
-    await screen.findByDisplayValue(pickupTarget.storeId);
+    await screen.findByDisplayValue(pickupTarget.payload.name);
 
     expect((screen.getByLabelText('六位核销码') as HTMLInputElement).disabled).toBe(true);
     expect((screen.getByRole('button', { name: '确认门店核销' }) as HTMLButtonElement).disabled).toBe(true);
@@ -1190,13 +1287,13 @@ describe('03b assigned takeover fulfillment', () => {
 
     await user.click(await screen.findByRole('button', { name: '处理案件' }));
     expect(await screen.findByText(deliveryTarget.payload.address)).toBeTruthy();
-    expect(screen.getByText(takeoverCaseDetail.case.currentAssignment!.evidenceHash)).toBeTruthy();
+    expect(document.querySelector(`[title="${takeoverCaseDetail.case.currentAssignment!.evidenceHash}"]`)).toBeTruthy();
     const confirm = screen.getByRole('button', { name: '确认发货' }) as HTMLButtonElement;
     expect(confirm.disabled).toBe(true);
 
     await user.type(screen.getByLabelText('物流单号'), 'SF-REPLACEMENT-001');
     await user.click(screen.getByRole('button', { name: '创建物流证据' }));
-    expect(await screen.findByText('Core 已封存物流证据')).toBeTruthy();
+    expect(await screen.findByText('系统已保存物流凭证')).toBeTruthy();
     expect(confirm.disabled).toBe(false);
     await user.click(confirm);
 
@@ -1239,7 +1336,7 @@ describe('03b assigned takeover fulfillment', () => {
     await screen.findByText(deliveryTarget.payload.address);
     expect((screen.getByLabelText('物流单号') as HTMLInputElement).disabled).toBe(true);
     expect((screen.getByRole('button', { name: '创建物流证据' }) as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByText(/仅 `FUNDED`/)).toBeTruthy();
+    expect(screen.getByText(/仅“已资助”/)).toBeTruthy();
     expect(createOrderTrackingEvidence).not.toHaveBeenCalled();
   });
 
@@ -1419,6 +1516,10 @@ describe('04 store controls', () => {
       getMediaReadAccess,
     }));
 
+    expect(await screen.findByText('已营业，无需重复激活')).toBeTruthy();
+    expect(screen.queryByText('当前门店状态不允许该操作')).toBeNull();
+    expect((screen.getByRole('button', { name: '已激活' }) as HTMLButtonElement).disabled).toBe(true);
+
     await user.click(await screen.findByRole('button', { name: '新增门店' }));
     const createForm = screen.getByRole('heading', { name: '新建门店草稿' }).closest('form')!;
     await user.type(within(createForm).getByLabelText('门店名称'), '浦东黄金店');
@@ -1427,9 +1528,7 @@ describe('04 store controls', () => {
     await user.type(within(createForm).getByLabelText('省'), '上海市');
     await user.type(within(createForm).getByLabelText('市'), '上海市');
     await user.type(within(createForm).getByLabelText('区县'), '浦东新区');
-    await user.type(within(createForm).getByLabelText('6 位行政区代码'), '310115');
-    await user.type(within(createForm).getByLabelText('经度'), '121.506');
-    await user.type(within(createForm).getByLabelText('纬度'), '31.245');
+    await user.type(within(createForm).getByLabelText('地区代码（6 位）'), '310115');
     await user.type(within(createForm).getByLabelText('详细地址'), '上海市浦东新区世纪大道 24 号');
     await user.click(within(createForm).getByRole('button', { name: '创建草稿' }));
 
@@ -1442,11 +1541,11 @@ describe('04 store controls', () => {
       city: '上海市',
       district: '浦东新区',
       regionCode: '310115',
-      longitude: 121.506,
-      latitude: 31.245,
+      longitude: 121.6147,
+      latitude: 38.914,
       idempotencyKey: expect.stringMatching(/^merchant-create-store-/),
     }), 'test-session');
-    expect(screen.getByText(/门店位置已锁定/)).toBeTruthy();
+    expect(screen.getByText('地址已固定')).toBeTruthy();
 
     const imageInput = document.querySelector<HTMLInputElement>('input[type="file"][multiple]');
     expect(imageInput).toBeTruthy();
@@ -1458,7 +1557,11 @@ describe('04 store controls', () => {
       resourceId: 'store-created-1',
       contentType: 'image/webp',
       sizeBytes: 512,
+      idempotencyKey: expect.stringMatching(/^merchant-store-image-[A-Za-z0-9:_-]+$/),
     }), 'test-session', walletAddress);
+    const storeUploadCalls = createMediaUploadIntent.mock.calls as unknown as Array<[MediaUploadIntentRequest, string, string]>;
+    const storeUploadKey = storeUploadCalls[0]?.[0].idempotencyKey;
+    expect(storeUploadKey?.length).toBeLessThanOrEqual(128);
     expect(providerFetch).toHaveBeenCalledWith(storeImageUploadIntent.uploadUrl, expect.objectContaining({ method: 'PUT' }));
 
     await user.click(screen.getByRole('button', { name: '保存资料' }));
@@ -1500,16 +1603,14 @@ describe('04 store controls', () => {
     await user.type(within(createForm).getByLabelText('省'), '上海市');
     await user.type(within(createForm).getByLabelText('市'), '上海市');
     await user.type(within(createForm).getByLabelText('区县'), '浦东新区');
-    await user.type(within(createForm).getByLabelText('经度'), '121.506');
-    await user.type(within(createForm).getByLabelText('纬度'), '31.245');
     await user.type(within(createForm).getByLabelText('详细地址'), '上海市浦东新区世纪大道 24 号');
 
     expect(createButton.disabled).toBe(true);
-    await user.type(within(createForm).getByLabelText('6 位行政区代码'), '310115');
+    await user.type(within(createForm).getByLabelText('地区代码（6 位）'), '310115');
     expect(createButton.disabled).toBe(false);
     await user.click(createButton);
 
-    expect((await within(createForm).findByRole('alert')).textContent).toMatch(/ConfigurationRequired/);
+    expect((await within(createForm).findByRole('alert')).textContent).toMatch(/门店配置不完整/);
     expect(within(createForm).getByDisplayValue('上海市浦东新区世纪大道 24 号')).toBeTruthy();
     expect(screen.queryByText(/门店草稿已创建/)).toBeNull();
     expect(createMerchantStore).toHaveBeenCalledTimes(1);
@@ -1526,7 +1627,7 @@ describe('04 store controls', () => {
     const { user } = await enterStores(createMockCoreApi({ listManagedMerchantStores, updateMerchantStore }));
     await user.click(await screen.findByRole('button', { name: '保存资料' }));
 
-    expect((await screen.findByRole('alert')).textContent).toMatch(/409 状态或版本冲突/);
+    expect((await screen.findByRole('alert')).textContent).toMatch(/门店版本已变更/);
     expect(screen.getByText('营业中 · v8')).toBeTruthy();
     expect(listManagedMerchantStores).toHaveBeenCalledTimes(2);
 
@@ -1536,7 +1637,7 @@ describe('04 store controls', () => {
     });
     const forbidden = await enterStores(createMockCoreApi({ updateMerchantStore: forbiddenUpdate }));
     await forbidden.user.click(await screen.findByRole('button', { name: '保存资料' }));
-    expect((await screen.findByRole('alert')).textContent).toMatch(/403 无权执行/);
+    expect((await screen.findByRole('alert')).textContent).toMatch(/当前钱包没有权限|无权修改该门店/);
     expect(screen.queryByText(/门店资料已保存/)).toBeNull();
   });
 
@@ -1550,7 +1651,7 @@ describe('04 store controls', () => {
       applyMerchantPrinterBinding,
     }));
     expect(await screen.findByText(merchantStore.address)).toBeTruthy();
-    const region = screen.getByLabelText('6 位行政区划代码') as HTMLInputElement;
+    const region = screen.getByLabelText('地区代码') as HTMLInputElement;
     expect(region.disabled).toBe(true);
     expect(region.readOnly).toBe(true);
     expect(screen.queryByText(/核销云打印机|打印服务|Device ID/)).toBeNull();
@@ -1568,52 +1669,43 @@ describe('05 asset rails', () => {
     expect(await screen.findByRole('heading', { name: 'USDT 商家货款' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'NPL 收益子类' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'BNM 积分总额' })).toBeTruthy();
-    expect(await screen.findByText('8000000000000000000000')).toBeTruthy();
+    expect(await screen.findByText('8,000.00 USDT')).toBeTruthy();
     expect(screen.getByText(/2026-07-14T16:00:00.000Z 至 2026-07-15T16:00:00.000Z/)).toBeTruthy();
     expect(screen.getByLabelText('USDT 商家货款五状态余额')).toBeTruthy();
     expect(screen.getByRole('heading', { name: '逐单应收账单' })).toBeTruthy();
     expect(screen.queryByText(/秒杀额外分成|DecisionBlocked/)).toBeNull();
     const nplRewards = screen.getByLabelText('NPL 奖励收益子类');
-    for (const subtype of rewardSubtypes) expect(within(nplRewards).getByText(subtype)).toBeTruthy();
-    expect(within(nplRewards).getByText('2108')).toBeTruthy();
-    const bnmPoints = screen.getByLabelText('BNM Locked/Available 聚合');
-    expect(within(bnmPoints).getByText('8800')).toBeTruthy();
-    expect(within(bnmPoints).getByText('3600')).toBeTruthy();
-    expect(screen.getByText(/BNM 是不可转移的后台积分/)).toBeTruthy();
+    for (const label of ['创世奖励', '直推奖励', '区县奖励', '城市奖励', '省级奖励', '大区奖励', '运维奖励', '取整余额']) {
+      expect(within(nplRewards).getByText(label)).toBeTruthy();
+    }
+    const bnmPoints = screen.getByLabelText('BNM 锁定和可用汇总');
+    expect(screen.getByText(/BNM 是后台积分/)).toBeTruthy();
     expect(within(bnmPoints).queryByRole('button')).toBeNull();
-    expect(screen.getByText('45000000000000000000')).toBeTruthy();
-    expect(screen.getAllByText(`0x${'7'.repeat(64)}`).length).toBeGreaterThan(0);
-    expect(screen.getByRole('link', { name: new RegExp(`0x${'9'.repeat(64)}`) }).getAttribute('href'))
-      .toBe(`https://bscscan.com/tx/0x${'9'.repeat(64)}`);
-    expect(screen.getByText('REORGED')).toBeTruthy();
-    expect(screen.getByText('15 / 15')).toBeTruthy();
-    expect(screen.getByText('takeover-1')).toBeTruthy();
-    expect(screen.getAllByText('200000000000000000000').length).toBeGreaterThan(0);
-    expect(screen.queryByText(/CLAIM_MERCHANT_USDT|ClaimVault|PaymentEscrow/)).toBeNull();
+    expect(screen.queryByText(/一键缴纳保证金|保证金收款钱包|手动补录|CLAIM_MERCHANT_USDT|ClaimVault|PaymentEscrow/)).toBeNull();
   });
 
   it('renders authoritative per-order journals and loads the next stable cursor page', async () => {
     const listMerchantReceivableStatements = vi.fn(createMockCoreApi().listMerchantReceivableStatements);
     const { user } = await enterAssets(createMockCoreApi({ listMerchantReceivableStatements }));
 
-    const firstOrderIds = await screen.findAllByText(merchantReceivableStatements.statements[0]!.orderId);
+    const firstOrderIds = await screen.findAllByText(shortTestId(merchantReceivableStatements.statements[0]!.orderId));
     expect(firstOrderIds.length).toBeGreaterThan(0);
-    expect(screen.getByText('SECKILL')).toBeTruthy();
-    expect(screen.getByText('ORDINARY')).toBeTruthy();
+    expect(screen.getByText('秒杀订单')).toBeTruthy();
+    expect(screen.getByText('普通订单')).toBeTruthy();
     const firstStatement = firstOrderIds[0]!.closest('details')!;
     await user.click(firstOrderIds[0]!);
     expect(within(firstStatement).getByText('冻结金额快照')).toBeTruthy();
-    expect(within(firstStatement).getByText('平台技术服务费').parentElement?.textContent).toBe('平台技术服务费120');
-    expect(within(firstStatement).getByText('Custody 商品 USDT').parentElement?.textContent).toBe('Custody 商品 USDT8280');
-    expect(within(firstStatement).getAllByText('journal:a:lifecycle')).toHaveLength(2);
-    expect(within(firstStatement).getByText('journal:a:requested')).toBeTruthy();
-    expect(within(firstStatement).getByRole('link', { name: new RegExp(`0x${'b'.repeat(64)}`) }).getAttribute('href'))
+    expect(within(firstStatement).getByText('平台服务费').parentElement?.textContent).toBe('平台服务费120.00 USDT');
+    expect(within(firstStatement).getByText('商家货款 USDT').parentElement?.textContent).toBe('商家货款 USDT8,280.00 USDT');
+    expect(within(firstStatement).getAllByText(shortTestId('journal:a:lifecycle'))).toHaveLength(2);
+    expect(within(firstStatement).getByText(shortTestId('journal:a:requested'))).toBeTruthy();
+    expect(within(firstStatement).getByTitle(`0x${'b'.repeat(64)}`).closest('a')?.getAttribute('href'))
       .toBe(`https://bscscan.com/tx/0x${'b'.repeat(64)}`);
 
     await user.click(screen.getByRole('button', { name: '加载下一页' }));
-    expect((await screen.findAllByText(merchantReceivableStatementsNext.statements[0]!.orderId)).length)
+    expect((await screen.findAllByText(shortTestId(merchantReceivableStatementsNext.statements[0]!.orderId))).length)
       .toBeGreaterThan(0);
-    expect(screen.getByText('FALLBACK_RETAIL')).toBeTruthy();
+    expect(screen.getByText('常规兜底订单')).toBeTruthy();
     expect(listMerchantReceivableStatements).toHaveBeenNthCalledWith(1, 'test-session', { limit: 20 });
     expect(listMerchantReceivableStatements).toHaveBeenNthCalledWith(2, 'test-session', {
       cursor: merchantReceivableStatements.nextCursor,
@@ -1628,7 +1720,7 @@ describe('05 asset rails', () => {
         throw new CoreApiError('Unauthorized', '商家会话已失效。', 'corr-receivable-auth');
       },
     }));
-    expect(await screen.findByText(/Unauthorized：商家会话已失效.*corr-receivable-auth/)).toBeTruthy();
+    expect(await screen.findByText(/请先连接正确钱包：商家会话已失效.*corr-receivable-auth/)).toBeTruthy();
 
     cleanup();
     await enterAssets(createMockCoreApi({
@@ -1648,14 +1740,14 @@ describe('05 asset rails', () => {
       createSettlementIntent,
       submitSettlementRequest,
     }));
-    await screen.findByText('45000000000000000000');
+    await screen.findByText('45.00 USDT');
 
-    await user.type(screen.getByLabelText('申请金额（USDT 最小单位）'), '45000000000000000000');
+    await user.type(screen.getByLabelText('申请金额（USDT）'), '45.00');
     const submit = screen.getByRole('button', { name: '签名并提交结算申请' });
     await waitFor(() => expect((submit as HTMLButtonElement).disabled).toBe(false));
     await user.click(submit);
 
-    expect(await screen.findByText(/settlement-request-requested/)).toBeTruthy();
+    expect(await screen.findByText(/结算请求已提交/)).toBeTruthy();
     expect(createSettlementIntent).toHaveBeenCalledWith({
       rail: 'MERCHANT_USDT',
       amount: '45000000000000000000',
@@ -1670,54 +1762,46 @@ describe('05 asset rails', () => {
     }, 'test-session');
   });
 
-  it('submits only the published guarantee evidence fields and keeps a frozen merchant fail closed', async () => {
-    const submitGuaranteeDeposit = vi.fn(createMockCoreApi().submitGuaranteeDeposit);
-    const { user } = await enterAssets(createMockCoreApi({ submitGuaranteeDeposit }));
-    expect((await screen.findAllByText('1200000000000000000000')).length).toBeGreaterThan(0);
-    const transactionHash = `0x${'0'.repeat(64)}`;
-
-    await user.type(screen.getByLabelText('Policy version'), '9');
-    await user.type(screen.getByLabelText('预期金额（USDT 最小单位）'), '1000000000000000000000');
-    await user.type(screen.getByLabelText('BSC Transfer TxHash'), transactionHash);
-    await user.click(screen.getByRole('button', { name: '提交保证金交易证据' }));
-
-    expect(await screen.findByText(/guarantee-submitted/)).toBeTruthy();
-    expect(submitGuaranteeDeposit).toHaveBeenCalledWith({
-      policyVersion: '9',
-      expectedAmountUsdt: '1000000000000000000000',
-      transactionHash,
-      idempotencyKey: expect.stringMatching(/^merchant-guarantee-deposit-/),
-    }, 'test-session');
-
-    cleanup();
-    const frozenFinance = {
+  it('hides the guarantee module and lets Core allowedActions control settlement', async () => {
+    const blockedFinance = {
       ...merchantFinance,
-      merchant: { ...merchantFinance.merchant, guarantee_status: 'FROZEN' as const },
+      merchant: { ...merchantFinance.merchant, guarantee_status: 'DECISION_BLOCKED' as const },
+      guarantee: null,
+      guaranteeDeposits: [],
       allowedActions: [],
       settlementEligibility: { mode: 'BLOCKED' as const, expiresAt: null },
     };
-    const frozen = await enterAssets(createMockCoreApi({ getMerchantFinance: async () => frozenFinance }));
-    expect((await screen.findAllByText(/APPROVED \/ FROZEN/)).length).toBeGreaterThan(0);
-    await frozen.user.type(screen.getByLabelText('申请金额（USDT 最小单位）'), '1');
+    const submitGuaranteeDeposit = vi.fn(createMockCoreApi().submitGuaranteeDeposit);
+    const blocked = await enterAssets(createMockCoreApi({
+      getMerchantFinance: async () => blockedFinance,
+      submitGuaranteeDeposit,
+    }));
+
+    expect(await screen.findByRole('heading', { name: '资产清算中心' })).toBeTruthy();
+    expect(screen.queryByText(/一键缴纳保证金|待缴纳保证金|保证金收款钱包|手动补录|TxHash|1,000\.00 USDT/)).toBeNull();
+    expect(screen.queryByText(/保证金充值暂未开放|保证金未开放|保证金不足/)).toBeNull();
+    await blocked.user.type(screen.getByLabelText('申请金额（USDT）'), '1');
     expect((screen.getByRole('button', { name: '签名并提交结算申请' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(submitGuaranteeDeposit).not.toHaveBeenCalled();
+    expect(blocked.walletRequest.mock.calls.some(([request]) => request.method === 'eth_sendTransaction')).toBe(false);
 
     cleanup();
-    const microtestFinance = {
+    const allowedBelowMinimumFinance = {
       ...merchantFinance,
       merchant: { ...merchantFinance.merchant, guarantee_status: 'BELOW_MINIMUM' as const },
+      guarantee: null,
+      guaranteeDeposits: [],
       allowedActions: ['REQUEST_MERCHANT_USDT' as const],
-      settlementEligibility: {
-        mode: 'MAINNET_MICROTEST' as const,
-        expiresAt: '2026-07-20T12:00:00.000Z',
-      },
+      settlementEligibility: { mode: 'FORMAL' as const, expiresAt: null },
     };
-    const microtest = await enterAssets(createMockCoreApi({ getMerchantFinance: async () => microtestFinance }));
-    expect(await screen.findByText('仅授权受控主网微测')).toBeTruthy();
-    expect(screen.getAllByText(/BELOW_MINIMUM/).length).toBeGreaterThan(0);
-    await microtest.user.type(screen.getByLabelText('申请金额（USDT 最小单位）'), '1');
-    expect((screen.getByRole('button', { name: '签名并提交结算申请' }) as HTMLButtonElement).disabled).toBe(false);
+    const allowed = await enterAssets(createMockCoreApi({ getMerchantFinance: async () => allowedBelowMinimumFinance }));
+    expect(await screen.findByRole('heading', { name: '资产清算中心' })).toBeTruthy();
+    expect(screen.queryByText(/一键缴纳保证金|保证金不足|仅授权受控主网微测/)).toBeNull();
+    await allowed.user.type(screen.getByLabelText('申请金额（USDT）'), '1');
+    await waitFor(() => expect((screen.getByRole('button', { name: '签名并提交结算申请' }) as HTMLButtonElement).disabled).toBe(false));
   });
 });
+
 
 describe('06 audit and 07 rules', () => {
   it('loads tenant profile and audit, saves only editable fields and keeps settlement wallet read-only', async () => {
@@ -1727,12 +1811,12 @@ describe('06 audit and 07 rules', () => {
 
     const name = await screen.findByLabelText('店铺名称') as HTMLInputElement;
     expect(name.value).toBe('阿步金店');
-    expect(screen.getByText(merchantProfile.settlementWallet)).toBeTruthy();
+    expect(document.querySelector(`[title="${merchantProfile.settlementWallet}"]`)).toBeTruthy();
     expect(screen.getByText('普通编辑不可更换')).toBeTruthy();
     expect(await screen.findByText('SettlementRequestAuthorized')).toBeTruthy();
-    expect(screen.getByText(/PARTIAL_PRE_MERCHANT_SCOPE/)).toBeTruthy();
-    expect(screen.getByText(/不代表全局链证明/)).toBeTruthy();
-    expect(screen.getByText(/ExternalBlocked/)).toBeTruthy();
+    expect(screen.getByText('商家范围说明')).toBeTruthy();
+    expect(screen.getByText(/较早的历史日志可能不完整/)).toBeTruthy();
+    expect(screen.getByText(/实体打印机与设备验收暂未开放/)).toBeTruthy();
 
     await user.clear(name);
     await user.type(name, '阿步新金店');
@@ -1851,7 +1935,7 @@ describe('06 audit and 07 rules', () => {
       screen.getByLabelText('上传 Logo'),
       new File([new Uint8Array([1, 2, 3, 4])], 'logo.png', { type: 'image/png' }),
     );
-    expect((await screen.findByRole('alert')).textContent).toContain('ConfigurationRequired');
+    expect((await screen.findByRole('alert')).textContent).toContain('系统配置未完成');
   });
 
   it('downloads the exact bounded CSV returned by Core with the active filters', async () => {
@@ -1922,7 +2006,7 @@ describe('06 audit and 07 rules', () => {
     const user = userEvent.setup();
     installWallet();
     render(<MemoryRouter><App client={createMockCoreApi({ listPublicCms })} /></MemoryRouter>);
-    const connect = screen.getByRole('button', { name: '连接钱包' });
+    const connect = screen.getByRole('button', { name: /连接钱包/ });
     await waitFor(() => expect((connect as HTMLButtonElement).disabled).toBe(false));
     await user.click(connect);
     const navigation = await screen.findByRole('navigation', { name: '商家工作台导航' });
@@ -1930,15 +2014,15 @@ describe('06 audit and 07 rules', () => {
 
     expect(await screen.findByRole('heading', { name: '秒杀履约与结算' })).toBeTruthy();
     expect(listPublicCms).toHaveBeenCalledWith('test-session');
-    expect(screen.getByText('Policy 8')).toBeTruthy();
-    expect(screen.getByText(/Locked 进入 Available/)).toBeTruthy();
+    expect(screen.getByText('8')).toBeTruthy();
+    expect(screen.getByText(/锁定中.*后续状态/)).toBeTruthy();
     expect(screen.getByText(/1% USDT 进入技术服务费钱包/)).toBeTruthy();
     expect(screen.getByText(/商家不获得额外秒杀收益/)).toBeTruthy();
     expect(screen.getByText(/创世节点 2% NPL 不使用 NFT/)).toBeTruthy();
     expect(screen.getByText(/人工只审核有效性且不得更换获奖人/)).toBeTruthy();
     expect(screen.getByRole('heading', { name: '7 天未发货进入平台接管' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: '商家不能直接确认签收' })).toBeTruthy();
-    expect(screen.getByText(/保证金 → 冻结应收 → 未来货款/)).toBeTruthy();
+    expect(screen.getByText(/当前启动版本不收商家保证金/)).toBeTruthy();
   });
 });
 
@@ -1953,6 +2037,6 @@ describe('workspace accessibility', () => {
     expect(screen.getByRole('button', { name: '打开导航' })).toBeTruthy();
     expect(screen.getByRole('main')).toBeTruthy();
     expect(screen.getByText(artifactVersion)).toBeTruthy();
-    expect(await screen.findByText('三批 Core 能力已连接')).toBeTruthy();
+    expect((await screen.findAllByText('系统已连接')).length).toBeGreaterThan(0);
   });
 });

@@ -240,6 +240,23 @@ export interface MerchantSession extends SiweSession {
   merchantId: string;
 }
 
+export interface PublicMerchantApplicationRequest {
+  message: string;
+  signature: string;
+  shopName: string;
+  legalName: string;
+  legalId: string;
+  contactPhone: string;
+  idempotencyKey: string;
+}
+
+export interface PublicMerchantApplicationResult {
+  merchantId: string;
+  settlementWallet: string;
+  status: string;
+  shopName: string | null;
+}
+
 export interface ConcessionPreviewRequest {
   merchantConcessionBps: number;
   idempotencyKey: string;
@@ -297,6 +314,7 @@ export interface CoreApi {
   bootstrap(): Promise<CoreBootstrap>;
   createSiweChallenge(walletAddress: string): Promise<SiweChallenge>;
   verifySiwe(message: string, signature: string): Promise<SiweSession>;
+  submitMerchantApplication(input: PublicMerchantApplicationRequest): Promise<PublicMerchantApplicationResult>;
   listCatalog(): Promise<readonly CatalogProduct[]>;
   listCatalogCategories(): Promise<readonly CatalogCategory[]>;
   listCatalogTags(): Promise<readonly CatalogTag[]>;
@@ -492,6 +510,13 @@ export function createCoreApi(baseUrl = import.meta.env.VITE_CORE_API_BASE_URL ?
           ? {}
           : { merchantId: string(value.merchantId, 'merchantId') }),
       };
+    },
+
+    async submitMerchantApplication(input) {
+      return parsePublicMerchantApplication(await request(normalizedBaseUrl, '/v2/public/merchant-applications', {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }));
     },
 
     async listCatalog() {
@@ -1058,6 +1083,18 @@ function parseReadiness(input: unknown): CoreReadiness {
     paymentExternalBlocked: stringArray(value.paymentExternalBlocked, 'paymentExternalBlocked'),
     providers: parsedProviders,
     writesEnabled: boolean(value.writesEnabled, 'writesEnabled'),
+  };
+}
+
+function parsePublicMerchantApplication(input: unknown): PublicMerchantApplicationResult {
+  const value = record(input, 'merchant application response');
+  exact(value.artifactVersion, artifactVersion, 'artifactVersion');
+  const merchant = record(value.merchant, 'merchant application merchant');
+  return {
+    merchantId: string(merchant.merchantId, 'merchantId'),
+    settlementWallet: address(merchant.settlementWallet, 'settlementWallet').toLowerCase(),
+    status: string(merchant.status, 'status'),
+    shopName: nullableString(merchant.shopName, 'shopName'),
   };
 }
 

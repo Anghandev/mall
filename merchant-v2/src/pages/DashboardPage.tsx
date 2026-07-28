@@ -14,6 +14,7 @@ import type {
 } from '@abu24k/core-artifacts';
 import { readableError, useCoreRuntime } from '../core-runtime';
 import { EmptyState, LoadingRows, Metric, PageHeader } from '../components/ui';
+import { formatBpsAsPercent, formatUsdt } from '../display';
 
 type LoadState =
   | { phase: 'idle' | 'loading' }
@@ -68,7 +69,7 @@ export function DashboardPage() {
 
   const dashboard = state.phase === 'ready' ? state.value : undefined;
   const loadHint = state.phase === 'loading'
-    ? '正在读取 Core 权威聚合'
+    ? '正在读取系统最新数据'
     : state.phase === 'error'
       ? state.message
       : '需要已验证的商家会话';
@@ -79,10 +80,10 @@ export function DashboardPage() {
       <PageHeader
         actions={(
           <button className="button quiet" disabled={!session} onClick={() => void loadDashboard()} type="button">
-            <RefreshCw aria-hidden="true" size={16} /> 刷新权威数据
+            <RefreshCw aria-hidden="true" size={16} /> 刷新数据
           </button>
         )}
-        description="单店支付终局、实时履约队列与资产快照均由 Core 返回，页面每分钟刷新一次。"
+        description="单店销售、履约队列和资产快照由系统实时读取，页面每分钟刷新一次。"
         eyebrow="01 / 工作台"
         title="运营大盘"
       />
@@ -97,9 +98,9 @@ export function DashboardPage() {
           />
         </Link>
         <Metric
-          hint={dashboard ? `${dashboard.timezone} 链上最终确认订单总价` : loadHint}
-          label="今日销售总价（USDT atomic）"
-          value={dashboard?.sales.listPriceUsdt}
+          hint={dashboard ? `${dashboard.timezone} 最终确认订单总价` : loadHint}
+          label="今日销售总价"
+          value={formatUsdt(dashboard?.sales.listPriceUsdt)}
         />
         <Metric
           hint={dashboard
@@ -137,7 +138,7 @@ export function DashboardPage() {
           <div className="dashboard-grid">
             <section className="section-block" aria-labelledby="delivery-title">
               <div className="section-heading">
-                <div><p className="eyebrow">Fulfillment</p><h2 id="delivery-title">当前履约队列</h2></div>
+                <div><p className="eyebrow">履约</p><h2 id="delivery-title">当前履约队列</h2></div>
                 <Link className="text-link" to="/fulfillment">查看全部 <ArrowRight aria-hidden="true" size={15} /></Link>
               </div>
               <dl className="dashboard-queue">
@@ -150,16 +151,16 @@ export function DashboardPage() {
               </dl>
               <div className="dashboard-authority-summary">
                 <div><span>今日最终确认订单</span><strong>{dashboard.orders.finalizedToday}</strong></div>
-                <div><span>今日 cohort 发货率</span><strong>{dashboard.shipmentRate.bps === null ? '不可计算' : `${dashboard.shipmentRate.bps} bps`}</strong><small>{dashboard.shipmentRate.numerator} / {dashboard.shipmentRate.denominator}</small></div>
-                <div><span>买家 USDT 实付</span><strong>{dashboard.sales.buyerUsdtPaid}</strong><small>atomic</small></div>
-                <div><span>商家基础应收</span><strong>{dashboard.sales.merchantBaseReceivableUsdt}</strong><small>USDT atomic</small></div>
-                <div><span>商家净应收</span><strong>{dashboard.sales.merchantNetReceivableUsdt}</strong><small>USDT atomic</small></div>
+                <div><span>今日发货率</span><strong>{dashboard.shipmentRate.bps === null ? '不可计算' : formatBpsAsPercent(Number(dashboard.shipmentRate.bps))}</strong><small>{dashboard.shipmentRate.numerator} / {dashboard.shipmentRate.denominator}</small></div>
+                <div><span>买家 USDT 实付</span><strong>{formatUsdt(dashboard.sales.buyerUsdtPaid)}</strong></div>
+                <div><span>商家基础应收</span><strong>{formatUsdt(dashboard.sales.merchantBaseReceivableUsdt)}</strong></div>
+                <div><span>商家净应收</span><strong>{formatUsdt(dashboard.sales.merchantNetReceivableUsdt)}</strong></div>
               </div>
             </section>
 
             <section className="section-block" aria-labelledby="product-title">
               <div className="section-heading">
-                <div><p className="eyebrow">Single product</p><h2 id="product-title">唯一商品</h2></div>
+                <div><p className="eyebrow">单品</p><h2 id="product-title">唯一商品</h2></div>
               </div>
               {product ? (
                 <>
@@ -179,12 +180,12 @@ export function DashboardPage() {
               ) : (
                 <div className="product-state-row">
                   <span className="status-icon"><Truck aria-hidden="true" size={20} /></span>
-                  <div><strong>尚未提报商品</strong><p>Core 返回空商品位，可前往单品提报检查可用操作。</p></div>
+                  <div><strong>尚未提报商品</strong><p>当前还没有提报商品，可前往单品提报开始创建。</p></div>
                 </div>
               )}
               <div className="inline-warning">
                 <CircleAlert aria-hidden="true" size={17} />
-                <span>{dashboard.merchant.status} / {dashboard.merchant.guaranteeStatus}，商品和财务写入仍以各自 Core 授权为准。</span>
+                <span>商家状态：{dashboard.merchant.status}，商品和财务操作以系统授权为准。</span>
               </div>
               <Link className="button secondary wide" to="/product">检查单品表单</Link>
             </section>

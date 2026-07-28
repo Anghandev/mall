@@ -1,6 +1,14 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { Eip712TypedData } from '@abu24k/core-artifacts';
-import { createCoreApi, CoreApiError, type CoreApi, type CoreBootstrap, type MerchantSession } from './core-api';
+import {
+  createCoreApi,
+  CoreApiError,
+  type CoreApi,
+  type CoreBootstrap,
+  type MerchantSession,
+  type PublicMerchantApplicationResult,
+} from './core-api';
+import { humanizeError } from './display';
 import {
   connectWallet,
   signSettlementTypedData as signWalletTypedData,
@@ -20,6 +28,10 @@ interface CoreRuntimeValue {
   signingIn: boolean;
   authError: string | undefined;
   signIn(provider: Eip1193Provider): Promise<void>;
+  submitMerchantApplication(
+    provider: Eip1193Provider,
+    input: { shopName: string; legalName: string; legalId: string; contactPhone: string; idempotencyKey: string },
+  ): Promise<PublicMerchantApplicationResult>;
   signTypedData(typedData: Eip712TypedData): Promise<string>;
   signSettlementTypedData(typedData: Eip712TypedData): Promise<string>;
   signOut(): void;
@@ -59,19 +71,19 @@ export function CoreRuntimeProvider({
     setSigningIn(true);
     setAuthError(undefined);
     try {
-      if (bootstrap.phase !== 'ready') throw new Error('Core API 尚未就绪。');
+      if (bootstrap.phase !== 'ready') throw new Error('系统服务尚未就绪。');
       const walletAddress = await connectWallet(provider);
       const challenge = await api.createSiweChallenge(walletAddress);
       const signature = await signSiweMessage(provider, walletAddress, challenge.message);
       const nextSession = await api.verifySiwe(challenge.message, signature);
       if (nextSession.walletAddress.toLowerCase() !== walletAddress.toLowerCase()) {
-        throw new Error('Core 会话钱包与实际签名钱包不一致。');
+        throw new Error('登录钱包与实际签名钱包不一致。');
       }
       if (!nextSession.roles.includes('MERCHANT')) {
         throw new Error('该钱包没有商家工作台权限。');
       }
       if (!nextSession.merchantId) {
-        throw new Error('Core 会话缺少商家身份，已拒绝进入工作台。');
+        throw new Error('当前钱包没有绑定商家身份，已拒绝进入工作台。');
       }
       setSession({ ...nextSession, merchantId: nextSession.merchantId });
       setActiveProvider(provider);
@@ -83,6 +95,17 @@ export function CoreRuntimeProvider({
     } finally {
       setSigningIn(false);
     }
+  }, [api, bootstrap.phase]);
+
+  const submitMerchantApplication = useCallback(async (
+    provider: Eip1193Provider,
+    input: { shopName: string; legalName: string; legalId: string; contactPhone: string; idempotencyKey: string },
+  ) => {
+    if (bootstrap.phase !== 'ready') throw new Error('系统服务尚未就绪。');
+    const walletAddress = await connectWallet(provider);
+    const challenge = await api.createSiweChallenge(walletAddress);
+    const signature = await signSiweMessage(provider, walletAddress, challenge.message);
+    return api.submitMerchantApplication({ ...input, message: challenge.message, signature });
   }, [api, bootstrap.phase]);
 
   const signTypedData = useCallback(async (typedData: Eip712TypedData) => {
@@ -103,6 +126,7 @@ export function CoreRuntimeProvider({
     signingIn,
     authError,
     signIn,
+    submitMerchantApplication,
     signTypedData,
     signSettlementTypedData: signTypedData,
     signOut,
@@ -116,6 +140,7 @@ export function CoreRuntimeProvider({
     signIn,
     signOut,
     signTypedData,
+    submitMerchantApplication,
     signingIn,
   ]);
 
@@ -129,10 +154,7 @@ export function useCoreRuntime() {
 }
 
 export function readableError(error: unknown) {
-  if (error instanceof CoreApiError) {
-    const label = error.code === 'NetworkUnavailable' ? '网络不可用' : error.code;
-    return `${label}：${error.message}${error.correlationId ? `（${error.correlationId}）` : ''}`;
-  }
   if (error && typeof error === 'object' && 'code' in error && error.code === 4001) return '已取消钱包操作。';
-  return error instanceof Error ? error.message : '操作失败，请重试。';
+  if (error instanceof CoreApiError) return humanizeError(error);
+  return humanizeError(error);
 }
