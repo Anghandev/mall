@@ -83,9 +83,10 @@ source conflicts are indexed in `V2_DECISIONS.md`.
   Custody-backed merchant or reward ledger. The USDT Custody/Settlement Wallet
   backs merchant product/freight receivables, seckill prize, node-reward and
   reward-reserve liabilities. The NPL Reward/Distribution Wallet backs NPL
-  reward liabilities. The Operations/Guarantee Wallet receives merchant
-  guarantees and funds explicitly posted platform advances and operational
-  obligations; it never substitutes for a shortfall in another funding wallet.
+  reward liabilities. The Operations/Guarantee Wallet keeps historical
+  merchant-capital evidence and funds explicitly posted platform advances and
+  operational obligations; it never substitutes for a shortfall in another
+  funding wallet.
 - The Router never manages logistics, arbitration, BNM, merchant balances,
   settlement requests or arbitrary withdrawals. A normal successful call
   leaves zero USDT and zero NPL in the Router.
@@ -267,35 +268,21 @@ source conflicts are indexed in `V2_DECISIONS.md`.
   confirm receipt. The merchant may then request platform forced receipt but
   cannot finalize the order. Pickup verification and final arbitration use the
   same finality path.
-- Major-loss funding consumes the merchant guarantee, frozen receivables and
-  future merchant proceeds in that order. Platform advances become merchant
-  debt. Merchant guarantee minimum is exactly 1,000 USDT; below it, new product
-  listing and new orders are prohibited.
-- The 1,000-USDT minimum is the formal merchant trading-capital requirement,
-  not a requirement to spend 1,000 USDT in a bounded chain acceptance test.
-  Before launch, Core may load one temporary `MainnetMicrotestEntitlement`
-  that binds exactly one approved merchant and immutable settlement wallet,
-  one product, three buyer EOAs, one finalized non-zero guarantee evidence
-  hash, maximum list price/freight, total stock of at most ten, seckill
-  inventory and an expiry no more than 24 hours away. Product plus freight is
-  bounded by the existing 3-USDT micro-test ceiling. It never changes the
-  merchant's `BELOW_MINIMUM` status or the formal threshold.
-- That entitlement authorizes only the bound product's publication, catalog,
-  quote, seckill and merchant-USDT settlement paths. Quotes are single-unit and
-  buyer-whitelisted, expire no later than the entitlement, and are revalidated
-  on idempotent reads. Settlement accepts only whitelisted-buyer orders created
-  at or after the bound guarantee evidence became final; historical orders,
-  other products and other merchants remain ineligible at intent, request and
-  transfer creation. Takeover eligibility and guarantee-loss funding are never
-  relaxed. Missing, mismatched, expired or cleared configuration fails closed
-  for every new Core action and for any not-yet-broadcast micro-test transfer.
-  Clearing Core configuration cannot revoke an already signed Router quote.
-  Cleanup therefore requires this exact order: pause the Router and Core
-  `NEW_PAYMENT` breaker, delist the product, wait through the entitlement and
-  all quote/reservation deadlines, settle every already-created micro-test
-  transfer, pass the dual-RPC/database cleanup gate, clear the entitlement,
-  restart Core, then resume new payments. Formal 1,000-USDT funding remains
-  `External/CapitalRequired`.
+- Current launch sets the merchant guarantee operating requirement to 0 USDT.
+  Guarantee status and historical capital records do not block product listing,
+  catalog visibility, quote creation, new orders, seckill sessions or merchant
+  settlement. Merchant `APPROVED` status is the business eligibility gate;
+  suspended, frozen or blacklisted merchants remain blocked.
+- Major-loss funding treats guarantee as 0 for current operations. Recovery
+  consumes frozen receivables first, then future merchant proceeds. Any
+  remaining platform advance becomes merchant debt. Historical guarantee
+  tables, finality workers and audit evidence remain append-only compatibility
+  records and are not deleted.
+- Earlier 1,000-USDT and `MainnetMicrotestEntitlement` rules are retained only
+  as historical compatibility notes for old evidence and cleanup. They do not
+  create a current Core operating threshold, do not authorize or block current
+  product publication, catalog, quotes, seckill, takeover or settlement, and do
+  not require any new merchant top-up before launch operation.
 - Successful receipt, pickup verification or final arbitration unlocks
   ordinary receivables, BNM and rewards. The seckill grand prize remains Locked
   until final session settlement.

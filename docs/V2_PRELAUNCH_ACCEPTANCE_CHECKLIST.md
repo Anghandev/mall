@@ -87,8 +87,8 @@ Core artifact：`2.0.0-fulfillment-launch.18`
 | 电子面单 / 打印机 / 批量发货 | Phase2 | 首发生产 UI 无入口，底层历史契约保留 |
 | GPS 最近门店 / 高德百度导航 | Phase2 | 不得阻断手工地址和履约 |
 | 短信 / 邮件 / Push / OSS-CDN 真实账号 | External | 未配置时返回真实 `ConfigurationRequired` |
-| 正式 1000 USDT 保证金实缴 | External / CapitalRequired | 不属于微测资金，不伪装执行，不阻塞代码与微测验收 |
-| 真实保证金链路微测 | Required | 最小非零金额，验证入账、账本、`BELOW_MINIMUM`、冻结/扣除边界与审计；不改正式门槛 |
+| 当前启动保证金经营要求 | Required | 0 USDT；已入驻商家经营不再被保证金阻断，历史保证金记录只保留审计与兼容 |
+| 历史保证金链路兼容检查 | Optional / Audit | 如需检查，仅验证历史入账、账本、`BELOW_MINIMUM`、冻结/扣除边界与审计，不作为当前经营门槛 |
 
 ## 7. 历史链上证据复用边界
 

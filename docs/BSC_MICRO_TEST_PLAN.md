@@ -106,19 +106,19 @@ ERC-20 transfer tax: fixed-block fork checks showed exact buyer-to-Router
 `transferFrom` and exact Router-to-Burn/Reward delivery. The separately
 approved recovery packet then completed sequences 13-15. The later bounded
   payment, seckill, breaker and dual-settlement packets are recorded below; the
-  formal 1,000-USDT guarantee transaction was not broadcast.
+  former formal 1,000-USDT guarantee transaction is historical only and is not a current operating gate.
 
-The current pre-launch acceptance extension does not replace that formal
-capital requirement. It uses one exact, non-zero guarantee micro-transfer plus
-the temporary entitlement frozen in `D-V2-039` to verify guarantee ingestion,
-ledger state, audit, bound listing/payment/seckill and bound settlement at the
-existing micro-test ceiling. The report must state that the formal 1,000-USDT
-guarantee was not paid. The test product is delisted and the entitlement is
-cleared only after `NEW_PAYMENT` is paused, every bounded quote/reservation has
-expired, every micro-test transfer is `SETTLED`, and
-`check-mainnet-microtest-cleanup.mjs` passes against both RPCs and the business
-database. New payments resume only after Core restarts without the entitlement.
-The merchant remains `BELOW_MINIMUM` until formal capital is provided.
+The current launch replaces the former formal capital operating gate with a
+0-USDT guarantee requirement. Historical guarantee ingestion can still be
+checked with a bounded non-zero micro-transfer when an audit task needs it, but
+that check does not authorize or block listing, payment, seckill or settlement.
+The report must state that any former formal 1,000-USDT guarantee was not paid
+for current launch readiness. Test products are delisted only after
+`NEW_PAYMENT` is paused, every bounded quote/reservation has expired, every
+micro-test transfer is `SETTLED`, and `check-mainnet-microtest-cleanup.mjs`
+passes against both RPCs and the business database. APPROVED merchants can
+operate with a 0-USDT guarantee requirement; suspended or blacklisted merchants
+remain blocked by merchant status.
 
 ## Exact Packet Gate
 
@@ -181,8 +181,8 @@ Actual native value plus Gas was `0.0000471636 BNB`, below the approved
    classification and prize-liability evidence.
 9. Current release gate: submit each buyer txHash to `PaymentReceiptWorker`, verify
    the exact Router receipt and 15-confirmation finality, then project payment
-   and pickup fulfillment. The 1,000-USDT guarantee remains an explicit mainnet
-   budget boundary and was not disguised as a micro amount.
+   and pickup fulfillment. The former 1,000-USDT guarantee is historical compatibility evidence only
+   and is not disguised as a micro amount or used as a current gate.
 10. Completed: execute one signed `MERCHANT_USDT` request and one signed
     `REWARD_NPL` request as individual EOA ERC-20 transfers, wait for at least
     15 confirmations and reconcile both ledger liabilities and TxHashes.
