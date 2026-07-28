@@ -3,8 +3,8 @@ import { productBaseline } from './bootstrap';
 export const coreState = Object.freeze({
   artifactStatus: productBaseline.coreArtifacts,
   artifactVersion: productBaseline.artifactVersion,
-  connectionLabel: `Core ${productBaseline.artifactVersion} · Merchant governance`,
-  reason: '共享 Core 已发布商家履约指标与永久不可变更的结算钱包绑定；Admin 不推断比率、资金或最终状态。',
+  connectionLabel: '系统已连接',
+  reason: '商家履约、结算钱包和资金状态都以系统真实结果为准，后台不做本地猜测。',
   executableOrderActionNames: productBaseline.publicCatalogs.executableOrderActionNames,
   canRead: productBaseline.adminCapabilities.projections,
   canWriteWithoutRuntimeAuthorization: productBaseline.adminCapabilities.writesWithoutRuntimeAuthorization,

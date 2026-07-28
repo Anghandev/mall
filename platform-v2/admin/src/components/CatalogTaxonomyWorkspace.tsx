@@ -13,6 +13,7 @@ import {
   type CatalogTagWrite,
 } from '../catalogAdminApi';
 import { CoreApiError } from '../coreApi';
+import { formatBpsAsPercent } from '../display';
 import { CatalogMediaAccess } from './CatalogMediaAccess';
 
 type Props = Readonly<{
@@ -47,8 +48,8 @@ export function CatalogTaxonomyWorkspace(props: Props) {
   const orderedCategories = useMemo(() => flattenCategories(props.categories), [props.categories]);
   const [selectedCategoryId, setSelectedCategoryId] = useState('');
   const [selectedTagId, setSelectedTagId] = useState('');
-  const [categoryForm, setCategoryForm] = useState(emptyCategory);
-  const [tagForm, setTagForm] = useState(emptyTag);
+  const [categoryForm, setCategoryForm] = useState(() => ({ ...emptyCategory, idempotencyKey: catalogCommandKey('catalog-category') }));
+  const [tagForm, setTagForm] = useState(() => ({ ...emptyTag, idempotencyKey: catalogCommandKey('catalog-tag') }));
   const [saving, setSaving] = useState(false);
   const selectedCategory = props.categories.find((item) => item.categoryId === selectedCategoryId) ?? null;
   const selectedTag = props.tags.find((item) => item.tagId === selectedTagId) ?? null;
@@ -57,7 +58,7 @@ export function CatalogTaxonomyWorkspace(props: Props) {
     if (!selectedCategory) return;
     setCategoryForm({
       iconAssetId: selectedCategory.iconAssetId ?? '',
-      idempotencyKey: '',
+      idempotencyKey: catalogCommandKey('catalog-category'),
       name: selectedCategory.name,
       parentCategoryId: selectedCategory.parentCategoryId ?? '',
       sortOrder: String(selectedCategory.sortOrder),
@@ -69,7 +70,7 @@ export function CatalogTaxonomyWorkspace(props: Props) {
     if (!selectedTag) return;
     setTagForm({
       example: selectedTag.example,
-      idempotencyKey: '',
+      idempotencyKey: catalogCommandKey('catalog-tag'),
       name: selectedTag.name,
       sortOrder: String(selectedTag.sortOrder),
       status: selectedTag.status,
@@ -95,8 +96,8 @@ export function CatalogTaxonomyWorkspace(props: Props) {
       const saved = await saveCatalogCategory(selectedCategoryId || null, input, props.token);
       props.onCategorySaved(saved);
       setSelectedCategoryId(saved.categoryId);
-      setCategoryForm((current) => ({ ...current, idempotencyKey: '' }));
-      props.onNotice(`Core 已保存类目 ${saved.categoryId} v${saved.version}`);
+      setCategoryForm((current) => ({ ...current, idempotencyKey: catalogCommandKey('catalog-category') }));
+      props.onNotice(`系统已保存类目 ${saved.categoryId} v${saved.version}`);
     });
   };
 
@@ -114,8 +115,8 @@ export function CatalogTaxonomyWorkspace(props: Props) {
       const saved = await saveCatalogTag(selectedTagId || null, input, props.token);
       props.onTagSaved(saved);
       setSelectedTagId(saved.tagId);
-      setTagForm((current) => ({ ...current, idempotencyKey: '' }));
-      props.onNotice(`Core 已保存标签 ${saved.tagId} v${saved.version}`);
+      setTagForm((current) => ({ ...current, idempotencyKey: catalogCommandKey('catalog-tag') }));
+      props.onNotice(`系统已保存标签 ${saved.tagId} v${saved.version}`);
     });
   };
 
@@ -131,14 +132,14 @@ export function CatalogTaxonomyWorkspace(props: Props) {
     }
   };
 
-  const resetCategory = () => { setSelectedCategoryId(''); setCategoryForm(emptyCategory); };
-  const resetTag = () => { setSelectedTagId(''); setTagForm(emptyTag); };
+  const resetCategory = () => { setSelectedCategoryId(''); setCategoryForm({ ...emptyCategory, idempotencyKey: catalogCommandKey('catalog-category') }); };
+  const resetTag = () => { setSelectedTagId(''); setTagForm({ ...emptyTag, idempotencyKey: catalogCommandKey('catalog-tag') }); };
 
   return (
     <div className="catalog-taxonomy-grid">
       <section className="panel catalog-taxonomy-panel" aria-labelledby="category-title">
         <div className="panel-heading">
-          <div><p className="section-kicker">GET /v2/admin/catalog/categories</p><h2 id="category-title">三级类目树</h2></div>
+          <div><p className="section-kicker">类目树</p><h2 id="category-title">三级类目树</h2></div>
           {props.canWrite ? <button className="button button-quiet" type="button" onClick={resetCategory}><Plus aria-hidden="true" />新建类目</button> : null}
         </div>
         <div className="catalog-taxonomy-list" role="list" aria-label="类目树">
@@ -155,7 +156,7 @@ export function CatalogTaxonomyWorkspace(props: Props) {
               <Status status={category.status} />
             </button>
           ))}
-          {orderedCategories.length === 0 ? <Empty label="Core 返回真实空类目树" /> : null}
+          {orderedCategories.length === 0 ? <Empty label="当前还没有类目" /> : null}
         </div>
         {props.canWrite ? (
           <form className="catalog-compact-form" onSubmit={submitCategory}>
@@ -163,14 +164,13 @@ export function CatalogTaxonomyWorkspace(props: Props) {
             <div className="form-grid">
               <label>类目名称<input value={categoryForm.name} onChange={(event) => setCategoryForm({ ...categoryForm, name: event.target.value })} maxLength={80} required /></label>
               <label>父类目<select value={categoryForm.parentCategoryId} onChange={(event) => setCategoryForm({ ...categoryForm, parentCategoryId: event.target.value })}><option value="">顶级类目</option>{props.categories.filter((category) => category.level < 3 && category.categoryId !== selectedCategoryId && category.status === 'ENABLED').map((category) => <option key={category.categoryId} value={category.categoryId}>L{category.level} · {category.name}</option>)}</select></label>
-              <label>Icon asset ID<input value={categoryForm.iconAssetId} onChange={(event) => setCategoryForm({ ...categoryForm, iconAssetId: event.target.value })} placeholder="0x… bytes32" /></label>
+              <label>图标资源编号<input value={categoryForm.iconAssetId} onChange={(event) => setCategoryForm({ ...categoryForm, iconAssetId: event.target.value })} placeholder="上传后得到的资源编号" /></label>
               <label>排序<input inputMode="numeric" min="0" type="number" value={categoryForm.sortOrder} onChange={(event) => setCategoryForm({ ...categoryForm, sortOrder: event.target.value })} required /></label>
               <label>状态<select value={categoryForm.status} onChange={(event) => setCategoryForm({ ...categoryForm, status: event.target.value as CatalogTaxonomyStatus })}>{catalogTaxonomyStatuses.map((status) => <option key={status} value={status}>{statusLabel(status)}</option>)}</select></label>
-              <label>Idempotency key<input value={categoryForm.idempotencyKey} onChange={(event) => setCategoryForm({ ...categoryForm, idempotencyKey: event.target.value })} minLength={8} maxLength={128} required /></label>
-            </div>
-            <div className="catalog-decision-field"><span>服务费率</span><strong>{selectedCategory?.serviceFee.state ?? 'DecisionBlocked'}</strong><small>{selectedCategory?.serviceFee.valueBps === null || selectedCategory?.serviceFee.valueBps === undefined ? '未决策，界面不提交默认值' : `${selectedCategory.serviceFee.valueBps} bps`}</small></div>
-            <p className="catalog-form-hint"><FolderTree aria-hidden="true" />已有类目选择“顶级类目”时，提交 Core `.5` 的显式 `parentCategoryId: null`；未选择的创建请求不携带该字段。</p>
-            <button className="button button-primary" type="submit" disabled={saving || categoryForm.idempotencyKey.length < 8}><Save aria-hidden="true" />保存类目版本</button>
+                          </div>
+            <div className="catalog-decision-field"><span>服务费率</span><strong>{selectedCategory?.serviceFee.state ?? '待配置'}</strong><small>{selectedCategory?.serviceFee.valueBps === null || selectedCategory?.serviceFee.valueBps === undefined ? '未决策，界面不提交默认值' : formatBpsAsPercent(selectedCategory.serviceFee.valueBps)}</small></div>
+            <p className="catalog-form-hint"><FolderTree aria-hidden="true" />选择“顶级类目”会保存为顶级；未选择父类目时，系统不会猜测归属。</p>
+            <button className="button button-primary" type="submit" disabled={saving}><Save aria-hidden="true" />保存类目版本</button>
           </form>
         ) : <ReadOnlyNotice />}
         {selectedCategory?.iconAssetId ? <CatalogMediaAccess assetId={selectedCategory.iconAssetId} label={`${selectedCategory.name} 图标`} token={props.token} /> : null}
@@ -178,7 +178,7 @@ export function CatalogTaxonomyWorkspace(props: Props) {
 
       <section className="panel catalog-taxonomy-panel" aria-labelledby="tag-title">
         <div className="panel-heading">
-          <div><p className="section-kicker">GET /v2/admin/catalog/tags</p><h2 id="tag-title">版本化标签库</h2></div>
+          <div><p className="section-kicker">标签库</p><h2 id="tag-title">版本化标签库</h2></div>
           {props.canWrite ? <button className="button button-quiet" type="button" onClick={resetTag}><Plus aria-hidden="true" />新建标签</button> : null}
         </div>
         <div className="catalog-taxonomy-list" role="list" aria-label="标签库">
@@ -187,7 +187,7 @@ export function CatalogTaxonomyWorkspace(props: Props) {
               <Tags aria-hidden="true" /><span><strong>{tag.name}</strong><small>{tag.example || '无示例'} · v{tag.version}</small></span><Status status={tag.status} />
             </button>
           ))}
-          {props.tags.length === 0 ? <Empty label="Core 返回真实空标签库" /> : null}
+          {props.tags.length === 0 ? <Empty label="当前还没有标签" /> : null}
         </div>
         {props.canWrite ? (
           <form className="catalog-compact-form" onSubmit={submitTag}>
@@ -196,10 +196,9 @@ export function CatalogTaxonomyWorkspace(props: Props) {
               <label>标签名称<input value={tagForm.name} onChange={(event) => setTagForm({ ...tagForm, name: event.target.value })} maxLength={60} required /></label>
               <label>排序<input inputMode="numeric" min="0" type="number" value={tagForm.sortOrder} onChange={(event) => setTagForm({ ...tagForm, sortOrder: event.target.value })} required /></label>
               <label>状态<select value={tagForm.status} onChange={(event) => setTagForm({ ...tagForm, status: event.target.value as CatalogTaxonomyStatus })}>{catalogTaxonomyStatuses.map((status) => <option key={status} value={status}>{statusLabel(status)}</option>)}</select></label>
-              <label>Idempotency key<input value={tagForm.idempotencyKey} onChange={(event) => setTagForm({ ...tagForm, idempotencyKey: event.target.value })} minLength={8} maxLength={128} required /></label>
-            </div>
+                          </div>
             <label>前台示例<input value={tagForm.example} onChange={(event) => setTagForm({ ...tagForm, example: event.target.value })} maxLength={240} /></label>
-            <button className="button button-primary" type="submit" disabled={saving || tagForm.idempotencyKey.length < 8}><Save aria-hidden="true" />保存标签版本</button>
+            <button className="button button-primary" type="submit" disabled={saving}><Save aria-hidden="true" />保存标签版本</button>
           </form>
         ) : <ReadOnlyNotice />}
       </section>
@@ -240,9 +239,13 @@ function Empty({ label }: { label: string }) {
 }
 
 function ReadOnlyNotice() {
-  return <div className="catalog-readonly-note"><Ban aria-hidden="true" /><span>AUDITOR 仅读：不渲染类目或标签写入表单。</span></div>;
+  return <div className="catalog-readonly-note"><Ban aria-hidden="true" /><span>审核员只读：不显示类目或标签写入表单。</span></div>;
 }
 
 function asCoreError(cause: unknown) {
-  return cause instanceof CoreApiError ? cause : new CoreApiError({ code: 'ExternalBlocked', message: 'Catalog taxonomy Core 能力不可用', status: 503 });
+  return cause instanceof CoreApiError ? cause : new CoreApiError({ code: 'ExternalBlocked', message: '类目和标签服务暂时不可用', status: 503 });
+}
+
+function catalogCommandKey(scope: string) {
+  return `${scope}-${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`}`;
 }

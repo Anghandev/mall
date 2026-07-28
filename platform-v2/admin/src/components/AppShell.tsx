@@ -41,18 +41,18 @@ export function AppShell({ children }: AppShellProps) {
       <header className="topbar">
         <div className="brand-lockup">
           <img src={logoUrl} alt="24K商城" width="42" height="42" />
-          <span><strong>24K商城</strong><small>PLATFORM OPERATIONS</small></span>
+          <span><strong>24K商城</strong><small>平台运营后台</small></span>
         </div>
         <button ref={menuButtonRef} className="mobile-menu" type="button" aria-label="打开后台模块导航" aria-expanded={mobileNavOpen} aria-controls="primary-navigation" onClick={() => setMobileNavOpen((open) => !open)}>
           <Menu aria-hidden="true" />
         </button>
         <div className="system-strip">
           <span className="status-chip"><ShieldAlert aria-hidden="true" /> {coreState.connectionLabel}</span>
-          <span className="status-chip"><Radio aria-hidden="true" /> BSC · Chain 56</span>
+          <span className="status-chip"><Radio aria-hidden="true" /> 主网环境</span>
           <button
             className="wallet-button"
             type="button"
-            title={sessionError ?? (session ? '断开当前内存会话' : '使用 Core SIWE / JWT 认证')}
+            title={sessionError ?? (session ? '断开当前会话' : '连接平台管理钱包')}
             onClick={() => session ? disconnect() : void connect()}
             disabled={status === 'CONNECTING'}
           >
@@ -72,9 +72,13 @@ export function AppShell({ children }: AppShellProps) {
           ))}
         </nav>
         <div className="sidebar-footer">
-          <p>Artifact contract</p>
-          <strong>{coreState.artifactVersion}</strong>
-          <span>履约写入以会话与 allowedActions 为准</span>
+          <p>系统状态</p>
+          <strong>已连接</strong>
+          <span>所有操作以当前钱包权限和系统状态为准</span>
+          <details className="technical-details compact">
+            <summary>高级版本信息</summary>
+            <code>{coreState.artifactVersion}</code>
+          </details>
         </div>
       </aside>
 

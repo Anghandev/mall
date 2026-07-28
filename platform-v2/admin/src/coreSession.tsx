@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { CoreApiError, createWalletSession, type CoreSession } from './coreApi';
+import { humanizeError } from './display';
 
 type SessionState = {
   connect(): Promise<void>;
@@ -48,7 +49,7 @@ export function CoreSessionProvider({ children }: { children: ReactNode }) {
       } catch (cause) {
         setSession(null);
         setStatus('DISCONNECTED');
-        setError(cause instanceof CoreApiError ? `${cause.code}: ${cause.message}` : '钱包认证失败');
+        setError(cause instanceof CoreApiError ? humanizeError(cause) : '钱包认证失败，请确认当前钱包有后台权限。');
       }
     },
     disconnect: () => {

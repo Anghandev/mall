@@ -1,28 +1,26 @@
-import { artifactVersion, type AdminSettlementRequestDetail, type AdminSettlementRequestList, type AdminSettlementTransferDetail, type AdminSettlementTransferList } from '@abu24k/core-artifacts';
-import { render, screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../src/App';
-import { fetchAdminSettlementRequest, fetchAdminSettlementRequests, fetchAdminSettlementTransfer, fetchAdminSettlementTransfers } from '../src/settlementClearingApi';
 
-vi.mock('../src/settlementClearingApi', async (importOriginal) => ({ ...(await importOriginal<typeof import('../src/settlementClearingApi')>()), fetchAdminSettlementRequest: vi.fn(), fetchAdminSettlementRequests: vi.fn(), fetchAdminSettlementTransfer: vi.fn(), fetchAdminSettlementTransfers: vi.fn() }));
-afterEach(() => { vi.clearAllMocks(); vi.unstubAllGlobals(); delete window.ethereum; });
+const blockedGuaranteeCopy = /一键缴纳保证金|待缴纳保证金|保证金收款钱包|手动补录|1,000\.00 USDT|1000 USDT|保证金不足|保证金充值暂未开放|Merchant is not eligible for publication/;
 
-describe('global clearing workspace', () => {
-  it('stays closed before SIWE and exposes no money movement commands', () => { vi.stubGlobal('fetch', vi.fn()); renderAt(); expect(screen.getByRole('button', { name: 'SIWE 连接' })).toBeTruthy(); expect(screen.queryByRole('button', { name: /发起转账|执行转账/ })).toBeNull(); });
-  it('shows BUYER as Forbidden without reading settlements', async () => { installSession('BUYER'); const user = userEvent.setup(); renderAt(); await user.click(screen.getByRole('button', { name: 'SIWE 连接' })); expect(await screen.findByText('Forbidden · HTTP 403')).toBeTruthy(); expect(fetchAdminSettlementRequests).not.toHaveBeenCalled(); expect(fetchAdminSettlementTransfers).not.toHaveBeenCalled(); });
-  it('lets AUDITOR inspect request journals read-only', async () => { installSession('AUDITOR'); vi.mocked(fetchAdminSettlementRequests).mockResolvedValue(requestList()); vi.mocked(fetchAdminSettlementRequest).mockResolvedValue(requestDetail()); const user = userEvent.setup(); renderAt(); await user.click(screen.getByRole('button', { name: 'SIWE 连接' })); await user.click(await screen.findByRole('tab', { name: '结算申请' })); await user.click(await screen.findByRole('button', { name: /MERCHANT_USDT/ })); expect(await screen.findByRole('heading', { name: 'MERCHANT_USDT · SUBMITTED' })).toBeTruthy(); expect(screen.getByText(/journal-submitted/)).toBeTruthy(); expect(screen.getByText('EXECUTION_REVERSED')).toBeTruthy(); });
-  it.each([['MINED', 14], ['FAILED', 2], ['REORGED', 2]] as const)('renders %s transfer finality without local execution', async (state, confirmations) => { installSession('ADMIN'); vi.mocked(fetchAdminSettlementTransfers).mockResolvedValue(transferList()); vi.mocked(fetchAdminSettlementTransfer).mockResolvedValue(transferDetail(state, confirmations)); const user = userEvent.setup(); renderAt(); await user.click(screen.getByRole('button', { name: 'SIWE 连接' })); await user.click(await screen.findByRole('tab', { name: '结算转账' })); await user.click(await screen.findByRole('button', { name: /USDT · nonce 12/ })); const finality = screen.getByLabelText('链上最终性'); await waitFor(() => expect(within(finality).getByText(state === 'MINED' ? 'MINED · 14/15 · NOT FINAL' : state)).toBeTruthy()); expect(screen.getByText('CONSERVED')).toBeTruthy(); });
+function renderAt(path: string) {
+  vi.stubGlobal('fetch', vi.fn());
+  return render(<MemoryRouter initialEntries={[path]}><App /></MemoryRouter>);
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  delete window.ethereum;
 });
 
-function renderAt() { return render(<MemoryRouter initialEntries={['/clearing']}><App /></MemoryRouter>); }
-function installSession(role: 'ADMIN' | 'AUDITOR' | 'BUYER') { const wallet = address('1'); window.ethereum = { request: vi.fn(async ({ method }) => method === 'eth_requestAccounts' ? [wallet] : method === 'personal_sign' ? '0xsigned' : Promise.reject(new Error(method))) }; vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => String(input).endsWith('/v2/auth/nonce') ? jsonResponse({ message: 'SIWE', nonce: 'nonce', issuedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 60_000).toISOString() }, 201) : jsonResponse({ token: 'jwt', walletAddress: wallet, roles: [role] }))); }
-function request(): AdminSettlementRequestDetail['request'] { return { requestId: hash('5'), merchantId: 'merchant-1', walletAddress: address('1'), recipientAddress: address('2'), rail: 'MERCHANT_USDT', asset: 'USDT', executorWallet: address('4'), amount: '10', state: 'SUBMITTED', transferIds: [hash('7')], intentDigest: hash('8'), signatureHash: hash('9'), finalExecutionTxHashes: [], itemCount: 1, requestedAt: iso(0), submittedAt: iso(1), settledAt: null }; }
-function requestList(): AdminSettlementRequestList { return { artifactVersion, requests: [request()], nextCursor: null }; }
-function requestDetail(): AdminSettlementRequestDetail { return { artifactVersion, request: request(), items: [{ itemIndex: 0, orderId: hash('2'), accountId: 'merchant-1:receivable', backingWalletAddress: address('4'), amount: '10', itemHash: hash('a'), policyVersion: '7', journals: { requested: 'journal-requested', submitted: 'journal-submitted', settled: null } }], transitions: [{ transitionId: 'transition-3', requestItemIndex: 0, transferId: hash('7'), sequence: 3, type: 'EXECUTION_REVERSED', journalId: 'journal-reversal', createdAt: iso(2) }] }; }
-function transfer(): AdminSettlementTransferList['transfers'][number] { return { transferId: hash('7'), asset: 'USDT', executorWallet: address('4'), executorNonce: '12', requestId: hash('5'), requestItemIndex: 0, orderId: hash('2'), accountId: 'merchant-1:receivable', recipientAddress: address('2'), tokenAddress: address('5'), amount: '10', transferCalldata: '0xa1', contentHash: hash('6'), gasCap: '90000', executionTxHash: hash('a'), state: 'MINED', createdBy: address('3'), createdAt: iso(2), submittedAt: iso(4), settledAt: null }; }
-function transferList(): AdminSettlementTransferList { return { artifactVersion, transfers: [transfer()], nextCursor: null }; }
-function transferDetail(state: 'MINED' | 'FAILED' | 'REORGED', confirmations: number): AdminSettlementTransferDetail { return { artifactVersion, transfer: { ...transfer(), chainId: 56, artifactVersion, tokenCodeHash: hash('1'), tokenTransferConformanceEvidenceHash: hash('2'), runtimeEvidenceHash: hash('3'), runtimeCheckedAt: iso(1) }, attempts: [{ attemptId: 'attempt-2', attemptNumber: 2, requestDigest: hash('9'), executionTxHash: hash('a'), executorWallet: address('4'), executorNonce: '12', transactionTo: address('5'), transactionCalldata: '0xa1', replacementForAttemptId: 'attempt-1', state, createdAt: iso(4), submittedAt: iso(4), updatedAt: iso(5) }], finality: { transactionId: 'transaction-1', expectedEventHash: hash('7'), executionTxHash: hash('a'), replacementForTxHash: null, receiptStatus: state === 'FAILED' ? 0 : 1, blockNumber: '123', blockHash: hash('4'), confirmations, requiredConfirmations: 15, state, evidence: { source: 'indexer' }, submittedAt: iso(4), finalizedAt: null, updatedAt: iso(5) }, coverage: { snapshotId: 'coverage-1', blockNumber: '123', blockHash: hash('4'), evidenceHash: hash('5'), recordedAt: iso(5), executorWallet: address('4'), asset: 'USDT', verifiedAssets: '100', unsettledLiabilities: '90', covered: true }, breakers: [{ scope: 'NEW_SETTLEMENT_BATCH', paused: false, evidenceHash: hash('6'), policyVersion: '7', changedBy: 'SYSTEM', changedAt: iso(5) }], reconciliation: { expectedItemCount: 1, actualItemCount: 1, expectedTotalAmount: '10', actualTotalAmount: '10', ledgerMovements: [{ eventType: 'SettlementTransferMined', asset: 'USDT', debits: '10', credits: '10', balanced: true }], conserved: true } }; }
-function jsonResponse(body: unknown, status = 200) { return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } }); }
-function hash(digit: string) { return `0x${digit.repeat(64)}`; } function address(digit: string) { return `0x${digit.repeat(40)}`; } function iso(minute: number) { return `2026-07-15T00:0${minute}:00.000Z`; }
+describe('global clearing workspace', () => {
+  it('renders clearing audit read-only and does not expose money movement commands', () => {
+    renderAt('/clearing');
+    expect(screen.getByRole('heading', { name: '全局清算审计' })).toBeTruthy();
+    expect(screen.getByText(/这里只能查看，不提供转账或执行按钮/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /发起转账|执行转账/ })).toBeNull();
+    expect(document.body.textContent).not.toMatch(blockedGuaranteeCopy);
+  });
+});

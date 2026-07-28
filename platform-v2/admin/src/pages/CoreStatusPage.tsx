@@ -13,54 +13,61 @@ export function CoreStatusPage() {
       <header className="page-header">
         <div className="page-icon"><RadioTower aria-hidden="true" /></div>
         <div>
-          <p className="eyebrow">Coordinated admin global operations checkpoint</p>
-          <h1>Core 状态</h1>
-          <p>版本、HTTP 能力和运行时 readiness 均来自同一发布物。未部署、未配置或未发布不会显示为健康。</p>
+          <p className="eyebrow">系统状态检查</p>
+          <h1>系统状态</h1>
+          <p>版本、接口能力和运行状态均来自同一发布物。未部署、未配置或未发布不会显示为健康。</p>
         </div>
-        <div className="requirement-list"><code>ADM-SYS-005</code><code>{artifactVersion}</code></div>
+        <div className="requirement-list"><code>运行检查</code></div>
       </header>
 
-      <section className="status-overview" aria-label="Core 发布状态">
-        <article><span>Artifact</span><strong>{artifactVersion}</strong><small>{publicationStatus}</small></article>
-        <article><span>Network</span><strong>BSC · {chainIdentity.chainId}</strong><small>固定链身份</small></article>
-        <article><span>Deployment</span><strong>{deploymentAuthorized ? 'Authorized' : 'ExternalBlocked'}</strong><small>没有地址时不推断</small></article>
+      <section className="status-overview" aria-label="系统发布状态">
+        <article><span>系统状态</span><strong>已连接</strong><small>{publicationLabel(publicationStatus)}</small><details className="technical-details compact"><summary>高级版本信息</summary><code>{artifactVersion}</code></details></article>
+        <article><span>运行网络</span><strong>BSC 主网</strong><small>平台正式运行网络</small><details className="technical-details compact"><summary>高级网络编号</summary><code>{chainIdentity.chainId}</code></details></article>
+        <article><span>部署状态</span><strong>{deploymentAuthorized ? '已授权' : '外部阻断'}</strong><small>没有地址时不推断</small></article>
         <article>
-          <span>New payment</span>
-          <strong>{bootstrap.loading ? 'Checking' : bootstrap.error ? 'Unavailable' : readiness?.writesEnabled ? 'Enabled' : 'Fail closed'}</strong>
-          <small>{bootstrap.error?.code ?? (readiness ? 'Core authoritative' : '无运行时证据')}</small>
+          <span>新付款</span>
+          <strong>{bootstrap.loading ? '检查中' : bootstrap.error ? '不可用' : readiness?.writesEnabled ? '已开启' : '安全关闭'}</strong>
+          <small>{bootstrap.error ? errorLabel(bootstrap.error.code) : readiness ? '系统确认' : '无运行证据'}</small>
         </article>
       </section>
 
       <section className="status-columns">
         <article className="panel">
           <div className="panel-heading">
-            <div><p className="section-kicker">GET /v2/bootstrap</p><h2>支付运行时 readiness</h2></div>
+            <div><p className="section-kicker">运行状态</p><h2>支付运行状态</h2></div>
             <button className="button button-quiet" type="button" onClick={bootstrap.reload} disabled={bootstrap.loading}>
               <RefreshCw aria-hidden="true" /> {bootstrap.loading ? '检查中' : '重新检查'}
             </button>
           </div>
           {bootstrap.error ? (
-            <div className="resource-state resource-state-error" role="alert"><Ban aria-hidden="true" /><div><strong>{bootstrap.error.code}</strong><p>{bootstrap.error.message}</p></div></div>
+            <div className="resource-state resource-state-error" role="alert"><Ban aria-hidden="true" /><div><strong>{errorLabel(bootstrap.error.code)}</strong><p>{humanStatusError(bootstrap.error.message)}</p></div></div>
           ) : null}
           {readiness ? (
             <dl className="definition-grid">
-              <div><dt>Core status</dt><dd>{bootstrap.data?.status}</dd></div>
-              <div><dt>Chain ID</dt><dd>{readiness.chainId}</dd></div>
-              <div><dt>USDT</dt><dd><code>{readiness.assets.usdt}</code></dd></div>
-              <div><dt>NPL</dt><dd><code>{readiness.assets.npl}</code></dd></div>
-              <div><dt>NPL / USDT pair</dt><dd>{readiness.assets.nplUsdtPair ? <code>{readiness.assets.nplUsdtPair}</code> : '未公开'}</dd></div>
-              <div><dt>新支付写入</dt><dd>{readiness.writesEnabled ? 'Enabled' : 'Fail closed'}</dd></div>
+              <div><dt>系统状态</dt><dd>{statusLabel(bootstrap.data?.status)}</dd></div>
+              <div><dt>运行网络</dt><dd>BSC 主网<details className="technical-details compact"><summary>高级编号</summary><code>{readiness.chainId}</code></details></dd></div>
+              <div><dt>新支付写入</dt><dd>{readiness.writesEnabled ? '已开启' : '安全关闭'}</dd></div>
             </dl>
+          ) : null}
+          {readiness ? (
+            <details className="technical-details">
+              <summary>高级配置</summary>
+              <dl className="definition-grid">
+                <div><dt>USDT 合约</dt><dd><code>{readiness.assets.usdt}</code></dd></div>
+                <div><dt>NPL 合约</dt><dd><code>{readiness.assets.npl}</code></dd></div>
+                <div><dt>NPL / USDT 交易对</dt><dd>{readiness.assets.nplUsdtPair ? <code>{readiness.assets.nplUsdtPair}</code> : '未公开'}</dd></div>
+              </dl>
+            </details>
           ) : null}
         </article>
 
         <aside className="panel">
-          <p className="section-kicker">Checkpoint capabilities</p><h2>Core 全局发布面</h2>
+          <p className="section-kicker">系统能力</p><h2>系统全局发布面</h2>
           <ul className="capability-list">
             {Object.entries(capabilityStatus).map(([name, status]) => (
               <li key={name} className={status === 'AVAILABLE' ? 'capability-available' : 'capability-blocked'}>
                 {status === 'AVAILABLE' ? <CheckCircle2 aria-hidden="true" /> : <CircleDot aria-hidden="true" />}
-                <span><strong>{name}</strong><small>{status}</small></span>
+                <span><strong>{capabilityLabel(name)}</strong><small>{status === 'AVAILABLE' ? '已发布' : '未发布'}</small></span>
               </li>
             ))}
           </ul>
@@ -68,26 +75,92 @@ export function CoreStatusPage() {
       </section>
 
       <section className="status-columns">
-        <BlockedList title="Runtime Blockers" values={readiness?.runtimeBlockers} loading={bootstrap.loading} />
-        <BlockedList title="Payment DecisionBlocked" values={readiness?.paymentDecisionBlocked} loading={bootstrap.loading} />
-        <BlockedList title="Payment ExternalBlocked" values={readiness?.paymentExternalBlocked} loading={bootstrap.loading} />
+        <BlockedList title="运行阻断" values={readiness?.runtimeBlockers} loading={bootstrap.loading} />
+        <BlockedList title="付款决策阻断" values={readiness?.paymentDecisionBlocked} loading={bootstrap.loading} />
+        <BlockedList title="付款外部阻断" values={readiness?.paymentExternalBlocked} loading={bootstrap.loading} />
       </section>
 
       <section className="snapshot-rule">
         <ShieldCheck aria-hidden="true" />
-        <div><strong>Admin 边界</strong><p>Admin 物流配置、跨商家面单、打印作业、AND/OR 全局检索、精确 UID、精确/模糊钱包、资源导出、商品标签与授权生命周期批处理均已发布。手机号、Yellow queue 与生产部署仍保持 fail-closed。</p></div>
+        <div><strong>后台边界</strong><p>物流配置、面单、打印、检索、资源导出、商品标签和商家审核功能已发布。手机号、特殊队列和生产部署仍保持安全关闭。</p></div>
       </section>
     </>
   );
 }
 
+function capabilityLabel(name: string) {
+  return ({
+    siweAuthentication: '钱包登录认证',
+    orderAllowedActions: '订单可用操作',
+    catalogHttp: '商品读取',
+    catalogManagementHttp: '商品管理',
+    signedConcessionPreview: '让利预览签名',
+    mediaHttp: '媒体上传读取',
+    merchantProfileHttp: '商家资料',
+    fulfillmentHttp: '履约操作',
+    takeoverHttp: '接管履约',
+    settlementHttp: '结算读取',
+    adminHttp: '平台后台',
+    auditHttp: '审计日志',
+    notificationsHttp: '消息通知',
+    monitoringHttp: '运维监控',
+    immutableMediaEvidence: '媒体证据封存',
+    paymentQuoteHttp: '付款报价',
+    inventoryReservation: '库存预留',
+    paymentSubmissionHttp: '支付提交',
+    paymentProjectionHttp: '支付预览',
+    paymentIndexer: '支付确认',
+    settlementEoaTransfers: '结算转账',
+    buyerShoppingStatementHttp: '买家购物明细',
+    merchantReceivableStatementHttp: '商家应收明细',
+    guaranteeDepositHttp: '历史资金记录读取',
+    guaranteeDepositFinality: '历史资金最终确认',
+    takeoverFundingHttp: '接管资金',
+    takeoverCaseManagementHttp: '接管案件',
+    replacementMerchantFulfillment: '替代商家履约',
+    policyGovernanceHttp: '政策治理',
+    cmsHttp: '内容管理',
+    notificationDelivery: '通知投递',
+    systemConfigGovernanceHttp: '系统配置治理',
+    buyerAccountHttp: '买家账户',
+    buyerSavedAddressHttp: '买家收货地址',
+    buyerTakeoverTimelineHttp: '买家接管进度',
+    merchantLifecycleHttp: '商家审核',
+    merchantQualificationEncryption: '商家资质加密',
+  } as Record<string, string>)[name] ?? name;
+}
+
+function publicationLabel(value: string) {
+  return value === 'COORDINATED_SETTLEMENT_ADMIN_CHECKPOINT' ? '正式发布中' : value;
+}
+
+function statusLabel(value: string | undefined) {
+  return value === 'CORE_API_READY' ? '运行正常' : value ?? '未知';
+}
+
+function humanStatusError(message: string) {
+  if (/Core API is unreachable|gateway is unavailable|unavailable|unreachable/i.test(message)) return '后台服务暂时不可用，请稍后重试。';
+  if (/non-JSON|incompatible|artifact|version/i.test(message)) return '当前页面版本和后台版本不一致，请刷新页面或重新部署前端。';
+  return message;
+}
+
+function errorLabel(value: string | undefined) {
+  return ({
+    ExternalBlocked: '外部服务暂不可用',
+    DecisionBlocked: '需要人工确认',
+    ConfigurationRequired: '配置未完成',
+    Forbidden: '没有权限',
+    Unavailable: '暂不可用',
+  } as Record<string, string>)[String(value ?? '')] ?? (value || '操作失败');
+}
+
 function BlockedList({ title, values, loading }: { title: string; values: readonly string[] | undefined; loading: boolean }) {
   return (
     <article className="panel blocker-panel">
-      <p className="section-kicker">Runtime gate</p><h2>{title}</h2>
-      {loading ? <p className="muted-copy">正在读取 Core...</p> : null}
-      {!loading && values?.length === 0 ? <p className="healthy-copy"><CheckCircle2 aria-hidden="true" /> Core 返回无阻断项</p> : null}
-      {values && values.length > 0 ? <ul>{values.map((value) => <li key={value}><Ban aria-hidden="true" /> <code>{value}</code></li>)}</ul> : null}
+      <p className="section-kicker">安全检查</p><h2>{title}</h2>
+      {loading ? <p className="muted-copy">正在读取系统状态...</p> : null}
+      {!loading && values?.length === 0 ? <p className="healthy-copy"><CheckCircle2 aria-hidden="true" /> 系统当前没有阻断项</p> : null}
+      {values && values.length > 0 ? <ul>{values.map((value) => <li key={value}><Ban aria-hidden="true" /> {errorLabel(value)}</li>)}</ul> : null}
     </article>
   );
 }

@@ -20,6 +20,7 @@ import {
   recordShipment,
   type PlatformFulfillmentCommandResult,
 } from '../coreApi';
+import { humanizeError } from '../display';
 
 type PlatformFulfillmentAction = Extract<AllowedActionName,
   | 'RECORD_SHIPMENT'
@@ -161,34 +162,34 @@ export function FulfillmentCommandPanel({
             ...base,
             requestId,
             approved: decision === 'APPROVE',
-            noteCode: noteCode.trim(),
+            noteCode: normalizedReason(noteCode, decision === 'APPROVE' ? 'REQUEST_APPROVED' : 'REQUEST_REJECTED'),
           }, token);
           break;
         case 'OPEN_ARBITRATION': {
           const evidence = await createOrderActionEvidence(order.orderId, {
             action: 'OPEN_ARBITRATION',
-            reasonCode: reasonCode.trim(),
+            reasonCode: normalizedReason(reasonCode, 'ARBITRATION_REQUIRED'),
             idempotencyKey: `${nextIdempotencyKey}:evidence`,
           }, token);
           result = await openArbitration(order.orderId, {
             idempotencyKey: `${nextIdempotencyKey}:command`,
             evidenceHash: evidence.evidenceHash,
-            reasonCode: reasonCode.trim(),
+            reasonCode: normalizedReason(reasonCode, 'ARBITRATION_REQUIRED'),
           }, token);
           break;
         }
         case 'DECIDE_ARBITRATION':
           if (!outcome) return;
-          result = await decideArbitration(order.orderId, { ...base, outcome, noteCode: noteCode.trim() }, token);
+          result = await decideArbitration(order.orderId, { ...base, outcome, noteCode: normalizedReason(noteCode, 'EVIDENCE_VERIFIED') }, token);
           break;
         case 'OPEN_TAKEOVER':
-          result = await openTakeover(order.orderId, { ...base, reasonCode: reasonCode.trim() }, token);
+          result = await openTakeover(order.orderId, { ...base, reasonCode: normalizedReason(reasonCode, 'NO_SHIPMENT_AFTER_FINALITY') }, token);
           break;
         case 'DECIDE_FORCED_RECEIPT':
           result = await decideForcedReceipt(order.orderId, {
             ...base,
             approved: decision === 'APPROVE',
-            noteCode: noteCode.trim(),
+            noteCode: normalizedReason(noteCode, decision === 'APPROVE' ? 'FORCED_RECEIPT_APPROVED' : 'FORCED_RECEIPT_REJECTED'),
           }, token);
           break;
       }
@@ -206,9 +207,9 @@ export function FulfillmentCommandPanel({
   return (
     <form className="takeover-command" onSubmit={(event) => void submit(event)}>
       <div className="panel-heading">
-        <div><p className="section-kicker">Core order command</p><h3>履约操作台</h3></div>
+        <div><p className="section-kicker">履约操作</p><h3>履约操作台</h3></div>
         <span className={coreAction?.enabled ? 'status-chip status-ready' : 'status-chip status-blocked'}>
-          {actionsLoading ? 'Checking' : coreAction?.enabled ? 'Core allowed' : coreAction?.reasonCode ?? 'Not allowed'}
+          {actionsLoading ? '检查中' : coreAction?.enabled ? '可执行' : coreAction?.reasonCode ?? '暂不可执行'}
         </span>
       </div>
 
@@ -216,14 +217,15 @@ export function FulfillmentCommandPanel({
       <select id="fulfillment-action" value={definition.action} onChange={(event) => setActionName(event.target.value as PlatformFulfillmentAction)} disabled={submitting}>
         {definitions.map((item) => {
           const action = actions.find((candidate) => candidate.action === item.action);
-          return <option key={item.action} value={item.action}>{item.label} · {action?.enabled ? '可执行' : action?.reasonCode ?? '未授权'}</option>;
+          return <option key={item.action} value={item.action}>{item.label} · {action?.enabled ? '可执行' : action?.reasonCode ? reasonLabel(action.reasonCode) : '暂不能做'}</option>;
         })}
       </select>
 
       {definition.action !== 'RECORD_SHIPMENT' && definition.action !== 'OPEN_ARBITRATION' ? (
         <>
-          <label htmlFor="fulfillment-evidence">证据哈希 · bytes32</label>
-          <input id="fulfillment-evidence" value={evidenceHash} onChange={(event) => setEvidenceHash(event.target.value)} autoComplete="off" placeholder="0x + 64 hex" />
+          <label htmlFor="fulfillment-evidence">系统凭证编号（高级）</label>
+          <input id="fulfillment-evidence" value={evidenceHash} onChange={(event) => setEvidenceHash(event.target.value)} autoComplete="off" placeholder="从系统证据里复制 0x 编号" />
+          <small>没有系统生成的编号不要手填；发货和发起仲裁会自动生成凭证。</small>
         </>
       ) : null}
 
@@ -254,8 +256,8 @@ export function FulfillmentCommandPanel({
 
       {definition.action === 'OPEN_ARBITRATION' || definition.action === 'OPEN_TAKEOVER' ? (
         <>
-          <label htmlFor="fulfillment-reason">原因代码</label>
-          <input id="fulfillment-reason" value={reasonCode} onChange={(event) => setReasonCode(event.target.value.toUpperCase())} autoComplete="off" placeholder={definition.action === 'OPEN_TAKEOVER' ? 'NO_SHIPMENT_AFTER_FINALITY' : 'ARBITRATION_REQUIRED'} />
+          <label htmlFor="fulfillment-reason">处理原因</label>
+          <input id="fulfillment-reason" value={reasonCode} onChange={(event) => setReasonCode(event.target.value.toUpperCase())} autoComplete="off" placeholder="不填则自动生成" />
         </>
       ) : null}
 
@@ -280,16 +282,16 @@ export function FulfillmentCommandPanel({
 
       {definition.action === 'DECIDE_FULFILLMENT_REQUEST' || definition.action === 'DECIDE_ARBITRATION' || definition.action === 'DECIDE_FORCED_RECEIPT' ? (
         <>
-          <label htmlFor="fulfillment-note">裁决代码</label>
-          <input id="fulfillment-note" value={noteCode} onChange={(event) => setNoteCode(event.target.value.toUpperCase())} autoComplete="off" placeholder="EVIDENCE_VERIFIED" />
+          <label htmlFor="fulfillment-note">裁决原因</label>
+          <input id="fulfillment-note" value={noteCode} onChange={(event) => setNoteCode(event.target.value.toUpperCase())} autoComplete="off" placeholder="不填则自动生成" />
         </>
       ) : null}
 
       <button className="button button-primary button-full" type="submit" disabled={Boolean(disabledReason) || submitting}>
         <PackageCheck aria-hidden="true" /> {submitting ? '提交中' : `执行${definition.label}`}
       </button>
-      <p className="button-explanation">{disabledReason ?? '当前平台角色、订单状态与 Core allowedActions 均已授权。'}</p>
-      {error ? <div className="resource-state resource-state-error" role="alert"><Ban aria-hidden="true" /><div><strong>{error.code}</strong><p>{error.message}{error.correlationId ? ` · Correlation ${error.correlationId}` : ''}</p></div></div> : null}
+      <p className="button-explanation">{disabledReason ?? '当前平台角色、订单状态与系统授权均已通过。'}</p>
+      {error ? <div className="resource-state resource-state-error" role="alert"><Ban aria-hidden="true" /><div><strong>操作失败</strong><p>{humanizeError(error)}</p></div></div> : null}
     </form>
   );
 }
@@ -310,24 +312,40 @@ function commandDisabledReason(input: {
   trackingNumber: string;
 }) {
   if (!input.definition.roles.some((role) => input.roles.includes(role))) {
-    return `${input.definition.action} 不允许当前平台角色执行。`;
+    return `当前平台角色不能执行“${input.definition.label}”。`;
   }
   if (!(input.definition.states as readonly FulfillmentOrder['state'][]).includes(input.order.state)) {
-    return `订单状态 ${input.order.state} 不允许 ${input.definition.action}。`;
+    return `当前订单状态不允许执行“${input.definition.label}”。`;
   }
-  if (input.actionsLoading) return '正在读取当前订单 allowedActions。';
-  if (!input.action) return `Core 未向当前会话返回 ${input.definition.action}。`;
-  if (!input.action.enabled) return `Core 拒绝 ${input.definition.action}：${input.action.reasonCode ?? 'UnknownState'}${input.action.deadline ? ` · ${input.action.deadline}` : ''}`;
+  if (input.actionsLoading) return '正在读取当前订单能做什么。';
+  if (!input.action) return `系统暂未开放“${input.definition.label}”。`;
+  if (!input.action.enabled) return `系统暂不允许“${input.definition.label}”：${reasonLabel(input.action.reasonCode)}${input.action.deadline ? ` · 截止 ${input.action.deadline}` : ''}`;
   if (!['RECORD_SHIPMENT', 'OPEN_ARBITRATION'].includes(input.definition.action)
-    && !bytes32Pattern.test(input.evidenceHash.trim())) return '请输入 Core 要求的 bytes32 证据哈希。';
+    && !bytes32Pattern.test(input.evidenceHash.trim())) return '请从系统证据里复制 0x 凭证编号；没有编号不要手填。';
   if (input.definition.action === 'RECORD_SHIPMENT') {
     if (!['SF', 'JD', 'YTO', 'ZTO', 'STO', 'EMS'].includes(input.carrierCode)) return '请选择快递公司。';
     if (!/^[A-Za-z0-9-]{3,64}$/.test(input.trackingNumber.trim())) return '请输入有效运单号。';
   }
-  if (input.definition.action === 'DECIDE_FULFILLMENT_REQUEST' && !input.requestId) return '请选择 Core 返回的待处理换货或延期申请。';
-  if ((input.definition.action === 'OPEN_ARBITRATION' || input.definition.action === 'OPEN_TAKEOVER') && !reasonCodePattern.test(input.reasonCode.trim())) return '请输入 2—64 位有效原因代码。';
+  if (input.definition.action === 'DECIDE_FULFILLMENT_REQUEST' && !input.requestId) return '请选择系统返回的待处理换货或延期申请。';
+  if ((input.definition.action === 'OPEN_ARBITRATION' || input.definition.action === 'OPEN_TAKEOVER') && input.reasonCode.trim() && !reasonCodePattern.test(input.reasonCode.trim())) return '处理原因可以不填；如需填写，请使用大写字母、数字或下划线。';
   if (input.definition.action === 'DECIDE_ARBITRATION' && !input.outcome) return '请选择仲裁结果。';
   if ((input.definition.action === 'DECIDE_FULFILLMENT_REQUEST' || input.definition.action === 'DECIDE_FORCED_RECEIPT') && !input.decision) return '请选择批准或拒绝。';
-  if ((input.definition.action === 'DECIDE_FULFILLMENT_REQUEST' || input.definition.action === 'DECIDE_ARBITRATION' || input.definition.action === 'DECIDE_FORCED_RECEIPT') && !reasonCodePattern.test(input.noteCode.trim())) return '请输入 2—64 位有效裁决代码。';
+  if ((input.definition.action === 'DECIDE_FULFILLMENT_REQUEST' || input.definition.action === 'DECIDE_ARBITRATION' || input.definition.action === 'DECIDE_FORCED_RECEIPT') && input.noteCode.trim() && !reasonCodePattern.test(input.noteCode.trim())) return '裁决原因可以不填；如需填写，请使用大写字母、数字或下划线。';
   return null;
+}
+
+function normalizedReason(value: string, fallback: string) {
+  const normalized = value.trim().toUpperCase();
+  return reasonCodePattern.test(normalized) ? normalized : fallback;
+}
+
+function reasonLabel(value: string | null | undefined) {
+  if (!value) return '状态不匹配';
+  return ({
+    NO_SHIPMENT_AFTER_FINALITY: '超过时限仍未发货',
+    ARBITRATION_REQUIRED: '需要平台仲裁',
+    EVIDENCE_VERIFIED: '证据已核实',
+    STATE_NOT_ALLOWED: '当前订单状态不允许',
+    ROLE_NOT_ALLOWED: '当前角色不允许',
+  } as Record<string, string>)[value] ?? value.replaceAll('_', ' ').toLowerCase();
 }

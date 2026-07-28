@@ -1,4 +1,4 @@
-import { artifactVersion, type CatalogCategory, type CatalogTag, type ManagedCatalogProduct } from '@abu24k/core-artifacts';
+import type { CatalogCategory, CatalogTag, ManagedCatalogProduct } from '@abu24k/core-artifacts';
 import { Ban, Boxes, Check, FolderTree, KeyRound, RefreshCw, ShieldAlert } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import {
@@ -10,6 +10,7 @@ import { CatalogProductWorkspace } from '../components/CatalogProductWorkspace';
 import { CatalogTaxonomyWorkspace } from '../components/CatalogTaxonomyWorkspace';
 import { CoreApiError } from '../coreApi';
 import { useCoreSession } from '../coreSession';
+import { humanizeError } from '../display';
 
 type View = 'PRODUCTS' | 'TAXONOMY';
 
@@ -60,30 +61,30 @@ export function CatalogPage() {
       <header className="page-header">
         <div className="page-icon"><Boxes aria-hidden="true" /></div>
         <div>
-          <p className="eyebrow">Core authoritative catalog</p>
+          <p className="eyebrow">商品管理</p>
           <h1>商品主数据</h1>
-          <p>类目、标签、商品、SKU、媒体、让利预览、审核与库存操作全部消费同一 Core artifact；界面不计算金额或猜测权限。</p>
+          <p>类目、标签、商品、规格、图片、让利预览、审核与库存操作全部以系统返回为准；界面不自己计算金额或猜测权限。</p>
         </div>
-        <div className="requirement-list"><code>ADM-CAT-001—006</code><code>{artifactVersion}</code></div>
+        <div className="requirement-list"><code>商品审核</code><code>库存管理</code></div>
       </header>
 
       {!session ? (
         <section className="panel catalog-session-gate">
-          <div><KeyRound aria-hidden="true" /><span><strong>连接平台钱包</strong><small>ADMIN / OPERATOR 可写；AUDITOR 只读。所有请求由 Core SIWE/JWT 和当前数据库角色再校验。</small></span></div>
-          <button className="button button-primary" type="button" onClick={() => void connect()} disabled={status === 'CONNECTING'}><KeyRound aria-hidden="true" />{status === 'CONNECTING' ? '认证中' : 'SIWE 连接'}</button>
+          <div><KeyRound aria-hidden="true" /><span><strong>连接平台钱包</strong><small>管理员和运营可操作，审核员只能查看。连接后系统会再次校验当前钱包权限。</small></span></div>
+          <button className="button button-primary" type="button" onClick={() => void connect()} disabled={status === 'CONNECTING'}><KeyRound aria-hidden="true" />{status === 'CONNECTING' ? '连接中' : '连接钱包'}</button>
         </section>
       ) : !canRead ? (
-        <CatalogError error={new CoreApiError({ code: 'Forbidden', message: '当前会话没有 Catalog 读取权限。', status: 403 })} />
+        <CatalogError error={new CoreApiError({ code: 'Forbidden', message: '当前钱包没有商品管理读取权限。', status: 403 })} />
       ) : (
         <>
-          <section className="catalog-overview" aria-label="Catalog 概览">
+          <section className="catalog-overview" aria-label="商品管理概览">
             <div><span>商品</span><strong>{loading ? '—' : products.length}</strong><small>全生命周期</small></div>
             <div><span>类目</span><strong>{loading ? '—' : categories.length}</strong><small>三级版本树</small></div>
             <div><span>标签</span><strong>{loading ? '—' : tags.length}</strong><small>版本化状态</small></div>
-            <div><span>当前角色</span><strong>{session.roles.join(' / ')}</strong><small>{canWrite ? 'Core 写入仍需 allowedActions' : 'AUDITOR 只读'}</small></div>
-            <button className="icon-button" type="button" onClick={() => setReload((value) => value + 1)} disabled={loading} aria-label="重新读取 Catalog" title="重新读取 Catalog"><RefreshCw className={loading ? 'spin' : undefined} aria-hidden="true" /></button>
+            <div><span>当前角色</span><strong>{roleListLabel(session.roles)}</strong><small>{canWrite ? '写入仍需系统授权' : '审核员只读'}</small></div>
+            <button className="icon-button" type="button" onClick={() => setReload((value) => value + 1)} disabled={loading} aria-label="刷新商品列表" title="刷新商品列表"><RefreshCw className={loading ? 'spin' : undefined} aria-hidden="true" /></button>
           </section>
-          <div className="catalog-view-switch" role="tablist" aria-label="Catalog 管理视图">
+          <div className="catalog-view-switch" role="tablist" aria-label="商品管理视图">
             <button role="tab" aria-selected={view === 'PRODUCTS'} className={view === 'PRODUCTS' ? 'is-active' : undefined} type="button" onClick={() => setView('PRODUCTS')}><Boxes aria-hidden="true" />商品与库存</button>
             <button role="tab" aria-selected={view === 'TAXONOMY'} className={view === 'TAXONOMY' ? 'is-active' : undefined} type="button" onClick={() => setView('TAXONOMY')}><FolderTree aria-hidden="true" />类目与标签</button>
           </div>
@@ -115,13 +116,13 @@ export function CatalogPage() {
       )}
       {error ? <CatalogError error={error} /> : null}
       {notice ? <p className="healthy-copy catalog-notice" role="status"><Check aria-hidden="true" />{notice}</p> : null}
-      <section className="catalog-snapshot-rule"><ShieldAlert aria-hidden="true" /><div><strong>精确阻断边界</strong><p>类目/标签启停、商品写入和库存调整被场次、预留或 Locked/Disputed 负债阻断时，界面显示 Core 返回的 blockingResource；历史商品只隐藏/下架，不物理删除。</p></div></section>
+      <section className="catalog-snapshot-rule"><ShieldAlert aria-hidden="true" /><div><strong>精确阻断边界</strong><p>类目、标签、商品和库存如果被活动、预留订单或未结清记录锁定，页面会明确提示原因；历史商品只隐藏或下架，不会物理删除。</p></div></section>
     </>
   );
 }
 
 function CatalogLoading() {
-  return <div className="panel catalog-page-loading" role="status" aria-label="正在读取 Admin Catalog"><span /><span /><span /></div>;
+  return <div className="panel catalog-page-loading" role="status" aria-label="正在读取商品管理数据"><span /><span /><span /></div>;
 }
 
 function CatalogError({ error }: { error: CoreApiError }) {
@@ -129,7 +130,7 @@ function CatalogError({ error }: { error: CoreApiError }) {
   return (
     <div className="resource-state resource-state-error catalog-error" role="alert">
       <Ban aria-hidden="true" />
-      <div><strong>{error.code}</strong><p>{error.message}</p>{blocking ? <code>blockingResource: {blocking.type} · {blocking.id} · {blocking.state}</code> : null}{error.correlationId ? <small>Correlation ID: {error.correlationId}</small> : null}</div>
+      <div><strong>操作失败</strong><p>{humanizeError(error)}</p>{blocking ? <details className="catalog-technical-evidence"><summary>高级锁定信息</summary><code>锁定资源：{lockResourceTypeLabel(blocking.type)} · {blocking.id} · {lockResourceStateLabel(blocking.state)}</code></details> : null}{error.correlationId ? <small>编号：{error.correlationId}</small> : null}</div>
     </div>
   );
 }
@@ -146,6 +147,34 @@ function replaceBy<T>(current: readonly T[], saved: T, key: (value: T) => string
   return current.some((item) => key(item) === key(saved)) ? current.map((item) => key(item) === key(saved) ? saved : item) : [saved, ...current];
 }
 
+function roleListLabel(roles: readonly string[]) {
+  return roles.map((role) => ({
+    ADMIN: '管理员',
+    OPERATOR: '运营',
+    AUDITOR: '审核员',
+    MERCHANT: '商家',
+  } as Record<string, string>)[role] ?? role).join(' / ');
+}
+
+function lockResourceTypeLabel(value: string) {
+  return ({
+    SESSION: '秒杀活动',
+    ORDER: '订单',
+    INVENTORY: '库存',
+    POLICY: '规则',
+    PRODUCT: '商品',
+  } as Record<string, string>)[value] ?? value;
+}
+
+function lockResourceStateLabel(value: string) {
+  return ({
+    LOCKED: '锁定中',
+    SCHEDULED: '已排期',
+    ACTIVE: '生效中',
+    DISPUTED: '争议中',
+  } as Record<string, string>)[value] ?? value;
+}
+
 function asCoreError(cause: unknown) {
-  return cause instanceof CoreApiError ? cause : new CoreApiError({ code: 'ExternalBlocked', message: 'Admin Catalog Core 能力不可用', status: 503 });
+  return cause instanceof CoreApiError ? cause : new CoreApiError({ code: 'ExternalBlocked', message: '商品管理服务暂时不可用', status: 503 });
 }

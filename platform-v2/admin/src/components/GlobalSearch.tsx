@@ -10,6 +10,7 @@ import {
 import { CalendarDays, RotateCcw, Search, SlidersHorizontal } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
 import type { AdminOrderSearchFilters } from '../coreApi';
+import { commonStateLabel } from '../display';
 
 const quickRanges = ['今日', '昨日', '近 7 天', '近 30 天'] as const;
 const orderKinds = ['ORDINARY', 'SECKILL', 'FALLBACK_RETAIL'] as const;
@@ -72,22 +73,22 @@ export function GlobalSearch({ enabled = false, loading = false, onSearch }: Pro
     <details className="search-panel">
       <summary>
         <span className="summary-title"><SlidersHorizontal aria-hidden="true" /> 高级组合检索</span>
-        <span className="summary-meta">订单 AND 精确检索 · UID / 手机号仍受限</span>
+        <span className="summary-meta">多条件精确检索 · UID / 手机号仍受限</span>
       </summary>
       <form className="search-form" onSubmit={submit} aria-describedby="search-capability">
         <fieldset className="segmented-field">
           <legend>条件关系</legend>
           <div className="segmented" aria-label="条件关系">
-            <button className="is-active" type="button" aria-pressed="true" disabled={!enabled}>AND</button>
-            <button type="button" aria-pressed="false" disabled title="OR 查询未发布">OR</button>
+	            <button className="is-active" type="button" aria-pressed="true" disabled={!enabled}>全部满足</button>
+	            <button type="button" aria-pressed="false" disabled title="任一条件查询暂未开放">任一满足</button>
           </div>
         </fieldset>
 
         <div className="search-grid">
           <label>订单号<input value={form.orderId} onChange={(event) => set('orderId', event.target.value)} disabled={!enabled} autoComplete="off" placeholder="精确匹配" /></label>
-          <label>商品 ID<input value={form.productId} onChange={(event) => set('productId', event.target.value)} disabled={!enabled} autoComplete="off" placeholder="精确匹配" /></label>
-          <label>SKU ID<input value={form.skuId} onChange={(event) => set('skuId', event.target.value)} disabled={!enabled} autoComplete="off" placeholder="精确匹配" /></label>
-          <label>TxHash<input value={form.txHash} onChange={(event) => set('txHash', event.target.value)} disabled={!enabled} autoComplete="off" placeholder="0x… bytes32" /></label>
+	          <label>商品编号<input value={form.productId} onChange={(event) => set('productId', event.target.value)} disabled={!enabled} autoComplete="off" placeholder="精确匹配" /></label>
+	          <label>规格编号<input value={form.skuId} onChange={(event) => set('skuId', event.target.value)} disabled={!enabled} autoComplete="off" placeholder="精确匹配" /></label>
+	          <label>付款记录编号（高级）<input value={form.txHash} onChange={(event) => set('txHash', event.target.value)} disabled={!enabled} autoComplete="off" placeholder="从订单付款记录复制" /><small>不知道这个编号就留空。</small></label>
           <label>
             钱包地址
             <span className="inline-control">
@@ -96,12 +97,12 @@ export function GlobalSearch({ enabled = false, loading = false, onSearch }: Pro
             </span>
           </label>
           <label>用户 UID<input disabled autoComplete="off" placeholder="请在全局操作中精确查询" /></label>
-          <label>绑定手机号<input disabled type="tel" autoComplete="off" placeholder="Core 未发布 PII 查询" /></label>
+	          <label>绑定手机号<input disabled type="tel" autoComplete="off" placeholder="手机号查询暂未开放" /></label>
           <label>开始时间<input value={form.start} onChange={(event) => { setQuickRange(null); set('start', event.target.value); }} disabled={!enabled} type="datetime-local" /></label>
           <label>结束时间<input value={form.end} onChange={(event) => { setQuickRange(null); set('end', event.target.value); }} disabled={!enabled} type="datetime-local" /></label>
-          <label>订单状态<select value={form.state} onChange={(event) => set('state', event.target.value as SearchForm['state'])} disabled={!enabled}><option value="">全部</option>{orderProjectionStates.map((state) => <option key={state}>{state}</option>)}</select></label>
-          <label>履约方式<select value={form.fulfillmentMode} onChange={(event) => set('fulfillmentMode', event.target.value as SearchForm['fulfillmentMode'])} disabled={!enabled}><option value="">全部</option>{fulfillmentModes.map((mode) => <option key={mode}>{mode}</option>)}</select></label>
-          <label>订单类型<select value={form.orderKind} onChange={(event) => set('orderKind', event.target.value as SearchForm['orderKind'])} disabled={!enabled}><option value="">全部</option>{orderKinds.map((kind) => <option key={kind}>{kind}</option>)}</select></label>
+	          <label>订单状态<select value={form.state} onChange={(event) => set('state', event.target.value as SearchForm['state'])} disabled={!enabled}><option value="">全部</option>{orderProjectionStates.map((state) => <option key={state} value={state}>{stateLabel(state)}</option>)}</select></label>
+	          <label>履约方式<select value={form.fulfillmentMode} onChange={(event) => set('fulfillmentMode', event.target.value as SearchForm['fulfillmentMode'])} disabled={!enabled}><option value="">全部</option>{fulfillmentModes.map((mode) => <option key={mode} value={mode}>{fulfillmentModeLabel(mode)}</option>)}</select></label>
+	          <label>订单类型<select value={form.orderKind} onChange={(event) => set('orderKind', event.target.value as SearchForm['orderKind'])} disabled={!enabled}><option value="">全部</option>{orderKinds.map((kind) => <option key={kind} value={kind}>{orderKindLabel(kind)}</option>)}</select></label>
           <label>
             业务投影
             <select value={form.status} onChange={(event) => set('status', event.target.value as StatusFilter)} disabled={!enabled}>
@@ -111,7 +112,7 @@ export function GlobalSearch({ enabled = false, loading = false, onSearch }: Pro
               <option value="breaker">熔断状态</option>
             </select>
           </label>
-          {form.status === 'breaker' ? <label>Breaker scope<select value={form.breakerScope} onChange={(event) => set('breakerScope', event.target.value as BreakerScope)} disabled={!enabled}>{breakerScopes.map((scope) => <option key={scope}>{scope}</option>)}</select></label> : null}
+	          {form.status === 'breaker' ? <label>安全开关范围<select value={form.breakerScope} onChange={(event) => set('breakerScope', event.target.value as BreakerScope)} disabled={!enabled}>{breakerScopes.map((scope) => <option key={scope} value={scope}>{breakerScopeLabel(scope)}</option>)}</select></label> : null}
         </div>
 
         <div className="search-footer">
@@ -126,7 +127,7 @@ export function GlobalSearch({ enabled = false, loading = false, onSearch }: Pro
             <button className="button button-primary" type="submit" disabled={!enabled || loading}><Search aria-hidden="true" /> {loading ? '查询中' : '查询'}</button>
           </div>
         </div>
-        <p className="inline-notice" id="search-capability">{enabled ? '订单检索条件由 Core 服务端按 AND 执行。精确 UID、模糊钱包和 OR 请使用全局操作；手机号和 Yellow queue 仍保持 fail-closed。' : '连接 ADMIN / OPERATOR / AUDITOR 会话后启用精确订单检索。'}</p>
+        <p className="inline-notice" id="search-capability">{enabled ? '订单检索由系统按“全部满足”执行。精确 UID、模糊钱包和“任一满足”请使用全局操作；手机号和异常黄灯查询仍保持关闭。' : '连接管理员、运营或审计会话后启用精确订单检索。'}</p>
       </form>
     </details>
   );
@@ -170,3 +171,31 @@ function localInput(value: Date) {
 }
 
 function trim(value: string) { return value.trim(); }
+
+function stateLabel(state: OrderProjectionState) {
+  return commonStateLabel(state);
+}
+
+function fulfillmentModeLabel(mode: FulfillmentMode) {
+  return ({
+    DELIVERY: '快递配送',
+    PICKUP: '到店自提',
+  } as Record<FulfillmentMode, string>)[mode] ?? mode;
+}
+
+function orderKindLabel(kind: OrderKind) {
+  return ({
+    ORDINARY: '普通订单',
+    SECKILL: '秒杀订单',
+    FALLBACK_RETAIL: '普通兜底订单',
+  } as Record<OrderKind, string>)[kind] ?? kind;
+}
+
+function breakerScopeLabel(scope: BreakerScope) {
+  return ({
+    NEW_PAYMENT: '暂停新支付',
+    SECKILL_PURCHASE: '暂停秒杀购买',
+    SETTLEMENT_EXECUTION: '暂停结算执行',
+    COVERAGE: '资金覆盖保护',
+  } as Record<string, string>)[scope] ?? scope;
+}

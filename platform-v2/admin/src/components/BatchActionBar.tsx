@@ -44,23 +44,39 @@ export function BatchActionBar({
           </button>
         ))}
         {ordinarySoftDelete ? (
-          <button className="button button-danger" type="button" disabled title="等待 Core allowedActions">
-            <Trash2 aria-hidden="true" /> 逻辑软删除 · 等待 allowedActions
+          <button className="button button-danger" type="button" disabled title="等待系统授权">
+            <Trash2 aria-hidden="true" /> 逻辑软删除 · 待授权
           </button>
         ) : null}
       </div>
       {preview ? (
         <div className="batch-preview" role="status">
-          <span>Core enabled intersection</span>
-          <div>{preview.enabledActionIntersection.length ? preview.enabledActionIntersection.map((action) => <code key={action}>{action}</code>) : <strong>无共同可执行操作</strong>}</div>
-          <small>{preview.rows.length} 行逐项 allowedActions 已校验。订单批次接口仅发布只读预览，本页不会从 intersection 生成批量写入。</small>
+          <span>共同能做的操作</span>
+          <div>{preview.enabledActionIntersection.length ? preview.enabledActionIntersection.map((action) => <code key={action}>{batchActionLabel(action)}</code>) : <strong>无共同可用操作</strong>}</div>
+          <small>{preview.rows.length} 行已逐项校验。当前仅展示共同操作预览，不会直接批量写入。</small>
         </div>
       ) : null}
       {previewError ? <p className="batch-preview-error" role="alert">{previewError}</p> : null}
       <p className="batch-reason">
-        {immutable ? '资金、链上、审计或历史证据属于不可删除资源。' : '普通资源也必须由 Core 返回逐行与批次 allowedActions 后才能执行。'}
+        {immutable ? '资金、链上、审计或历史证据属于不可删除资源。' : '普通资源也必须逐行校验通过后才能执行。'}
         {' '}CSV / Excel 请在全局操作中按资源逐行权限导出；打印、任意批量修改和批量审核在本接口保持禁用。
       </p>
     </section>
   );
+}
+
+function batchActionLabel(action: string) {
+  return ({
+    RECORD_SHIPMENT: '发货',
+    REQUEST_FORCED_RECEIPT: '申请平台确认收货',
+    VERIFY_PICKUP: '核销自提',
+    DECIDE_FULFILLMENT_REQUEST: '处理履约申请',
+    DECIDE_FORCED_RECEIPT: '处理强制收货',
+    DECIDE_ARBITRATION: '处理仲裁',
+    EXPORT: '导出',
+    HIDE: '隐藏',
+    DELIST: '下架',
+    APPROVE: '通过',
+    REJECT: '拒绝',
+  } as Record<string, string>)[action] ?? action.replace(/_/g, ' ').toLowerCase();
 }

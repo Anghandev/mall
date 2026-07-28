@@ -3,6 +3,7 @@ import { Ban, ExternalLink, FileImage, LoaderCircle, Video } from 'lucide-react'
 import { useState } from 'react';
 import { fetchMediaReadAccess } from '../catalogAdminApi';
 import { CoreApiError } from '../coreApi';
+import { humanizeError } from '../display';
 
 export function CatalogMediaAccess({ assetId, label, token }: { assetId: string; label: string; token: string }) {
   const [access, setAccess] = useState<MediaReadAccessProjection | null>(null);
@@ -33,14 +34,14 @@ export function CatalogMediaAccess({ assetId, label, token }: { assetId: string;
       {!access ? (
         <button className="button button-quiet" type="button" onClick={() => void load()} disabled={loading}>
           {loading ? <LoaderCircle className="spin" aria-hidden="true" /> : <FileImage aria-hidden="true" />}
-          {loading ? '获取中' : '获取受控读取地址'}
+          {loading ? '获取中' : '查看媒体'}
         </button>
       ) : (
         <>
           <div className="catalog-media-frame">
             {access.contentType === 'video/mp4'
-              ? <video aria-label={`${label}，Core 受控视频`} controls preload="metadata" src={access.readUrl} />
-              : <img src={access.readUrl} alt={`${label}，Core 受控媒体`} loading="lazy" />}
+              ? <video aria-label={`${label}，平台校验视频`} controls preload="metadata" src={access.readUrl} />
+              : <img src={access.readUrl} alt={`${label}，平台校验媒体`} loading="lazy" />}
           </div>
           <div className="catalog-media-access">
             {access.contentType === 'video/mp4' ? <Video aria-hidden="true" /> : <FileImage aria-hidden="true" />}
@@ -50,7 +51,7 @@ export function CatalogMediaAccess({ assetId, label, token }: { assetId: string;
           <small>有效至 {formatDate(access.expiresAt)}</small>
         </>
       )}
-      {error ? <div className="catalog-inline-error" role="alert"><Ban aria-hidden="true" /><span>{error.code}: {error.message}</span></div> : null}
+      {error ? <div className="catalog-inline-error" role="alert"><Ban aria-hidden="true" /><span>{humanizeError(error)}</span></div> : null}
     </article>
   );
 }

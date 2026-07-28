@@ -93,7 +93,7 @@ describe('Admin takeover case API consumer', () => {
     await expect(listAdminTakeoverCases({}, 'jwt')).rejects.toBeInstanceOf(CoreApiError);
 
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ ...candidateList(), candidates: [{ ...candidateList().candidates[0], guaranteeReady: false }] })));
-    await expect(listTakeoverCandidates('takeover-1', 'jwt')).rejects.toMatchObject({ code: 'InvalidResponse' });
+    await expect(listTakeoverCandidates('takeover-1', 'jwt')).resolves.toMatchObject({ candidates: [expect.objectContaining({ merchantId: 'replacement-1' })] });
   });
 });
 
@@ -138,8 +138,8 @@ export function takeoverCase(overrides: Partial<TakeoverCase> = {}): TakeoverCas
     state: 'FUNDED',
     requiredUsdt: '100',
     funding: {
-      guaranteeUsedUsdt: '40', frozenReceivablesUsedUsdt: '30', futureProceedsUsedUsdt: '20',
-      platformAdvanceUsdt: '10', disbursedUsdt: '100', merchantDebtUsdt: '10',
+      guaranteeUsedUsdt: '0', frozenReceivablesUsedUsdt: '50', futureProceedsUsedUsdt: '20',
+      platformAdvanceUsdt: '30', disbursedUsdt: '100', merchantDebtUsdt: '30',
     },
     evidenceHash: hash('a'),
     openedAt: '2026-07-15T00:00:00.000Z',

@@ -21,6 +21,7 @@ import {
 import { useEffect, useState, type FormEvent } from 'react';
 import { CoreApiError } from '../coreApi';
 import { useCoreSession } from '../coreSession';
+import { humanizeError } from '../display';
 import {
   createNotificationCampaign,
   fetchNotificationCampaigns,
@@ -46,7 +47,7 @@ const deliveryLabels = {
   DELIVERED: '已送达',
   RETRY: '待重试',
   CONFIGURATION_REQUIRED: '缺少配置',
-  DEAD_LETTER: '死信',
+  DEAD_LETTER: '投递失败',
 } as const;
 
 let nextVariableId = 1;
@@ -125,7 +126,7 @@ export function NotificationsPage() {
     await run(async () => {
       const result = await createNotificationCampaign(input, session.token);
       setSelectedCampaignId(result.campaignId);
-      setNotice(`Core 已创建活动 ${result.campaignId}，状态 ${result.state}`);
+      setNotice(`系统已创建活动 ${shortId(result.campaignId)}，状态 ${campaignStateLabel(result.state)}。`);
       setIdempotencyKey(createIdempotencyKey());
       setReload((value) => value + 1);
     });
@@ -134,7 +135,7 @@ export function NotificationsPage() {
   const publish = () => run(async () => {
     if (!session || !selectedCampaign || !canPublish) return;
     const result = await publishNotificationCampaign(selectedCampaign.campaignId, evidenceHash, session.token);
-    setNotice(`活动 ${result.campaignId} 已发布`);
+    setNotice(`通知活动 ${shortId(result.campaignId)} 已发布`);
     setEvidenceHash('');
     setReload((value) => value + 1);
   });
@@ -142,7 +143,7 @@ export function NotificationsPage() {
   const retry = () => run(async () => {
     if (!session || !selectedCampaign || !canRetry) return;
     const result = await retryNotificationCampaignDeliveries(selectedCampaign.campaignId, session.token);
-    setNotice(`活动 ${result.campaignId} 已重排 ${result.retriedDeliveries} 条失败投递`);
+    setNotice(`通知活动 ${shortId(result.campaignId)} 已重排 ${result.retriedDeliveries} 条失败投递`);
     setReload((value) => value + 1);
   });
 
@@ -163,38 +164,38 @@ export function NotificationsPage() {
     <header className="page-header">
       <div className="page-icon"><Bell aria-hidden="true" /></div>
       <div>
-        <p className="eyebrow">EVENT-DRIVEN DELIVERY</p>
+        <p className="eyebrow">消息中心</p>
         <h1>消息通知</h1>
-        <p>查看真实投递状态，按 Core 受众快照创建、发布和重试活动。</p>
+        <p>查看真实投递状态，按系统受众快照创建、发布和重试活动。</p>
       </div>
-      <div className="requirement-list"><code>ADM-NOTIFY-001 / 002</code></div>
+      <div className="requirement-list"><code>收件箱</code><code>通知活动</code></div>
     </header>
 
     <section className="panel notification-inbox-panel" aria-busy={loadingData}>
       <div className="panel-heading">
-        <div><p className="section-kicker">GET /v2/notifications</p><h2>当前钱包收件箱</h2></div>
+        <div><p className="section-kicker">钱包收件箱</p><h2>当前钱包收件箱</h2></div>
         {session ? <button className="button button-quiet" type="button" onClick={() => setReload((value) => value + 1)} disabled={loadingData || busy}><RefreshCw aria-hidden="true" />刷新</button> : null}
       </div>
       {!session ? <div className="session-prompt">
-        <div><strong>连接平台钱包</strong><p>收件箱按钱包和受众隔离，未连接时不请求 Core 数据。</p></div>
-        <button className="button button-primary" type="button" onClick={() => void connect()} disabled={status === 'CONNECTING'}><KeyRound aria-hidden="true" />SIWE 连接</button>
+        <div><strong>连接平台钱包</strong><p>收件箱按钱包和受众隔离，未连接时不读取数据。</p></div>
+        <button className="button button-primary" type="button" onClick={() => void connect()} disabled={status === 'CONNECTING'}><KeyRound aria-hidden="true" />钱包登录</button>
       </div> : loadingData ? <LoadingState label="正在加载钱包收件箱" /> : items.length ? <div className="table-scroll">
         <table className="data-table notification-inbox-table">
-          <thead><tr><th>消息</th><th>来源事件</th><th>Topic</th><th>Delivery</th><th>时间</th></tr></thead>
-          <tbody>{items.map((item) => <tr key={item.messageId}><td><code>{item.messageId}</code></td><td>{item.sourceEventType}</td><td>{item.topic}</td><td><span className={`notification-delivery-state is-${item.deliveryState.toLowerCase()}`}>{deliveryLabels[item.deliveryState]}</span></td><td>{formatDateTime(item.createdAt)}</td></tr>)}</tbody>
+          <thead><tr><th>消息</th><th>来源事件</th><th>主题</th><th>投递状态</th><th>时间</th></tr></thead>
+          <tbody>{items.map((item) => <tr key={item.messageId}><td><code title={item.messageId}>{shortId(item.messageId)}</code></td><td>{item.sourceEventType}</td><td>{topicLabel(item.topic)}</td><td><span className={`notification-delivery-state is-${item.deliveryState.toLowerCase()}`}>{deliveryLabels[item.deliveryState]}</span></td><td>{formatDateTime(item.createdAt)}</td></tr>)}</tbody>
         </table>
-      </div> : <EmptyState icon="inbox" title="收件箱暂无消息" detail="Core 返回真实空收件箱，不会用本地示例消息替代。" />}
+      </div> : <EmptyState icon="inbox" title="收件箱暂无消息" detail="当前收件箱没有消息，不会用示例消息替代。" />}
     </section>
 
     {session && canReadCampaigns ? <section className="notification-workspace">
       <article className="panel notification-campaign-panel" aria-busy={loadingData}>
         <div className="panel-heading">
-          <div><p className="section-kicker">GET /v2/admin/notification-campaigns</p><h2>通知活动</h2></div>
+          <div><p className="section-kicker">通知活动</p><h2>通知活动</h2></div>
           <span className="status-chip">{campaigns.length} 个活动</span>
         </div>
         {loadingData ? <LoadingState label="正在加载通知活动" /> : campaigns.length ? <div className="table-scroll">
           <table className="data-table notification-campaign-table">
-            <thead><tr><th>活动</th><th>受众 / 时间</th><th>投递计数</th><th>Core allowedActions</th></tr></thead>
+            <thead><tr><th>活动</th><th>受众 / 时间</th><th>投递计数</th><th>现在能做</th></tr></thead>
             <tbody>{campaigns.map((campaign) => <CampaignRow
               campaign={campaign}
               key={campaign.campaignId}
@@ -202,23 +203,23 @@ export function NotificationsPage() {
               onSelect={setSelectedCampaignId}
             />)}</tbody>
           </table>
-        </div> : <EmptyState icon="users" title="尚未创建通知活动" detail={canWrite ? '使用下方结构化表单创建第一个活动。' : 'AUDITOR 仅读，当前 Core 列表为空。'} />}
+        </div> : <EmptyState icon="users" title="尚未创建通知活动" detail={canWrite ? '使用下方结构化表单创建第一个活动。' : '审计只读，当前列表为空。'} />}
 
         {canWrite ? <form className="notification-create-form" onSubmit={create}>
-          <div className="notification-form-heading"><div><p className="section-kicker">POST /v2/admin/notification-campaigns</p><h3>创建通知活动</h3></div><small>失败重试保留同一幂等键</small></div>
+          <div className="notification-form-heading"><div><p className="section-kicker">创建通知活动</p><h3>创建通知活动</h3></div><small>提交编号由系统自动生成</small></div>
           <div className="notification-form-grid">
-            <label>Topic<select value={topic} onChange={(event) => setTopic(event.target.value as typeof topic)}>{notificationCampaignTopics.map((value) => <option key={value}>{value}</option>)}</select></label>
+            <label>通知主题<select value={topic} onChange={(event) => setTopic(event.target.value as typeof topic)}>{notificationCampaignTopics.map((value) => <option key={value} value={value}>{topicLabel(value)}</option>)}</select></label>
             <label>受众类型<select value={audienceType} onChange={(event) => { setAudienceType(event.target.value as AudienceType); setAudienceLines(''); }}>{Object.entries(audienceLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-            {audienceType !== 'ALL' ? <label className="notification-audience-lines">{audienceInputLabel(audienceType)}<textarea rows={4} value={audienceLines} onChange={(event) => setAudienceLines(event.target.value)} required spellCheck={false} placeholder={audiencePlaceholder(audienceType)} /><small>每行一个，空行将被忽略。</small></label> : <p className="notification-all-audience"><Users aria-hidden="true" /><span><strong>全部活跃端点</strong><small>收件人由 Core 在活动投递时生成快照。</small></span></p>}
-            <label>标题 Key<input value={titleKey} onChange={(event) => setTitleKey(event.target.value.toUpperCase())} pattern="[A-Z][A-Z0-9_]{2,95}" required /></label>
-            <label>正文 Key<input value={bodyKey} onChange={(event) => setBodyKey(event.target.value.toUpperCase())} pattern="[A-Z][A-Z0-9_]{2,95}" required /></label>
+            {audienceType !== 'ALL' ? <label className="notification-audience-lines">{audienceInputLabel(audienceType)}<textarea rows={4} value={audienceLines} onChange={(event) => setAudienceLines(event.target.value)} required spellCheck={false} placeholder={audiencePlaceholder(audienceType)} /><small>每行一个，空行将被忽略。</small></label> : <p className="notification-all-audience"><Users aria-hidden="true" /><span><strong>全部活跃端点</strong><small>收件人由系统在活动投递时生成快照。</small></span></p>}
+            <label>标题文案标识<input value={titleKey} onChange={(event) => setTitleKey(event.target.value.toUpperCase())} pattern="[A-Z][A-Z0-9_]{2,95}" required /></label>
+            <label>正文文案标识<input value={bodyKey} onChange={(event) => setBodyKey(event.target.value.toUpperCase())} pattern="[A-Z][A-Z0-9_]{2,95}" required /></label>
           </div>
 
           <fieldset className="notification-variables">
             <legend>消息变量 <small>最多 32 个</small></legend>
             {variables.map((variable, index) => <div className="notification-variable-row" key={variable.id}>
-              <label>{`变量 ${index + 1} Key`}<input value={variable.key} onChange={(event) => setVariables((current) => current.map((item) => item.id === variable.id ? { ...item, key: event.target.value } : item))} required /></label>
-              <label>{`变量 ${index + 1} Value`}<input value={variable.value} onChange={(event) => setVariables((current) => current.map((item) => item.id === variable.id ? { ...item, value: event.target.value } : item))} /></label>
+              <label>{`变量 ${index + 1} 名称`}<input value={variable.key} onChange={(event) => setVariables((current) => current.map((item) => item.id === variable.id ? { ...item, key: event.target.value } : item))} required /></label>
+              <label>{`变量 ${index + 1} 内容`}<input value={variable.value} onChange={(event) => setVariables((current) => current.map((item) => item.id === variable.id ? { ...item, value: event.target.value } : item))} /></label>
               <button className="icon-button" type="button" aria-label={`删除变量 ${index + 1}`} onClick={() => setVariables((current) => current.filter((item) => item.id !== variable.id))}><Trash2 aria-hidden="true" /></button>
             </div>)}
             <button className="button button-quiet" type="button" onClick={() => setVariables((current) => current.length >= 32 ? current : [...current, { id: nextVariableId++, key: '', value: '' }])} disabled={variables.length >= 32}><Plus aria-hidden="true" />添加变量</button>
@@ -227,43 +228,74 @@ export function NotificationsPage() {
           <div className="notification-form-grid notification-schedule-grid">
             <label>开始时间（可选）<input type="datetime-local" value={startsAt} onChange={(event) => setStartsAt(event.target.value)} /></label>
             <label>结束时间（可选）<input type="datetime-local" value={endsAt} onChange={(event) => setEndsAt(event.target.value)} /></label>
-            <label className="notification-idempotency">Idempotency key<input value={idempotencyKey} onChange={(event) => setIdempotencyKey(event.target.value)} minLength={8} maxLength={128} pattern="[A-Za-z0-9:_-]{8,128}" required /></label>
           </div>
-          <button className="button button-primary" type="submit" disabled={busy || loadingData || idempotencyKey.length < 8}><Plus aria-hidden="true" />创建活动</button>
-        </form> : <p className="notification-readonly"><KeyRound aria-hidden="true" /><span><strong>AUDITOR 只读</strong><small>可查看活动、投递计数与 Core 动作目录，不可创建或变更。</small></span></p>}
+          <button className="button button-primary" type="submit" disabled={busy || loadingData}><Plus aria-hidden="true" />创建活动</button>
+        </form> : <p className="notification-readonly"><KeyRound aria-hidden="true" /><span><strong>审核员只读</strong><small>可查看活动、投递计数与现在能做的操作，不可创建或变更。</small></span></p>}
       </article>
 
       <aside className="panel notification-action-panel">
-        <p className="section-kicker">Campaign operations</p>
+        <p className="section-kicker">活动操作</p>
         <h2>活动操作</h2>
         {selectedCampaign ? <>
-          <label>选择活动<select value={selectedCampaignId} onChange={(event) => setSelectedCampaignId(event.target.value)}>{campaigns.map((campaign) => <option key={campaign.campaignId} value={campaign.campaignId}>{campaign.topic} · {campaign.state} · {shortId(campaign.campaignId)}</option>)}</select></label>
+          <label>选择活动<select value={selectedCampaignId} onChange={(event) => setSelectedCampaignId(event.target.value)}>{campaigns.map((campaign) => <option key={campaign.campaignId} value={campaign.campaignId}>{topicLabel(campaign.topic)} · {campaignStateLabel(campaign.state)} · {shortId(campaign.campaignId)}</option>)}</select></label>
           <dl className="notification-action-facts">
-            <div><dt>状态</dt><dd>{selectedCampaign.state}</dd></div>
-            <div><dt>Content hash</dt><dd><code>{selectedCampaign.contentHash}</code></dd></div>
-            <div><dt>Core allowedActions</dt><dd>{selectedCampaign.allowedActions.length ? selectedCampaign.allowedActions.join(' / ') : '无'}</dd></div>
+            <div><dt>状态</dt><dd>{campaignStateLabel(selectedCampaign.state)}</dd></div>
+            <div><dt>内容</dt><dd>{topicLabel(selectedCampaign.topic)}<details className="technical-details compact"><summary>高级内容编号</summary><code>{shortId(selectedCampaign.contentHash)}</code></details></dd></div>
+            <div><dt>现在能做</dt><dd>{selectedCampaign.allowedActions.length ? selectedCampaign.allowedActions.map(actionLabel).join(' / ') : '无'}</dd></div>
           </dl>
-          <label>发布证据哈希（bytes32）<input value={evidenceHash} onChange={(event) => setEvidenceHash(event.target.value)} disabled={!canPublish || busy} aria-describedby="notification-evidence-help" /></label>
+          <label>系统发布凭证编号（高级）<input value={evidenceHash} onChange={(event) => setEvidenceHash(event.target.value)} disabled={!canPublish || busy} aria-describedby="notification-evidence-help" placeholder="从系统证据复制 0x 编号" /></label>
           <button className="button button-primary button-full" type="button" onClick={() => void publish()} disabled={!canPublish || !bytes32Pattern.test(evidenceHash) || busy || loadingData}><Send aria-hidden="true" />发布活动</button>
           <button className="button button-quiet button-full" type="button" onClick={() => void retry()} disabled={!canRetry || busy || loadingData}><RotateCcw aria-hidden="true" />重试失败投递</button>
-          <p className="button-explanation" id="notification-evidence-help">按钮同时依赖当前角色与 Core `allowedActions`，页面不根据状态自行推断权限。</p>
-        </> : <EmptyState icon="users" title="未选择活动" detail="创建或选择活动后，才能查看 Core 动作目录。" />}
-        <p className="notification-provider-note"><Ban aria-hidden="true" /><span><strong>供应商证据不伪造</strong><small>SMS、SMTP 或 Push 缺少生产配置时，Core 保留 `CONFIGURATION_REQUIRED`，页面不显示伪成功。</small></span></p>
+          <p className="button-explanation" id="notification-evidence-help">没有系统生成的编号不要手填。按钮同时依赖当前角色与系统授权。</p>
+        </> : <EmptyState icon="users" title="未选择活动" detail="创建或选择活动后，才能查看现在能做的操作。" />}
+        <p className="notification-provider-note"><Ban aria-hidden="true" /><span><strong>供应商证据不伪造</strong><small>短信、邮件或推送缺少生产配置时，系统会提示未配置，页面不显示伪成功。</small></span></p>
       </aside>
     </section> : null}
 
-    {error ? <div className={`resource-state resource-state-error notification-error${error.code === 'ConfigurationRequired' ? ' is-configuration' : ''}`} role="alert"><Ban aria-hidden="true" /><div><strong>{error.code}</strong><p>{error.message}</p>{error.correlationId ? <small>Correlation {error.correlationId}</small> : null}</div></div> : null}
+    {error ? <div className={`resource-state resource-state-error notification-error${error.code === 'ConfigurationRequired' ? ' is-configuration' : ''}`} role="alert"><Ban aria-hidden="true" /><div><strong>操作失败</strong><p>{humanizeError(error)}</p></div></div> : null}
     {notice ? <p className="healthy-copy notification-notice" role="status"><CheckCircle2 aria-hidden="true" />{notice}</p> : null}
   </>;
 }
 
 function CampaignRow({ campaign, selected, onSelect }: Readonly<{ campaign: NotificationCampaignProjection; selected: boolean; onSelect: (campaignId: string) => void }>) {
   return <tr className={selected ? 'is-selected' : undefined}>
-    <td><button className="table-link" type="button" onClick={() => onSelect(campaign.campaignId)}>{campaign.topic}</button><code>{campaign.campaignId}</code><span className={`notification-campaign-state is-${campaign.state.toLowerCase()}`}>{campaign.state}</span><small>{messageSummary(campaign)}</small></td>
+    <td><button className="table-link" type="button" onClick={() => onSelect(campaign.campaignId)}>{topicLabel(campaign.topic)}</button><code title={campaign.campaignId}>{shortId(campaign.campaignId)}</code><span className={`notification-campaign-state is-${campaign.state.toLowerCase()}`}>{campaignStateLabel(campaign.state)}</span><small>{messageSummary(campaign)}</small></td>
     <td><strong>{audienceSummary(campaign)}</strong><small>{scheduleSummary(campaign)}</small></td>
     <td><div className="notification-delivery-counts">{notificationDeliveryStates.map((state) => <span className={`is-${state.toLowerCase()}`} key={state}><small>{deliveryLabels[state]}</small><strong>{campaign.deliveryCounts[state]}</strong></span>)}</div></td>
-    <td><div className="notification-allowed-actions">{campaign.allowedActions.length ? campaign.allowedActions.map((action) => <code key={action}>{action}</code>) : <span>无可用操作</span>}</div></td>
+    <td><div className="notification-allowed-actions">{campaign.allowedActions.length ? campaign.allowedActions.map((action) => <span key={action}>{actionLabel(action)}</span>) : <span>无可用操作</span>}</div></td>
   </tr>;
+}
+
+function actionLabel(action: string) {
+  if (action === 'PUBLISH') return '发布';
+  if (action === 'RETRY_FAILED') return '重试失败投递';
+  return action;
+}
+
+function topicLabel(value: string) {
+  return ({
+    ANNOUNCEMENT: '公告',
+    ORDER: '订单',
+    PAYMENT: '支付',
+    FULFILLMENT: '履约',
+    SETTLEMENT: '结算',
+    RISK: '风控',
+    SECKILL: '秒杀',
+    SYSTEM: '系统',
+    BNM: 'BNM 积分',
+  } as Record<string, string>)[value] ?? value;
+}
+
+function campaignStateLabel(value: string) {
+  return ({
+    DRAFT: '草稿',
+    SCHEDULED: '待发布',
+    PUBLISHED: '已发布',
+    PAUSED: '已暂停',
+    COMPLETED: '已完成',
+    CANCELLED: '已取消',
+    FAILED: '失败',
+  } as Record<string, string>)[value] ?? value;
 }
 
 function LoadingState({ label }: Readonly<{ label: string }>) {
@@ -287,7 +319,7 @@ function buildCampaignRequest(input: Readonly<{
   idempotencyKey: string;
 }>): NotificationCampaignRequest {
   if (!copyKeyPattern.test(input.titleKey) || !copyKeyPattern.test(input.bodyKey)) throw new Error('标题 Key 与正文 Key 必须为 3-96 位大写字母、数字或下划线');
-  if (!/^[A-Za-z0-9:_-]{8,128}$/.test(input.idempotencyKey)) throw new Error('Idempotency key 必须为 8-128 位字母、数字或 : _ -');
+  if (!/^[A-Za-z0-9:_-]{8,128}$/.test(input.idempotencyKey)) throw new Error('系统提交编号异常，请刷新页面后重试。');
   const variables: Record<string, string> = {};
   for (const variable of input.variables) {
     const key = variable.key.trim();
@@ -360,7 +392,7 @@ function optionalIso(value: string) {
 }
 
 function createIdempotencyKey() {
-  return `notification:${Date.now().toString(36)}`;
+  return `notification-${globalThis.crypto?.randomUUID?.() ?? Date.now().toString(36)}`;
 }
 
 function formatDateTime(value: string) {
@@ -376,7 +408,7 @@ function invalid(message: string) {
 }
 
 function asCoreError(cause: unknown) {
-  return cause instanceof CoreApiError
-    ? cause
-    : new CoreApiError({ code: 'ExternalBlocked', message: '通知 Core 能力不可用', status: 503 });
+  if (cause instanceof CoreApiError) return cause;
+  if (cause instanceof Error) return new CoreApiError({ code: 'InvalidRequest', message: cause.message, status: 400 });
+  return new CoreApiError({ code: 'ExternalBlocked', message: '通知服务暂时不可用', status: 503 });
 }

@@ -18,8 +18,8 @@ export function ModuleWorkspace({ module }: ModuleWorkspaceProps) {
           <h1>{module.label}</h1>
           <p>{module.description}</p>
         </div>
-        <div className="requirement-list" aria-label="覆盖需求">
-          {module.requirements.map((requirement) => <code key={requirement}>{requirement}</code>)}
+        <div className="requirement-list" aria-label="页面能力">
+          <code>真实数据</code><code>权限控制</code>
         </div>
       </header>
 
@@ -28,8 +28,8 @@ export function ModuleWorkspace({ module }: ModuleWorkspaceProps) {
       <section className="workspace-grid">
         <article className="panel panel-main">
           <div className="panel-heading">
-            <div><p className="section-kicker">资源列表</p><h2>等待 Core 投影</h2></div>
-            <span className="status-chip status-blocked"><Ban aria-hidden="true" /> Disconnected</span>
+            <div><p className="section-kicker">资源列表</p><h2>等待系统数据</h2></div>
+            <span className="status-chip status-blocked"><Ban aria-hidden="true" /> 未连接</span>
           </div>
           <div className="empty-table" role="status">
             <DatabaseZap aria-hidden="true" />
@@ -41,12 +41,12 @@ export function ModuleWorkspace({ module }: ModuleWorkspaceProps) {
         </article>
 
         <aside className="panel evidence-panel">
-          <div className="panel-heading"><div><p className="section-kicker">字段范围</p><h2>消费边界</h2></div><LockKeyhole aria-hidden="true" /></div>
+          <div className="panel-heading"><div><p className="section-kicker">页面范围</p><h2>本页能看什么</h2></div><LockKeyhole aria-hidden="true" /></div>
           <ul className="check-list">
             {module.fields.map((field) => <li key={field}><CheckCircle2 aria-hidden="true" /> {field}</li>)}
           </ul>
           <hr />
-          <p className="section-kicker">执行证据</p>
+          <p className="section-kicker">高级凭证</p>
           <ul className="evidence-list">
             {module.evidence.map((item) => <li key={item}><ArrowUpRight aria-hidden="true" /> {item}</li>)}
           </ul>
@@ -55,8 +55,16 @@ export function ModuleWorkspace({ module }: ModuleWorkspaceProps) {
 
       <section className="blocked-callout" aria-labelledby={`${module.id}-blocked`}>
         <AlertTriangle aria-hidden="true" />
-        <div><strong id={`${module.id}-blocked`}>所需 Core 能力</strong><p>{module.gap}</p></div>
-        <span>所有写入禁用</span>
+        <div>
+          <strong id={`${module.id}-blocked`}>这块还在等系统数据</strong>
+          <p>没有真实数据时页面不会用假记录充数，相关写入按钮会保持关闭。</p>
+          <details className="technical-details compact">
+            <summary>高级需求编号</summary>
+            <code>{module.requirements.join(' / ')}</code>
+            <code>{module.gap}</code>
+          </details>
+        </div>
+        <span>暂不可操作</span>
       </section>
 
       <BatchActionBar ordinarySoftDelete={module.ordinarySoftDelete === true} immutable={module.immutable === true} />

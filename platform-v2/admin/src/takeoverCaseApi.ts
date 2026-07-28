@@ -235,7 +235,7 @@ function isTakeoverCandidate(value: unknown): value is TakeoverCandidate {
     && Number.isSafeInteger(value.applicationVersion)
     && Number(value.applicationVersion) >= 1
     && value.qualificationComplete === true
-    && value.guaranteeReady === true;
+    && (value.guaranteeReady === undefined || typeof value.guaranteeReady === 'boolean');
 }
 
 function isTakeoverTransition(value: unknown): value is TakeoverCaseTransition {
