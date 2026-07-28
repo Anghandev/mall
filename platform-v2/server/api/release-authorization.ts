@@ -194,7 +194,6 @@ export function releaseAuthorizationExternalBlockers(env: Readonly<ReleaseAuthor
     ...(!env.RELEASE_GIT_COMMIT ? ['RELEASE_GIT_COMMIT'] : []),
     ...(!env.RELEASE_IMAGE_DIGEST ? ['RELEASE_IMAGE_DIGEST'] : []),
     ...(!env.RELEASE_RUNTIME_CONFIG_SHA256 ? ['RELEASE_RUNTIME_CONFIG_SHA256'] : []),
-    ...(!env.MAINNET_MICROTEST_PACKET_SHA256 ? ['MAINNET_MICROTEST_PACKET_SHA256'] : []),
   ] as const;
 }
 

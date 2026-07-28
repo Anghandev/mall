@@ -600,14 +600,18 @@ function walletExpectation(
 function validateFrozenOverrides(env: Readonly<Record<string, string | undefined>>) {
   const exact = [
     ['REQUIRED_CONFIRMATIONS', '15'],
-    ['MERCHANT_GUARANTEE_MINIMUM_USDT', String(1_000n * 10n ** 18n)],
   ] as const;
   for (const [name, expected] of exact) {
     if (env[name] !== undefined && env[name] !== expected) {
       throw new CoreError('InvalidRequest', `${name} is frozen at ${expected}`, 500);
     }
   }
+  const guaranteeMinimum = env.MERCHANT_GUARANTEE_MINIMUM_USDT;
+  if (guaranteeMinimum !== undefined && !/^(0|[1-9][0-9]*)$/.test(guaranteeMinimum)) {
+    throw new CoreError('InvalidRequest', 'MERCHANT_GUARANTEE_MINIMUM_USDT must be a non-negative integer', 500);
+  }
 }
+
 
 function parseOptionalPositiveBigInt(value: string | undefined, name: string) {
   if (!value) return undefined;

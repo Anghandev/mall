@@ -27,6 +27,7 @@ import { assertWalletPaymentAllowed } from './risk-service.ts';
 import { assertQuoteFulfillmentTarget } from './fulfillment-target-service.ts';
 import type { SqlExecutor, SqlTransactionRunner } from './migrations.ts';
 import type { FulfillmentActor } from './fulfillment-service.ts';
+import { isMerchantOperationallyEligible } from './merchant-eligibility.ts';
 import { auditSourceId, enqueueAudit } from './audit-service.ts';
 import { PAYMENT_COMPLETED_EVENT_SIGNATURE_HASH } from './payment-store.ts';
 import {
@@ -35,8 +36,6 @@ import {
   type StoredSeckillPhase,
 } from './seckill-phase.ts';
 import {
-  isMicrotestBuyerEligible,
-  isMicrotestProductEligible,
   type MainnetMicrotestEntitlement,
 } from './mainnet-microtest-entitlement.ts';
 
@@ -248,7 +247,7 @@ export class CatalogPaymentService {
     return this.#transactions.transaction(async (executor) => {
       const result = await executor.query<CatalogRow>(`${catalogSelect()}
         WHERE product.lifecycle_state = 'ACTIVE' AND sku.lifecycle_state = 'ACTIVE'
-          AND merchant.status = 'APPROVED'
+          AND merchant.status = 'APPROVED' AND merchant.guarantee_status <> 'FROZEN'
         ORDER BY product.created_at DESC, product.product_id, sku.sku_id`);
       const now = this.#clock();
       const buyer = buyerWallet ? normalizeAddress(buyerWallet) : undefined;
@@ -276,7 +275,7 @@ export class CatalogPaymentService {
     return this.#transactions.transaction(async (executor) => {
       const result = await executor.query<CatalogRow>(`${catalogSelect()}
         WHERE product.product_id = $1 AND product.lifecycle_state = 'ACTIVE'
-          AND sku.lifecycle_state = 'ACTIVE' AND merchant.status = 'APPROVED'
+          AND sku.lifecycle_state = 'ACTIVE' AND merchant.status = 'APPROVED' AND merchant.guarantee_status <> 'FROZEN'
         ORDER BY sku.sku_id`, [productId]);
       const now = this.#clock();
       const buyer = buyerWallet ? normalizeAddress(buyerWallet) : undefined;
@@ -784,7 +783,7 @@ async function loadPreparation(
   const catalog = catalogResult.rows[0];
   if (
     !catalog || catalog.product_state !== 'ACTIVE' || catalog.sku_state !== 'ACTIVE'
-      || catalog.merchant_status !== 'APPROVED'
+      || !isMerchantOperationallyEligible(catalog.merchant_status, catalog.guarantee_status)
       || !catalogRowPurchasable(catalog, buyer, input.quantity, mainnetMicrotestEntitlement, now)
       || Number(catalog.stock_available) < input.quantity
   ) throw new CoreError('InventoryUnavailable', 'Product, merchant or inventory is unavailable', 409);
@@ -853,7 +852,7 @@ async function loadSeckillPreparation(
   const catalog = catalogResult.rows[0];
   if (
     !catalog || catalog.product_state !== 'ACTIVE' || catalog.sku_state !== 'ACTIVE'
-      || catalog.merchant_status !== 'APPROVED'
+      || !isMerchantOperationallyEligible(catalog.merchant_status, catalog.guarantee_status)
   ) throw new CoreError('InventoryUnavailable', 'Seckill product or merchant is unavailable', 409);
   const sessionResult = await executor.query<SessionRow>(
     `SELECT session_id, policy_version, product_policy_hash, seckill_list_price_usdt::text,
@@ -1058,7 +1057,7 @@ async function assertStoredQuoteStillAuthorized(
   const catalog = result.rows[0];
   if (
     !catalog || catalog.product_state !== 'ACTIVE' || catalog.sku_state !== 'ACTIVE'
-      || catalog.merchant_status !== 'APPROVED'
+      || !isMerchantOperationallyEligible(catalog.merchant_status, catalog.guarantee_status)
       || !catalogRowPurchasable(catalog, buyer, quantity, mainnetMicrotestEntitlement, now)
   ) throw new CoreError('Forbidden', 'Stored payment quote is no longer authorized', 403);
 }
@@ -1091,7 +1090,7 @@ async function assertStoredSeckillQuoteStillAuthorized(
   const catalog = catalogResult.rows[0];
   if (
     !catalog || catalog.product_state !== 'ACTIVE' || catalog.sku_state !== 'ACTIVE'
-      || catalog.merchant_status !== 'APPROVED'
+      || !isMerchantOperationallyEligible(catalog.merchant_status, catalog.guarantee_status)
   ) throw new CoreError('Forbidden', 'Stored seckill quote is no longer authorized', 403);
 
   const sessionResult = await executor.query<{
@@ -1106,22 +1105,9 @@ async function assertStoredSeckillQuoteStillAuthorized(
     [seckill.session_id, seckill.product_id, seckill.sku_id, catalog.merchant_id],
   );
   const session = sessionResult.rows[0];
-  const entitled = catalog.guarantee_status === 'READY' || (
-    session !== undefined
-      && mainnetMicrotestEntitlement !== undefined
-      && Number(session.inventory) === mainnetMicrotestEntitlement.seckillInventory
-      && isMicrotestBuyerEligible(
-        mainnetMicrotestEntitlement,
-        { ...microtestSubject(catalog), stockAvailable: Number(session.inventory) },
-        buyer,
-        quantity,
-        now,
-      )
-  );
   if (
     !session || Number(session.policy_version) !== seckill.intent.policyVersion
       || session.product_policy_hash.toLowerCase() !== catalog.product_policy_hash.toLowerCase()
-      || !entitled
   ) throw new CoreError('Forbidden', 'Stored seckill quote is no longer authorized', 403);
 
   if (!['QUOTED', 'SUBMITTED', 'REORGED'].includes(seckill.state)) return;
@@ -1515,28 +1501,12 @@ async function loadCatalogSeckillRows(
      LEFT JOIN core.merchant_guarantees guarantee ON guarantee.merchant_id = merchant.merchant_id
      WHERE session.phase NOT IN ('SETTLED','FORCE_CLOSED')
        AND product.lifecycle_state = 'ACTIVE' AND sku.lifecycle_state = 'ACTIVE'
-       AND merchant.status = 'APPROVED'
+       AND merchant.status = 'APPROVED' AND merchant.guarantee_status <> 'FROZEN'
        AND ($1::text IS NULL OR product.product_id = $1)
      ORDER BY session.starts_at, session.session_id`,
     [productId ?? null],
   );
-  return result.rows.filter((row) => row.guarantee_status === 'READY' || (
-    isMicrotestProductEligible(mainnetMicrotestEntitlement, {
-      merchantId: row.merchant_id,
-      merchantWallet: row.settlement_wallet,
-      productId: row.product_id,
-      listPriceUsdt: row.list_price_usdt,
-      freightUsdt: row.default_freight_usdt,
-      stockAvailable: Number(row.inventory) - Number(row.sold) - Number(row.reserved),
-      guaranteeBalanceUsdt: row.guarantee_balance_usdt ?? '0',
-      guaranteeEvidenceHash: row.guarantee_evidence_hash,
-    }, now)
-    && mainnetMicrotestEntitlement !== undefined
-    && buyer !== undefined
-    && mainnetMicrotestEntitlement.buyerWallets.has(buyer)
-    && Number(row.inventory) === mainnetMicrotestEntitlement.seckillInventory
-    && BigInt(row.seckill_list_price_usdt) <= mainnetMicrotestEntitlement.maxListPriceUsdt
-  ));
+  return result.rows;
 }
 
 function isoTimestamp(value: Date | string) {
@@ -1592,14 +1562,7 @@ function catalogRowVisible(
   now: Date,
   buyer?: string,
 ) {
-  return row.guarantee_status === 'READY'
-    || (buyer !== undefined && isMicrotestBuyerEligible(
-      mainnetMicrotestEntitlement,
-      microtestSubject(row),
-      buyer,
-      1,
-      now,
-    ));
+  return true;
 }
 
 function catalogRowPurchasable(
@@ -1609,14 +1572,7 @@ function catalogRowPurchasable(
   mainnetMicrotestEntitlement: MainnetMicrotestEntitlement | undefined,
   now: Date,
 ) {
-  return row.guarantee_status === 'READY'
-    || isMicrotestBuyerEligible(
-      mainnetMicrotestEntitlement,
-      microtestSubject(row),
-      buyer,
-      quantity,
-      now,
-    );
+  return true;
 }
 
 function catalogRowSeckillPurchasable(
@@ -1627,27 +1583,7 @@ function catalogRowSeckillPurchasable(
   mainnetMicrotestEntitlement: MainnetMicrotestEntitlement | undefined,
   now: Date,
 ) {
-  return row.guarantee_status === 'READY'
-    || isMicrotestBuyerEligible(
-      mainnetMicrotestEntitlement,
-      { ...microtestSubject(row), stockAvailable: Number(session.available) },
-      buyer,
-      quantity,
-      now,
-    );
-}
-
-function microtestSubject(row: CatalogRow) {
-  return {
-    merchantId: row.merchant_id,
-    merchantWallet: row.settlement_wallet,
-    productId: row.product_id,
-    listPriceUsdt: row.list_price_usdt,
-    freightUsdt: row.default_freight_usdt,
-    stockAvailable: Number(row.total_stock_available),
-    guaranteeBalanceUsdt: row.guarantee_balance_usdt ?? '0',
-    guaranteeEvidenceHash: row.guarantee_evidence_hash,
-  };
+  return true;
 }
 
 function quoteDeadlines(
@@ -1655,19 +1591,7 @@ function quoteDeadlines(
   catalog: CatalogRow,
   mainnetMicrotestEntitlement: MainnetMicrotestEntitlement | undefined,
 ) {
-  if (catalog.guarantee_status === 'READY') {
-    return { deadline: now + 5 * 60, reservationDeadline: now + 10 * 60 };
-  }
-  if (!mainnetMicrotestEntitlement || catalog.product_id !== mainnetMicrotestEntitlement.productId) {
-    throw new CoreError('Forbidden', 'Mainnet micro-test quote is not authorized', 403);
-  }
-  const entitlementDeadline = Math.floor(mainnetMicrotestEntitlement.expiresAt.getTime() / 1000);
-  const deadline = Math.min(now + 5 * 60, entitlementDeadline);
-  const reservationDeadline = Math.min(now + 10 * 60, entitlementDeadline);
-  if (deadline <= now || reservationDeadline <= now) {
-    throw new CoreError('NonceExpired', 'Mainnet micro-test entitlement expired before quote issuance', 401);
-  }
-  return { deadline, reservationDeadline };
+  return { deadline: now + 5 * 60, reservationDeadline: now + 10 * 60 };
 }
 
 function preparationFingerprint(value: { catalog: CatalogRow; policy: PolicyRow; session?: SessionRow }) {

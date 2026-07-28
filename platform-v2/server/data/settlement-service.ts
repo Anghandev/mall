@@ -29,9 +29,9 @@ import {
 } from '../api/settlement-signing.ts';
 import type { FulfillmentActor } from './fulfillment-service.ts';
 import type { SqlExecutor, SqlTransactionRunner } from './migrations.ts';
+import { isMerchantOperationallyEligible } from './merchant-eligibility.ts';
 import { auditCorrelationId, auditSourceId, enqueueAudit } from './audit-service.ts';
 import {
-  isMicrotestMerchantProduct,
   type MainnetMicrotestEntitlement,
 } from './mainnet-microtest-entitlement.ts';
 import { lockSeckillPrizeFundingMutation } from './seckill-prize-service.ts';
@@ -1538,8 +1538,6 @@ export class SettlementService {
         'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
         [`settlement-executor:${runtime.executorWallet}`],
       );
-      const microtest = this.#mainnetMicrotestEntitlement;
-      const microtestActive = microtest !== undefined && this.#clock() < microtest.expiresAt;
       const requestedItems = await executor.query<RequestedItemRow>(
         `SELECT request.request_id, item.item_index AS request_item_index,
            item.order_id, item.account_id, request.recipient_address, item.amount,
@@ -1549,27 +1547,11 @@ export class SettlementService {
          JOIN core.settlement_request_items item ON item.request_id = request.request_id
          JOIN core.orders orders ON orders.order_id = item.order_id
          LEFT JOIN core.merchants merchant ON merchant.merchant_id = orders.merchant_id
-         LEFT JOIN core.merchant_guarantees guarantee ON guarantee.merchant_id = merchant.merchant_id
          WHERE request.state IN ('REQUESTED','RETRYABLE') AND request.executor_wallet = $1
            AND request.asset = $2 AND item.submitted_journal_id IS NULL
            AND NOT (
              request.rail = 'MERCHANT_USDT'
-             AND (
-               merchant.status <> 'APPROVED'
-               OR (
-                 merchant.guarantee_status <> 'READY'
-                 AND NOT (
-                   $3::text IS NOT NULL
-                   AND request.merchant_id = $3
-                   AND lower(merchant.settlement_wallet) = lower($4)
-                   AND orders.product_id = $5
-                   AND guarantee.balance_usdt > 0
-                   AND lower(guarantee.source_evidence_hash) = lower($6)
-                   AND lower(orders.buyer_wallet) = ANY($7::text[])
-                   AND orders.created_at >= guarantee.updated_at
-                 )
-               )
-             )
+             AND NOT (merchant.status = 'APPROVED' AND merchant.guarantee_status <> 'FROZEN')
            )
          ORDER BY request.requested_at, request.request_id, item.item_index
          LIMIT 1
@@ -1577,11 +1559,6 @@ export class SettlementService {
         [
           runtime.executorWallet,
           input.asset,
-          microtestActive ? microtest.merchantId : null,
-          microtestActive ? microtest.merchantWallet : null,
-          microtestActive ? microtest.productId : null,
-          microtestActive ? microtest.evidenceHash : null,
-          microtestActive ? [...microtest.buyerWallets] : [],
         ],
       );
       if (requestedItems.rows.length === 0) {
@@ -1592,16 +1569,9 @@ export class SettlementService {
       if (recipientAddress === runtime.executorWallet.toLowerCase()) {
         throw new CoreError('InvalidRequest', 'Settlement transfer recipient cannot equal the EOA executor wallet', 409);
       }
-      const authorizationMode = item.rail === 'MERCHANT_USDT'
-        && item.merchant_guarantee_status !== 'READY'
-        ? 'MAINNET_MICROTEST'
-        : 'FORMAL';
-      const authorizationExpiresAt = authorizationMode === 'MAINNET_MICROTEST'
-        ? microtest!.expiresAt
-        : null;
-      const authorizationEvidenceHash = authorizationMode === 'MAINNET_MICROTEST'
-        ? microtest!.evidenceHash
-        : null;
+      const authorizationMode = 'FORMAL';
+      let authorizationExpiresAt: Date | null = null;
+      const authorizationEvidenceHash: string | null = null;
       await lockLedgerAccounts(executor, [item.account_id]);
       await assertRequestedStateBalances(executor, [item]);
       const pendingSeckillReservation = await executor.query<{ action_id: string }>(
@@ -1645,7 +1615,7 @@ export class SettlementService {
         transferCalldata,
         gasCap: input.gasCap,
         authorizationMode,
-        authorizationExpiresAt: authorizationExpiresAt?.toISOString() ?? null,
+        authorizationExpiresAt: null,
         authorizationEvidenceHash,
       });
       await executor.query(
@@ -1855,14 +1825,9 @@ async function authorizeSettlementOwner(
     settlement_wallet: string;
     status: string;
     guarantee_status: string;
-    guarantee_balance_usdt: string | null;
-    guarantee_evidence_hash: string | null;
   }>(
-    `SELECT merchant.merchant_id, merchant.settlement_wallet, merchant.status,
-       merchant.guarantee_status, guarantee.balance_usdt::text AS guarantee_balance_usdt,
-       guarantee.source_evidence_hash AS guarantee_evidence_hash
+    `SELECT merchant.merchant_id, merchant.settlement_wallet, merchant.status, merchant.guarantee_status
      FROM core.merchants merchant
-     LEFT JOIN core.merchant_guarantees guarantee ON guarantee.merchant_id = merchant.merchant_id
      WHERE merchant.settlement_wallet = $1 OR ($2::text IS NOT NULL AND merchant.merchant_id = $2)
      ORDER BY CASE WHEN settlement_wallet = $1 THEN 0 ELSE 1 END
      LIMIT 1`,
@@ -1875,26 +1840,12 @@ async function authorizeSettlementOwner(
   if (actor.merchantId && row.merchant_id !== actor.merchantId) {
     throw new CoreError('Forbidden', 'Merchant settlement scope does not match the active session', 403);
   }
-  const microtestEligible = row.status === 'APPROVED'
-    && row.settlement_wallet.toLowerCase() === mainnetMicrotestEntitlement?.merchantWallet
-    && BigInt(row.guarantee_balance_usdt ?? '0') > 0n
-    && /^0x[0-9a-fA-F]{64}$/.test(row.guarantee_evidence_hash ?? '')
-    && row.guarantee_evidence_hash?.toLowerCase() === mainnetMicrotestEntitlement?.evidenceHash
-    && isMicrotestMerchantProduct(
-      mainnetMicrotestEntitlement,
-      row.merchant_id,
-      mainnetMicrotestEntitlement?.productId ?? '',
-      now,
-    );
-  if (row.status !== 'APPROVED' || (row.guarantee_status !== 'READY' && !microtestEligible)) {
+  if (!isMerchantOperationallyEligible(row.status, row.guarantee_status)) {
     throw new CoreError('Forbidden', 'Merchant settlement is frozen', 403);
   }
   return {
     recipient: row.settlement_wallet.toLowerCase(),
     merchantId: row.merchant_id,
-    ...(row.guarantee_status !== 'READY' && microtestEligible
-      ? { microtestProductId: mainnetMicrotestEntitlement!.productId }
-      : {}),
   };
 }
 

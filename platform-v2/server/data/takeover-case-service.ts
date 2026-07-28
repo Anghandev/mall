@@ -387,7 +387,7 @@ async function eligibleCandidates(executor: SqlExecutor, originalMerchantId: str
        AND binding.role = 'MERCHANT' AND binding.merchant_id = merchant.merchant_id
        AND binding.status = 'ACTIVE'
      WHERE merchant.merchant_id <> $1 AND merchant.status = 'APPROVED'
-       AND merchant.guarantee_status = 'READY'
+       AND merchant.guarantee_status <> 'FROZEN'
        AND ($2::text IS NULL OR merchant.merchant_id = $2)
      ORDER BY merchant.merchant_id`,
     [originalMerchantId, merchantId ?? null],

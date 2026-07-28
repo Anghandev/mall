@@ -13,10 +13,8 @@ import type { SignerRequest } from '../chain/signer.ts';
 import { auditSourceId, enqueueAudit } from './audit-service.ts';
 import type { FulfillmentActor } from './fulfillment-service.ts';
 import type { SqlExecutor, SqlTransactionRunner } from './migrations.ts';
-import {
-  isMicrotestProductEligible,
-  type MainnetMicrotestEntitlement,
-} from './mainnet-microtest-entitlement.ts';
+import { isMerchantOperationallyEligible } from './merchant-eligibility.ts';
+import type { MainnetMicrotestEntitlement } from './mainnet-microtest-entitlement.ts';
 
 const LOCKED_SESSION_PHASES = ['PREHEAT', 'LIVE', 'SETTLING'] as const;
 const FULFILLMENT_MODES = ['DELIVERY', 'PICKUP'] as const;
@@ -1674,25 +1672,7 @@ async function prepareProductLifecycleDecision(
        ORDER BY sku.sku_id`,
       [product.product_id],
     );
-    const totalStock = merchant.rows.reduce((sum, row) => sum + Number(row.stock_available), 0);
-    const microtestEligible = merchant.rows.length > 0 && merchant.rows.every((row) => isMicrotestProductEligible(
-      mainnetMicrotestEntitlement,
-      {
-        merchantId: product.merchant_id,
-        merchantWallet: row.settlement_wallet,
-        productId: product.product_id,
-        listPriceUsdt: row.list_price_usdt,
-        freightUsdt: row.default_freight_usdt,
-        stockAvailable: totalStock,
-        guaranteeBalanceUsdt: row.guarantee_balance_usdt ?? '0',
-        guaranteeEvidenceHash: row.guarantee_evidence_hash,
-      },
-      now,
-    ));
-    if (
-      merchant.rows[0]?.status !== 'APPROVED'
-      || (merchant.rows[0]?.guarantee_status !== 'READY' && !microtestEligible)
-    ) {
+    if (!isMerchantOperationallyEligible(merchant.rows[0]?.status, merchant.rows[0]?.guarantee_status)) {
       throw new CoreError('Forbidden', 'Merchant is not eligible for publication', 409);
     }
   }

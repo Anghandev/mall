@@ -10,12 +10,8 @@ import type { UserRole } from '../api/enums.ts';
 import { CoreError } from '../api/errors.ts';
 import { auditSourceId, enqueueAudit } from './audit-service.ts';
 import type { SqlExecutor, SqlTransactionRunner } from './migrations.ts';
-import {
-  isMicrotestMerchantProduct,
-  type MainnetMicrotestEntitlement,
-} from './mainnet-microtest-entitlement.ts';
-
-const GUARANTEE_MINIMUM_USDT = 1_000n * 10n ** 18n;
+import { isMerchantOperationallyEligible } from './merchant-eligibility.ts';
+import type { MainnetMicrotestEntitlement } from './mainnet-microtest-entitlement.ts';
 
 interface FundingActor {
   walletAddress: string;
@@ -415,34 +411,17 @@ export class TakeoverFundingService {
       ]);
       if (!merchant.rows[0]) throw new CoreError('InvalidRequest', 'Merchant not found', 404);
       const merchantRow = merchant.rows[0];
-      const guaranteeRow = guarantee.rows[0] as {
-        balance_usdt?: string;
-        source_evidence_hash?: string;
-      } | undefined;
-      const microtestEligible = merchantRow.status === 'APPROVED'
-        && merchantRow.settlement_wallet.toLowerCase() === this.#mainnetMicrotestEntitlement?.merchantWallet
-        && BigInt(guaranteeRow?.balance_usdt ?? '0') > 0n
-        && /^0x[0-9a-fA-F]{64}$/.test(guaranteeRow?.source_evidence_hash ?? '')
-        && guaranteeRow?.source_evidence_hash?.toLowerCase() === this.#mainnetMicrotestEntitlement?.evidenceHash
-        && isMicrotestMerchantProduct(
-          this.#mainnetMicrotestEntitlement,
-          merchantRow.merchant_id,
-          this.#mainnetMicrotestEntitlement?.productId ?? '',
-          this.#clock(),
-        );
-      const formalEligible = merchantRow.status === 'APPROVED' && merchantRow.guarantee_status === 'READY';
+      const formalEligible = isMerchantOperationallyEligible(merchantRow.status, merchantRow.guarantee_status);
       return {
         merchant: merchantRow,
         guarantee: guarantee.rows[0] ?? null,
         guaranteeDeposits: deposits.rows,
         debt: debt.rows[0] ?? null,
         takeovers: takeovers.rows,
-        allowedActions: formalEligible || microtestEligible ? ['REQUEST_MERCHANT_USDT'] : [],
+        allowedActions: formalEligible ? ['REQUEST_MERCHANT_USDT'] : [],
         settlementEligibility: formalEligible
           ? { mode: 'FORMAL', expiresAt: null }
-          : microtestEligible
-            ? { mode: 'MAINNET_MICROTEST', expiresAt: this.#mainnetMicrotestEntitlement!.expiresAt.toISOString() }
-            : { mode: 'BLOCKED', expiresAt: null },
+          : { mode: 'BLOCKED', expiresAt: null },
       };
     });
   }
@@ -522,23 +501,9 @@ async function buildFundingPlan(
   if (row.state !== 'OPEN' || row.required_usdt !== null) {
     throw new CoreError('UnknownState', 'Takeover case cannot be funded from its current state', 409);
   }
-  const guarantee = await executor.query<{
-    backing_wallet_address: string;
-    balance_usdt: string;
-  }>(
-    `SELECT backing_wallet_address, balance_usdt::text FROM core.merchant_guarantees
-     WHERE merchant_id = $1
-       AND NOT EXISTS (
-         SELECT 1 FROM core.merchant_guarantee_reorg_exposures exposure
-         WHERE exposure.merchant_id = core.merchant_guarantees.merchant_id
-           AND exposure.state = 'OPEN'
-       )${forUpdate ? ' FOR UPDATE' : ''}`,
-    [row.merchant_id],
-  );
   const requiredUsdt = BigInt(input.requiredUsdt);
-  const guaranteeUsed = guarantee.rows[0]
-    ? minimum(requiredUsdt, BigInt(guarantee.rows[0].balance_usdt))
-    : 0n;
+  const guarantee = undefined;
+  const guaranteeUsed = 0n;
   const afterGuarantee = requiredUsdt - guaranteeUsed;
   const available = afterGuarantee > 0n
     ? await availableReceivables(executor, row.settlement_wallet, forUpdate)
@@ -552,7 +517,7 @@ async function buildFundingPlan(
     state: row.state,
     requiredUsdt: row.required_usdt,
     takeoverEvidenceHash: row.evidence_hash,
-    guarantee: guarantee.rows[0] ?? null,
+    guarantee: null,
     availableReceivables: available,
   });
   const newValueHash = hashJson({
@@ -574,7 +539,7 @@ async function buildFundingPlan(
     takeover: row,
     operationsWallet,
     requiredUsdt,
-    guarantee: guarantee.rows[0],
+    guarantee,
     guaranteeUsed,
     available,
     selected,

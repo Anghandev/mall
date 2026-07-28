@@ -684,6 +684,14 @@ export interface MerchantLifecycleApiService {
     idempotencyKey: string;
     correlationId: string;
   }): Promise<unknown>;
+  createPublicApplication(walletAddress: string, input: {
+    shopName: string;
+    legalName: string;
+    legalId: string;
+    contactPhone: string;
+    idempotencyKey: string;
+    correlationId: string;
+  }): Promise<unknown>;
   updateApplication(actor: FulfillmentActor, merchantId: string, input: {
     shopName: string;
     legalName: string;
@@ -898,6 +906,28 @@ async function route(
       roles: binding.roles,
       ...(binding.merchantId ? { merchantId: binding.merchantId } : {}),
     }, correlationId);
+    return;
+  }
+  if (request.method === 'POST' && url.pathname === '/v2/public/merchant-applications') {
+    const body = await readJson(request);
+    assertOnlyKeys(body, ['message', 'signature', 'shopName', 'legalName', 'legalId', 'contactPhone', 'idempotencyKey']);
+    const verified = await verifySiwe(dependencies.nonceStore, {
+      message: requiredString(body, 'message'),
+      signature: requiredString(body, 'signature'),
+      expectedDomain: dependencies.authDomain,
+      expectedUri: dependencies.authUri,
+    }, dependencies.clock());
+    sendJson(response, 201, await dependencies.merchantLifecycleService.createPublicApplication(
+      verified.walletAddress,
+      {
+        shopName: requiredString(body, 'shopName'),
+        legalName: requiredString(body, 'legalName'),
+        legalId: requiredString(body, 'legalId'),
+        contactPhone: requiredString(body, 'contactPhone'),
+        idempotencyKey: requiredString(body, 'idempotencyKey'),
+        correlationId,
+      },
+    ), correlationId);
     return;
   }
   const logisticsProvider = logisticsWebhookProvider(url.pathname);

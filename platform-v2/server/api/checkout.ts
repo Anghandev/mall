@@ -280,8 +280,7 @@ export function assertPolicyReady(policy: FrozenPaymentPolicy) {
     policy.nplPaymentBps !== 3_000 ||
     policy.platformFeeBps !== PLATFORM_SERVICE_FEE_BPS ||
     policy.nplBurnListPriceBps + policy.nplRewardListPriceBps !== policy.nplPaymentBps ||
-    policy.requiredConfirmations !== REQUIRED_CONFIRMATIONS ||
-    policy.merchantGuaranteeMinimumUsdt < 1_000n * 10n ** 18n
+    policy.requiredConfirmations !== REQUIRED_CONFIRMATIONS
   ) {
     throw new CoreError('InvalidRequest', 'Frozen launch payment policy is invalid');
   }

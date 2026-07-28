@@ -169,6 +169,11 @@ test('typed config reports blocked inputs without exposing secret values', () =>
     /address/,
   );
   assert.throws(() => loadConfig({ ...completeEnvironment(), REQUIRED_CONFIRMATIONS: '12' }), /frozen at 15/);
+  assert.doesNotThrow(() => loadConfig({ ...completeEnvironment(), MERCHANT_GUARANTEE_MINIMUM_USDT: '0' }));
+  assert.throws(
+    () => loadConfig({ ...completeEnvironment(), MERCHANT_GUARANTEE_MINIMUM_USDT: 'not-a-number' }),
+    /MERCHANT_GUARANTEE_MINIMUM_USDT must be a non-negative integer/,
+  );
   assert.throws(
     () => loadConfig({ ...completeEnvironment(), SETTLEMENT_EXECUTOR_URL: 'http://executor.example.invalid' }),
     /must use HTTPS/,
@@ -675,6 +680,10 @@ test('governed USDT concession uses only the fixed 45/45/10 Custody pools', () =
     ...policyFields,
     merchantGuaranteeMinimumUsdt: policy.merchantGuaranteeMinimumUsdt.toString(),
   };
+  assert.equal(parsePaymentPolicySnapshot(1, {
+    ...payload,
+    merchantGuaranteeMinimumUsdt: '0',
+  }).merchantGuaranteeMinimumUsdt, 0n);
   assert.throws(
     () => parsePaymentPolicySnapshot(1, { ...payload, platformFeeBps: 101 }),
     /Frozen launch payment policy/,
@@ -1621,6 +1630,16 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       list: async (_actor, query) => ({ merchants: [], query }),
       get: async (_actor, merchantId) => ({ merchant: { merchantId } }),
       createApplication: async (_actor, input) => ({ merchant: { merchantId: 'merchant-created' }, input }),
+      createPublicApplication: async (walletAddress, input) => ({
+        artifactVersion: CORE_ARTIFACT_VERSION,
+        merchant: {
+          merchantId: 'merchant-public',
+          settlementWallet: walletAddress,
+          status: 'PENDING',
+          shopName: input.shopName,
+        },
+        input,
+      }),
       updateApplication: async (_actor, merchantId, input) => ({ merchant: { merchantId }, input }),
       createReviewChallenge: async (_actor, merchantId, input) => ({ merchantId, actionId: HASH, input }),
       publishReview: async (_actor, merchantId, actionId) => ({ merchant: { merchantId }, actionId }),
@@ -1681,6 +1700,61 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       body: JSON.stringify({ walletAddress: wallet.address, ignored: true }),
     });
     assert.equal(extraField.status, 400);
+
+    const applicant = Wallet.createRandom();
+    const applicantNonce = await fetch(`${base}/v2/auth/nonce`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ walletAddress: applicant.address }),
+    });
+    const applicantChallenge = (await applicantNonce.json()) as { message: string };
+    const applicantSignature = await applicant.signMessage(applicantChallenge.message);
+    const publicApplication = await fetch(`${base}/v2/public/merchant-applications`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        message: applicantChallenge.message,
+        signature: applicantSignature,
+        shopName: 'Public Gold Shop',
+        legalName: 'Public Applicant',
+        legalId: 'PUBLIC123456',
+        contactPhone: '13800138000',
+        idempotencyKey: 'public-merchant-application-1',
+      }),
+    });
+    assert.equal(publicApplication.status, 201);
+    assert.deepEqual(await publicApplication.json(), {
+      artifactVersion: CORE_ARTIFACT_VERSION,
+      merchant: {
+        merchantId: 'merchant-public',
+        settlementWallet: applicant.address.toLowerCase(),
+        status: 'PENDING',
+        shopName: 'Public Gold Shop',
+      },
+      input: {
+        shopName: 'Public Gold Shop',
+        legalName: 'Public Applicant',
+        legalId: 'PUBLIC123456',
+        contactPhone: '13800138000',
+        idempotencyKey: 'public-merchant-application-1',
+        correlationId: publicApplication.headers.get('x-correlation-id'),
+      },
+    });
+    const publicApplicationExtraField = await fetch(`${base}/v2/public/merchant-applications`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        message: applicantChallenge.message,
+        signature: applicantSignature,
+        shopName: 'Public Gold Shop',
+        legalName: 'Public Applicant',
+        legalId: 'PUBLIC123456',
+        contactPhone: '13800138000',
+        idempotencyKey: 'public-merchant-application-2',
+        settlementWallet: wallet.address,
+      }),
+    });
+    assert.equal(publicApplicationExtraField.status, 400);
 
     const nonceResponse = await fetch(`${base}/v2/auth/nonce`, {
       method: 'POST',

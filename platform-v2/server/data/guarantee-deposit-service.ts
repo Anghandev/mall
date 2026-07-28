@@ -5,7 +5,7 @@ import { CoreError } from '../api/errors.ts';
 import { auditSourceId, enqueueAudit } from './audit-service.ts';
 import type { SqlExecutor, SqlTransactionRunner } from './migrations.ts';
 
-const GUARANTEE_MINIMUM_USDT = 1_000n * 10n ** 18n;
+const GUARANTEE_MINIMUM_USDT = 0n;
 const TRANSFER_EVENT_SIGNATURE_HASH = id('Transfer(address,address,uint256)').toLowerCase();
 
 interface GuaranteeActor {
@@ -316,6 +316,7 @@ export class GuaranteeDepositService {
                THEN core.merchant_guarantees.balance_usdt + EXCLUDED.balance_usdt
                ELSE core.merchant_guarantees.balance_usdt
              END,
+             minimum_usdt = EXCLUDED.minimum_usdt,
              source_evidence_hash = EXCLUDED.source_evidence_hash,
              updated_at = EXCLUDED.updated_at`,
           [

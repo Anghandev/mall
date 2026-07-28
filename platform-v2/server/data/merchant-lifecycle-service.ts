@@ -216,6 +216,28 @@ export class MerchantLifecycleService {
     const retention = requireRetentionPolicy(this.#retentionPolicyVersion);
     return this.#transactions.transaction(async (executor) => {
       const roles = await requireCurrentRole(executor, actor, ['ADMIN', 'OPERATOR']);
+      return this.#createApplicationRecord(executor, wallet, roles, normalized, key, retention);
+    });
+  }
+
+  createPublicApplication(walletAddress: string, input: Omit<MerchantApplicationInput, 'settlementWallet'>) {
+    const wallet = normalizeAddress(walletAddress);
+    const normalized = applicationInput({ ...input, settlementWallet: wallet });
+    const key = requireEncryptionKey(this.#encryptionKey);
+    const retention = requireRetentionPolicy(this.#retentionPolicyVersion);
+    return this.#transactions.transaction(async (executor) => (
+      this.#createApplicationRecord(executor, wallet, ['APPLICANT'], normalized, key, retention)
+    ));
+  }
+
+  async #createApplicationRecord(
+    executor: SqlExecutor,
+    wallet: string,
+    roles: string[],
+    normalized: ReturnType<typeof applicationInput>,
+    key: Buffer,
+    retention: string,
+  ) {
       const existing = await executor.query<ApplicationRow>(
         `SELECT application.* FROM core.merchant_application_versions application
          WHERE application.actor_wallet = $1 AND application.idempotency_key = $2`,
@@ -277,7 +299,6 @@ export class MerchantLifecycleService {
         now,
       });
       return this.#merchantDetail(executor, merchantId, roles);
-    });
   }
 
   updateApplication(actor: FulfillmentActor, merchantId: string, input: MerchantApplicationUpdateInput) {
@@ -368,10 +389,6 @@ export class MerchantLifecycleService {
       const roles = await requireCurrentRole(executor, actor, ['ADMIN']);
       const merchant = await lockedMerchant(executor, merchantId);
       const toStatus = reviewTransition(merchant.status, action);
-      const application = await latestApplication(executor, merchant);
-      if (action === 'APPROVE') {
-        if (!application?.license_asset_id) throw new CoreError('ConfigurationRequired', 'Merchant license evidence is incomplete', 409);
-      }
       const requestHash = hashJson({
         merchantId,
         action,
@@ -386,10 +403,24 @@ export class MerchantLifecycleService {
         if (existing.rows[0].request_hash !== requestHash) throw idempotencyConflict('Merchant review challenge');
         return reviewProjection(existing.rows[0], this.#verifyingContract, this.#secondarySigner);
       }
+      const now = this.#clock();
+      await executor.query(
+        `UPDATE core.merchant_review_actions SET state = 'EXPIRED', updated_at = $4
+         WHERE actor_wallet = $1 AND merchant_id = $2 AND request_hash = $3
+           AND state = 'DRAFT' AND approval_deadline <= $4`,
+        [wallet, merchantId, requestHash, now],
+      );
+      const active = await executor.query<ReviewRow>(
+        `SELECT * FROM core.merchant_review_actions
+         WHERE actor_wallet = $1 AND merchant_id = $2 AND request_hash = $3
+           AND state = 'DRAFT' AND approval_deadline > $4
+         ORDER BY created_at DESC, action_id DESC LIMIT 1`,
+        [wallet, merchantId, requestHash, now],
+      );
+      if (active.rows[0]) return reviewProjection(active.rows[0], this.#verifyingContract, this.#secondarySigner);
       const policyVersion = await latestPolicyVersion(executor);
       const oldValueHash = merchantStateHash(merchant, merchant.status);
       const newValueHash = merchantStateHash(merchant, toStatus, reasonCode);
-      const now = this.#clock();
       const row = (await executor.query<ReviewRow>(
         `INSERT INTO core.merchant_review_actions (
            action_id, merchant_id, action_kind, from_status, to_status,
@@ -406,6 +437,7 @@ export class MerchantLifecycleService {
         ],
       )).rows[0]!;
       await lifecycleAudit(executor, {
+        sourceEventId: auditSourceId('merchant-lifecycle', { eventType: 'MerchantReviewChallengeCreated', actionId: row.action_id }),
         eventType: 'MerchantReviewChallengeCreated', merchantId, actorWallet: wallet, roles,
         correlationId: input.correlationId, requestHash,
         payload: { actionId: row.action_id, action, fromStatus: merchant.status, toStatus, applicationVersion: Number(merchant.application_version) },
@@ -438,10 +470,6 @@ export class MerchantLifecycleService {
         || Number(merchant.application_version) !== Number(row.application_version)
         || merchantStateHash(merchant, merchant.status) !== row.old_value_hash
       ) throw new CoreError('IdempotencyConflict', 'Merchant review snapshot changed', 409);
-      if (row.action_kind === 'APPROVE') {
-        const application = await latestApplication(executor, merchant);
-        if (!application?.license_asset_id) throw new CoreError('ConfigurationRequired', 'Merchant license evidence is incomplete', 409);
-      }
       const intent = reviewIntent(row);
       const verified = verifySensitiveActionApproval(
         intent,
@@ -1281,6 +1309,7 @@ function businessDay(now: Date) {
 }
 
 async function lifecycleAudit(executor: SqlExecutor, input: {
+  sourceEventId?: string;
   eventType: string;
   merchantId: string;
   actorWallet: string;
@@ -1292,7 +1321,7 @@ async function lifecycleAudit(executor: SqlExecutor, input: {
   now: Date;
 }) {
   await enqueueAudit(executor, {
-    sourceEventId: auditSourceId('merchant-lifecycle', { eventType: input.eventType, requestHash: input.requestHash }),
+    sourceEventId: input.sourceEventId ?? auditSourceId('merchant-lifecycle', { eventType: input.eventType, requestHash: input.requestHash }),
     streamName: input.signature ? 'governance' : 'operational',
     evidenceProfile: input.signature ? 'SIGNED_OFFCHAIN' : 'RBAC',
     eventType: input.eventType,

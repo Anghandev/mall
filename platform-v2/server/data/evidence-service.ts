@@ -964,7 +964,7 @@ async function isPublicMediaAsset(
 ) {
   if (asset.resource_type === 'PRODUCT' && ['PRODUCT_IMAGE', 'PRODUCT_VIDEO'].includes(asset.purpose)) {
     const row = await loadProductMediaEligibility(executor, asset);
-    return row?.bound === true && row.merchant_status === 'APPROVED' && row.guarantee_status === 'READY';
+    return row?.bound === true && row.merchant_status === 'APPROVED';
   }
   if (asset.resource_type === 'CATEGORY' && asset.purpose === 'CATEGORY_ICON') {
     const result = await executor.query<{ visible: boolean }>(
