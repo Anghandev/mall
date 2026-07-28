@@ -1487,12 +1487,7 @@ describe('Mall V2 payment consumer', () => {
     expect(screen.getByRole('button', { name: '重新同步' })).toBeTruthy();
   });
 
-  it('tracks the Core winner candidate and rollover result instead of a blocked placeholder', async () => {
-    const pending = seckillSession({
-      phase: 'SETTLING',
-      storedPhase: 'SETTLING',
-      prizeSettlement: reviewPendingPrizeSettlement(),
-    });
+  it('tracks the finalized Core rollover result instead of a blocked placeholder', async () => {
     const rolled = seckillSession({
       sessionId: `0x${'4'.repeat(64)}`,
       phase: 'SETTLED',
@@ -1500,19 +1495,15 @@ describe('Mall V2 payment consumer', () => {
       prizePoolUsdt: '0',
       prizeSettlement: rolledOverPrizeSettlement(),
     });
-    const user = userEvent.setup();
     renderAt('/assets/activity', readyServices({
-      getCurrentSeckillSession: vi.fn().mockResolvedValue(pending),
       listSeckillSessionHistory: vi.fn().mockResolvedValue({ items: [rolled], nextCursor: null }),
     }));
 
     const records = await screen.findByLabelText('秒杀奖项记录');
-    expect(within(records).getByText('候选审核中')).toBeTruthy();
-    expect(within(records).getByTitle(seckillCandidateOrderId)).toBeTruthy();
     expect(within(records).getByText('已滚入下一场')).toBeTruthy();
+    expect(within(records).getByTitle(rolled.prizeSettlement!.rolloverTargetSessionId!)).toBeTruthy();
+    expect(within(records).queryByTitle(seckillCandidateOrderId)).toBeNull();
     expect(within(records).queryByText(/DecisionBlocked：秒杀奖项记录未发布/)).toBeNull();
-    await user.click(screen.getByRole('button', { name: '连接钱包' }));
-    await waitFor(() => expect(within(records).getByText(/当前钱包是唯一冻结候选人/)).toBeTruthy());
   });
 
   it('loads anonymous CMS without identity input and reloads authenticated CMS with the session token', async () => {
