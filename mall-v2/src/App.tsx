@@ -75,7 +75,15 @@ function MallShell() {
         </a>
         <header className="app-bar">
           <Link className="brand" to="/seckill" aria-label="24K商城首页">
-            <img src={brandAssetUrl('logo-mark.png')} alt="" />
+            <img
+              src={brandAssetUrl('logo-mark.png')}
+              alt=""
+              width={1024}
+              height={1024}
+              decoding="async"
+              loading="eager"
+              fetchPriority="high"
+            />
             <span>
               <strong>24K商城</strong>
               <small>商城 V2</small>
@@ -103,12 +111,12 @@ function MallShell() {
           {runtime.pendingSubmission ? (
             <section className="runtime-pending" aria-labelledby="pending-submission-title">
               <div className="runtime-pending__info">
-                <strong id="pending-submission-title">链上交易待恢复跟踪</strong>
+                <strong id="pending-submission-title">钱包付款待恢复跟踪</strong>
                 <span>{shortenHash(runtime.pendingSubmission.txHash)}</span>
               </div>
               <div className="runtime-pending__actions">
                 <button type="button" onClick={() => void runtime.retrySubmission()} disabled={runtime.busy || !runtime.session}>
-                  {runtime.pendingSubmission.phase === 'PENDING_CORE_SUBMISSION' ? '重试提交' : '刷新投影'}
+                  {runtime.pendingSubmission.phase === 'PENDING_CORE_SUBMISSION' ? '重试提交付款凭证' : '刷新支付状态'}
                 </button>
               </div>
             </section>

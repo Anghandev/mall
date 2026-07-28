@@ -513,15 +513,15 @@ export function MallRuntimeProvider({
 
     selectSeckillSession() {
       if (pendingSubmission) {
-        setError('当前链上交易尚未提交到 Core，请先恢复跟踪');
+        setError('当前付款凭证尚未提交给系统，请先恢复跟踪');
         return false;
       }
       if (!seckillSession) {
-        setError('当前没有 Core 发布的秒杀场次');
+        setError('当前没有已发布的秒杀场次');
         return false;
       }
       if (seckillSession.phase !== 'LIVE' || BigInt(seckillSession.inventory.available) === 0n) {
-        setError('Core 当前场次阶段或库存不允许创建秒杀订单');
+        setError('系统当前场次阶段或库存不允许创建秒杀订单');
         return false;
       }
       const product = catalog.find((item) => item.productId === seckillSession.product.productId);
@@ -590,7 +590,7 @@ export function MallRuntimeProvider({
           throw new CoreClientError('Forbidden', '订单与当前买家钱包不一致');
         }
         const allowed = orderActions[orderId]?.find((item) => item.action === action);
-        if (!allowed?.enabled) throw new CoreClientError('Forbidden', 'Core 当前未允许该订单操作');
+        if (!allowed?.enabled) throw new CoreClientError('Forbidden', '系统当前不允许该订单操作');
         const reasonCode = validateEvidenceReasonCode(input.reasonCode);
         const file = input.file;
         const fileHash = file ? await evidenceFileHash(file) : null;
@@ -646,7 +646,7 @@ export function MallRuntimeProvider({
           || attempt.evidence.resourceId !== order.orderId
           || attempt.evidence.action !== action
           || attempt.evidence.reasonCode !== reasonCode
-        ) throw new CoreClientError('InvalidResponse', 'Core 证据与当前买家操作不一致');
+        ) throw new CoreClientError('InvalidResponse', '系统凭证与当前买家操作不一致');
 
         const command = {
           idempotencyKey: attempt.commandIdempotencyKey,
@@ -883,7 +883,7 @@ export function MallRuntimeProvider({
     },
 
     selectProduct(productId) {
-      if (pendingSubmission) return setError('当前链上交易尚未提交到 Core，请先恢复跟踪');
+      if (pendingSubmission) return setError('当前付款凭证尚未提交给系统，请先恢复跟踪');
       const product = catalog.find((item) => item.productId === productId);
       setSelectedProductId(product?.productId ?? null);
       setSelectedSkuId(null);
@@ -897,26 +897,26 @@ export function MallRuntimeProvider({
     },
 
     selectSku(skuId) {
-      if (pendingSubmission) return setError('当前链上交易尚未提交到 Core，请先恢复跟踪');
+      if (pendingSubmission) return setError('当前付款凭证尚未提交给系统，请先恢复跟踪');
       if (selectedSeckillSessionId && skuId !== seckillSession?.product.skuId) {
-        return setError('秒杀订单只能使用 Core 场次绑定的 SKU');
+        return setError('秒杀订单只能使用当前场次绑定的规格');
       }
       const sku = selectedProduct?.skus.find((item) => item.skuId === skuId);
       if (sku?.seckill && !selectedSeckillSessionId) {
-        return setError(`该 SKU 处于${sku.seckill.phase}活动阶段，普通结算已停用`);
+        return setError(`该规格处于${sku.seckill.phase}活动阶段，普通结算已停用`);
       }
       setSelectedSkuId(sku?.skuId ?? null);
       clearPaymentState();
     },
 
     setQuantity(nextQuantity) {
-      if (pendingSubmission) return setError('当前链上交易尚未提交到 Core，请先恢复跟踪');
+      if (pendingSubmission) return setError('当前付款凭证尚未提交给系统，请先恢复跟踪');
       setQuantityState(Math.max(1, Math.floor(nextQuantity)));
       clearPaymentState();
     },
 
     setFulfillmentMode(mode) {
-      if (pendingSubmission) return setError('当前链上交易尚未提交到 Core，请先恢复跟踪');
+      if (pendingSubmission) return setError('当前付款凭证尚未提交给系统，请先恢复跟踪');
       if (selectedProduct && !selectedProduct.fulfillmentModes.includes(mode)) {
         return setError('该商品未发布当前履约方式');
       }
@@ -956,15 +956,15 @@ export function MallRuntimeProvider({
       try {
         await run(async () => {
           const activeQuote = requireQuote();
-          if (submittedTxHash) throw new CoreClientError('IdempotencyConflict', '当前报价已广播，只能恢复 Core 提交或刷新投影');
+          if (submittedTxHash) throw new CoreClientError('IdempotencyConflict', '当前付款已提交钱包，只能恢复付款凭证或刷新支付状态');
           if ('dual' in activeQuote && !acknowledgeSeckillFallback) {
             throw new CoreClientError('InvalidRequest', '请先确认秒杀与日常备用报价及链上分类规则');
           }
           if (!bootstrap?.writesEnabled) {
-            throw new CoreClientError('ExternalBlocked', '当前 Core 未开放新支付');
+            throw new CoreClientError('ExternalBlocked', '当前系统未开放新支付');
           }
           if (!services.walletWritesAuthorized) {
-            throw new CoreClientError('ExternalBlocked', '当前协调 manifest 未授权钱包广播');
+            throw new CoreClientError('ExternalBlocked', '当前支付上线开关未打开，不会发起钱包交易');
           }
           const txHash = await services.wallet.broadcastPayment(activeQuote, acknowledgeUnlimitedApproval);
           const submission: PendingSubmission = {
@@ -1138,12 +1138,12 @@ export function MallRuntimeProvider({
 
   async function buildSelection() {
     if (!bootstrap?.writesEnabled) throw readinessError(bootstrap);
-    if (!selectedProduct || !selectedSku) throw new CoreClientError('InvalidRequest', '请选择商品和 SKU');
+    if (!selectedProduct || !selectedSku) throw new CoreClientError('InvalidRequest', '请选择商品和规格');
     if (!selectedProduct.fulfillmentModes.includes(fulfillmentMode)) {
       throw new CoreClientError('InvalidRequest', '该商品未发布当前履约方式');
     }
     if (selectedSku.seckill && !selectedSeckillSessionId) {
-      throw new CoreClientError('SeckillOnlyProduct', '该 SKU 正在活动阶段，普通结算已停用');
+      throw new CoreClientError('SeckillOnlyProduct', '该规格正在活动阶段，普通结算已停用');
     }
     if (BigInt(selectedSku.stockAvailable) < BigInt(quantity)) {
       throw new CoreClientError('InventoryUnavailable', '抱歉，该规格商品刚刚已被抢光，请重新选择规格！');
@@ -1153,8 +1153,8 @@ export function MallRuntimeProvider({
       throw new CoreClientError(
         'ExternalBlocked',
         fulfillmentMode === 'DELIVERY'
-          ? '请先选择由 Core 验证的收货地址'
-          : '请先选择由 Core 验证的自提门店',
+          ? '请先选择系统已验证的收货地址'
+          : '请先选择系统已验证的自提门店',
       );
     }
     return {
@@ -1594,24 +1594,24 @@ export const defaultMallServices: MallServices = Object.freeze({
 
 export function validateSupportUrl(value: string | null | undefined) {
   const raw = value?.trim();
-  if (!raw) return { url: null, error: 'ConfigurationRequired：客服入口未配置' } as const;
-  if (/\s/.test(raw)) return { url: null, error: 'ConfigurationRequired：客服入口配置无效' } as const;
+  if (!raw) return { url: null, error: '客服入口未配置' } as const;
+  if (/\s/.test(raw)) return { url: null, error: '客服入口配置无效' } as const;
   try {
     const url = new URL(raw);
     if (!['https:', 'mailto:', 'tel:'].includes(url.protocol)) {
-      return { url: null, error: 'ConfigurationRequired：客服入口仅允许 https、mailto 或 tel' } as const;
+      return { url: null, error: '客服入口仅允许 https、mailto 或 tel' } as const;
     }
     if ((url.protocol === 'https:' && !url.hostname) || (url.protocol !== 'https:' && !url.pathname)) {
-      return { url: null, error: 'ConfigurationRequired：客服入口配置无效' } as const;
+      return { url: null, error: '客服入口配置无效' } as const;
     }
     return { url: url.href, error: null } as const;
   } catch {
-    return { url: null, error: 'ConfigurationRequired：客服入口配置无效' } as const;
+    return { url: null, error: '客服入口配置无效' } as const;
   }
 }
 
 function readinessError(bootstrap: CorePaymentAvailability | null) {
-  if (!bootstrap) return new CoreClientError('ConfigurationRequired', 'Core 安全状态尚未同步');
+  if (!bootstrap) return new CoreClientError('ConfigurationRequired', '商城安全状态尚未同步');
   if (bootstrap.blockCode === 'DecisionBlocked') {
     return new CoreClientError('DecisionBlocked', '支付政策尚有未决项');
   }

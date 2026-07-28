@@ -122,13 +122,13 @@ describe('seckill signed quote review', () => {
 
     render(<MemoryRouter><ReviewScreen /></MemoryRouter>);
     expect(screen.getByRole('heading', { name: '秒杀与日常备用报价' })).toBeTruthy();
-    expect(screen.getByText(/区块时间在场内/)).toBeTruthy();
-    expect(screen.getByText(/区块时间已过截止/)).toBeTruthy();
-    expect(screen.getByText(/PaymentRouter 的链上区块时间决定/)).toBeTruthy();
-    const payButton = screen.getByRole('button', { name: /支付并广播/ });
+    expect(screen.getByText(/付款在活动时间内/)).toBeTruthy();
+    expect(screen.getByText(/付款超过活动截止/)).toBeTruthy();
+    expect(screen.getByText(/是否命中秒杀只看奖金付款时间/)).toBeTruthy();
+    const payButton = screen.getByRole('button', { name: /确认支付/ });
     expect(payButton.hasAttribute('disabled')).toBe(true);
 
-    await user.click(screen.getByRole('checkbox', { name: /同时核对两笔五分钟签名报价/ }));
+    await user.click(screen.getByRole('checkbox', { name: /我已核对秒杀价和截止后普通价/ }));
     expect(payButton.hasAttribute('disabled')).toBe(false);
     await user.click(payButton);
     expect(broadcastPayment).toHaveBeenCalledWith(false, true);

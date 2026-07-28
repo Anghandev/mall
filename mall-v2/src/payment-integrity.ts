@@ -107,14 +107,14 @@ function assertCanonicalMatchesRouter(canonical: CanonicalPaymentIntent, router:
   } as Record<string, unknown>;
   for (const [field, value] of Object.entries(router)) {
     if (!sameValue(comparable[field], value)) {
-      throw new PaymentIntegrityError(`Core 报价字段 ${field} 与 Router 调用不一致`);
+      throw new PaymentIntegrityError(`系统报价字段 ${field} 与 Router 调用不一致`);
     }
   }
 }
 
 function assertFiveMinuteQuote(intent: CanonicalPaymentIntent) {
   if (intent.deadline - intent.issuedAt !== 5 * 60) {
-    throw new PaymentIntegrityError('Core 签名报价不是固定五分钟有效期');
+    throw new PaymentIntegrityError('系统签名报价有效期异常');
   }
 }
 

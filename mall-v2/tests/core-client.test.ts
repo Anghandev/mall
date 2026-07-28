@@ -869,7 +869,7 @@ describe('coordinated Core HTTP client', () => {
     longLived.authorizationDigest = digest;
     longLived.buyerAuthorization.digest = digest;
     const longLivedClient = createCoreClient({ fetch: vi.fn().mockResolvedValue(json(longLived, 201)) });
-    await expect(longLivedClient.createOrdinaryQuote('session', selection())).rejects.toThrow(/五分钟/);
+    await expect(longLivedClient.createOrdinaryQuote('session', selection())).rejects.toThrow(/系统签名报价有效期异常/);
   });
 });
 

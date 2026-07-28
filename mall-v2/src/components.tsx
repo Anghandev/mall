@@ -46,7 +46,7 @@ export function ScreenHeader({
 
 type StatusNoticeProps = {
   title: string;
-  children: ReactNode;
+  children?: ReactNode;
   tone?: 'neutral' | 'warning';
 };
 
@@ -58,7 +58,7 @@ export function StatusNotice({ title, children, tone = 'neutral' }: StatusNotice
       <Icon aria-hidden="true" size={20} />
       <div>
         <h2 id={`notice-${slug(title)}`}>{title}</h2>
-        <p>{children}</p>
+        {children ? <p>{children}</p> : null}
       </div>
     </section>
   );
@@ -196,7 +196,7 @@ export function RulesDialog({
       >
         <header>
           <div>
-            <p className="eyebrow">SECKILL RULES</p>
+            <p className="eyebrow">秒杀规则</p>
             <h2 id="rules-dialog-title">{confirmationRequired ? '进入配置前确认规则' : '秒杀规则'}</h2>
           </div>
         </header>
@@ -204,10 +204,10 @@ export function RulesDialog({
         <ul>
           <li>主场固定 60 分钟，接力初始 60 秒。</li>
           <li>每笔链上最终确认的秒杀购买增加 30 秒，接力最高 60 秒且不超过主场截止。</li>
-          <li>区块时间决定订单归类。截止后的交易只可按已签名的日常报价与库存原子执行。</li>
-          <li>商品付款基数为 70% USDT + 30% 等值 NPL；秒杀与日常均使用 Core 签名的五分钟精确报价。</li>
-          <li>BNM 是按商品 USDT 标价 1:1 记录的后台积分，不是代币，履约最终确认前保持 Locked。</li>
-          <li>TxHash 仅代表已提交，最终结果以链上确认和业务状态同步为准。</li>
+          <li>系统按付款最终确认时间判断是否命中秒杀；截止后的付款会按普通价和已锁定库存处理。</li>
+          <li>商品付款为 70% USDT + 30% 等值 NPL；秒杀与普通购买都使用系统生成的 5 分钟有效报价。</li>
+          <li>BNM 是按商品 USDT 标价 1:1 记录的后台积分，不是代币，履约最终确认前暂不可用。</li>
+          <li>交易编号只代表钱包已提交，最终结果以链上确认和系统同步状态为准。</li>
         </ul>
         <div className="rules-dialog__actions">
           <button ref={initialFocusRef} className="button button--secondary" type="button" onClick={onClose}>

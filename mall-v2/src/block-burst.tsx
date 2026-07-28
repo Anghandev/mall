@@ -9,7 +9,6 @@ import {
   ShieldCheck,
   Trophy,
   WalletCards,
-  Zap,
 } from "lucide-react";
 import { useLocation } from "react-router-dom";
 
@@ -27,6 +26,7 @@ const RELEASE_DAYS = 100;
 const PRODUCTION_RELEASE_DURATION_SECONDS = RELEASE_DAYS * 24 * 60 * 60;
 const TX_RECEIPT_ATTEMPTS = 60;
 const TX_RECEIPT_INTERVAL_MS = 2_000;
+const BLOCK_BURST_REFRESH_MS = 15_000;
 const PHASES = Array.from({ length: 10 }, (_, index) => {
   const phase = index + 1;
   const target = 100n * 2n ** BigInt(index);
@@ -205,12 +205,15 @@ export function BlockBurstScreen() {
   const isActiveRoute = location.pathname === BLOCK_BURST_ROUTE;
 
   const refresh = useCallback(
-    async (signal?: AbortSignal) => {
+    async (
+      signal?: AbortSignal,
+      options: { silent?: boolean } = {},
+    ) => {
       if (!configReady) {
         setReadState({ kind: "not-configured" });
         return;
       }
-      setReadState({ kind: "loading" });
+      if (!options.silent) setReadState({ kind: "loading" });
       try {
         const snapshot = await readBlockBurstSnapshot(
           config,
@@ -267,7 +270,13 @@ export function BlockBurstScreen() {
     if (!isActiveRoute) return;
     const controller = new AbortController();
     void refresh(controller.signal);
-    return () => controller.abort();
+    const interval = window.setInterval(() => {
+      void refresh(controller.signal, { silent: true });
+    }, BLOCK_BURST_REFRESH_MS);
+    return () => {
+      window.clearInterval(interval);
+      controller.abort();
+    };
   }, [isActiveRoute, refresh]);
 
   useEffect(() => {
@@ -646,9 +655,9 @@ export function BlockBurstScreen() {
   return (
     <div className="screen screen--block-burst">
       <ScreenHeader
-        eyebrow="NPL BLOCK BLAST"
+        eyebrow="NPL 爆区块"
         title="爆区块"
-        description="独立玩法入口，只接商城壳和钱包，不接商城订单、门店或资产台账"
+        description="爆区块是DEFI共识顶层逻辑，全网引爆区块瓜分奖励，每一次爆块都是财富机遇！"
         trailing={
           <span
             className={
@@ -667,20 +676,127 @@ export function BlockBurstScreen() {
       />
 
       <section
-        className="block-burst-hero"
-        aria-labelledby="block-burst-hero-title"
+        className="section-block block-burst-account"
+        aria-labelledby="block-burst-account-title"
       >
-        <div className="block-burst-hero__mark" aria-hidden="true">
-          <Zap size={28} />
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">我的权重</p>
+            <h2 id="block-burst-account-title">我的本金权重</h2>
+          </div>
+          <span
+            className={
+              walletAddress
+                ? "block-burst-account-pill block-burst-account-pill--connected"
+                : "block-burst-account-pill block-burst-account-pill--warning"
+            }
+          >
+            {walletAddress ? (
+              <WalletCards aria-hidden="true" size={14} />
+            ) : (
+              <AlertTriangle aria-hidden="true" size={14} />
+            )}
+            {walletAddress ? `已连接 ${shortenAddress(walletAddress)}` : "未连接钱包"}
+          </span>
         </div>
-        <div className="block-burst-hero__copy">
-          <p className="eyebrow">INDEPENDENT POOL</p>
-          <h2 id="block-burst-hero-title">未领取本金决定奖励权重</h2>
-          <p>
-            每期累计目标翻倍，爆区块只分发当期累计目标 10%
-            的奖励，本金从打入那一刻开始按 NPL 币本位每天释放 1%。
-          </p>
+        <div className="block-burst-wallet-connect">
+          <div>
+            <span>爆区块钱包</span>
+            <strong>{walletAddress ? shortenAddress(walletAddress) : "未连接"}</strong>
+          </div>
+          <button
+            type="button"
+            className="button button--secondary"
+            onClick={() => void handleConnectBlockBurstWallet()}
+            disabled={walletConnecting}
+          >
+            <WalletCards aria-hidden="true" size={18} />
+            {walletConnecting
+              ? "连接中…"
+              : walletAddress
+                ? "切换爆区块钱包"
+                : "连接爆区块钱包"}
+          </button>
         </div>
+        <div className="metric-grid metric-grid--four block-burst-weight-metrics">
+          <Metric
+            label="未领取本金"
+            value={
+              readState.kind === "ready" && readState.user
+                ? formatNpl(readState.user.activePrincipal)
+                : null
+            }
+          />
+          <Metric
+            label="待领奖励"
+            value={
+              readState.kind === "ready" && readState.user
+                ? formatNpl(readState.user.pendingReward)
+                : null
+            }
+          />
+          <Metric
+            label="本金单数"
+            value={
+              readState.kind === "ready" && readState.user
+                ? String(readState.user.positionCount)
+                : null
+            }
+          />
+          <Metric
+            label="可领本金"
+            value={
+              readState.kind === "ready" ? formatNpl(claimablePrincipal) : "0 NPL"
+            }
+          />
+        </div>
+        {walletSnapshot.kind === "ready" ? (
+          <dl
+            className="block-burst-config-list block-burst-wallet-list"
+            aria-label="NPL 余额和授权"
+          >
+            <div>
+              <dt>钱包余额</dt>
+              <dd>{formatNpl(walletSnapshot.balance)}</dd>
+            </div>
+            <div>
+              <dt>已授权额度</dt>
+              <dd>{formatNpl(walletSnapshot.allowance)}</dd>
+            </div>
+          </dl>
+        ) : config.writesEnabled && walletAddress ? (
+          <p className="field-help">NPL 余额和授权会在写链前重新校验。</p>
+        ) : null}
+        {readState.kind === "ready" && readState.positions.length > 0 ? (
+          <div className="block-burst-positions" aria-label="我的爆区块本金单">
+            {readState.positions.slice(0, 4).map((position) => (
+              <article key={position.id} className="block-burst-position">
+                <div>
+                  <strong>本金单 #{position.id}</strong>
+                  <span>
+                    {position.closed
+                      ? "已关闭"
+                      : `${String(position.joinedPhase).padStart(2, "0")} 期进入`}
+                  </span>
+                </div>
+                <dl>
+                  <div>
+                    <dt>本金</dt>
+                    <dd>{formatNpl(position.amount)}</dd>
+                  </div>
+                  <div>
+                    <dt>可领</dt>
+                    <dd>{formatNpl(position.claimablePrincipal)}</dd>
+                  </div>
+                  <div>
+                    <dt>剩余权重</dt>
+                    <dd>{formatNpl(position.activePrincipal)}</dd>
+                  </div>
+                </dl>
+              </article>
+            ))}
+          </div>
+        ) : null}
       </section>
 
       {configError ? (
@@ -690,8 +806,8 @@ export function BlockBurstScreen() {
       ) : null}
       {!configReady && !configError ? (
         <StatusNotice title="生产合约未配置" tone="warning">
-          当前商城只展示规则和独立入口。填入生产 Proxy 与只读 RPC 后，页面才读取
-          BSC 链上状态；MicroTest 不作为生产入口。
+          当前商城只展示规则和独立入口。填入生产合约与只读链上节点 后，页面才读取
+          BSC 链上状态；测试入口不作为生产入口。
         </StatusNotice>
       ) : null}
       {readState.kind === "error" ? (
@@ -733,7 +849,7 @@ export function BlockBurstScreen() {
       >
         <div className="section-heading">
           <div>
-            <p className="eyebrow">NEXT EXPLOSION</p>
+            <p className="eyebrow">下一期</p>
             <h2 id="block-burst-next-title">下一次爆区块</h2>
           </div>
           {readState.kind === "ready" && readState.next.canExplode ? (
@@ -769,7 +885,9 @@ export function BlockBurstScreen() {
             </p>
             <div className="block-burst-readiness" aria-label="爆区块条件">
               <ReadinessItem
-                label="本金达标"
+                readyLabel="水位已满"
+                waitingLabel="水位未满"
+                ariaDescription="大家打入的 NPL 是否已经填满本期目标。"
                 ready={
                   readState.kind === "ready"
                     ? readState.next.principalReady
@@ -777,7 +895,9 @@ export function BlockBurstScreen() {
                 }
               />
               <ReadinessItem
-                label="奖励池达标"
+                readyLabel="奖励充足"
+                waitingLabel="奖励不足"
+                ariaDescription="合约里的奖励 NPL 是否够发本期奖励。"
                 ready={
                   readState.kind === "ready"
                     ? readState.next.rewardReady
@@ -785,7 +905,9 @@ export function BlockBurstScreen() {
                 }
               />
               <ReadinessItem
-                label="合约可爆"
+                readyLabel="可以爆块"
+                waitingLabel="暂不能爆"
+                ariaDescription="水位满、奖励够且未暂停时，点爆区块才会成功。"
                 ready={
                   readState.kind === "ready" ? readState.next.canExplode : false
                 }
@@ -843,7 +965,7 @@ export function BlockBurstScreen() {
         <div className="block-burst-user-actions" aria-label="用户写链入口">
           <div className="section-heading section-heading--compact">
             <div>
-              <p className="eyebrow">USER ACTIONS</p>
+              <p className="eyebrow">我的操作</p>
               <h3>打入与领取</h3>
             </div>
           </div>
@@ -919,121 +1041,6 @@ export function BlockBurstScreen() {
         </div>
       </section>
 
-      <section
-        className="section-block block-burst-account"
-        aria-labelledby="block-burst-account-title"
-      >
-        <div className="section-heading">
-          <div>
-            <p className="eyebrow">MY WEIGHT</p>
-            <h2 id="block-burst-account-title">我的本金权重</h2>
-          </div>
-          <WalletCards aria-hidden="true" size={20} />
-        </div>
-        <div className="block-burst-wallet-connect">
-          <div>
-            <span>爆区块钱包</span>
-            <strong>{walletAddress ? shortenAddress(walletAddress) : "未连接"}</strong>
-          </div>
-          <button
-            type="button"
-            className="button button--secondary"
-            onClick={() => void handleConnectBlockBurstWallet()}
-            disabled={walletConnecting}
-          >
-            <WalletCards aria-hidden="true" size={18} />
-            {walletConnecting
-              ? "连接中…"
-              : walletAddress
-                ? "切换爆区块钱包"
-                : "连接爆区块钱包"}
-          </button>
-        </div>
-        {!walletAddress ? (
-          <StatusNotice title="未连接钱包" tone="warning">
-            连接爆区块钱包后，读取该钱包在合约里的本金、待领奖励和本金单；不需要商城 Core 登录或 BUYER 身份。
-          </StatusNotice>
-        ) : null}
-        <div className="metric-grid metric-grid--three">
-          <Metric
-            label="未领取本金"
-            value={
-              readState.kind === "ready" && readState.user
-                ? formatNpl(readState.user.activePrincipal)
-                : null
-            }
-          />
-          <Metric
-            label="待领奖励"
-            value={
-              readState.kind === "ready" && readState.user
-                ? formatNpl(readState.user.pendingReward)
-                : null
-            }
-          />
-          <Metric
-            label="本金单数"
-            value={
-              readState.kind === "ready" && readState.user
-                ? String(readState.user.positionCount)
-                : null
-            }
-          />
-          <Metric
-            label="可领本金"
-            value={
-              readState.kind === "ready" ? formatNpl(claimablePrincipal) : null
-            }
-          />
-        </div>
-        {walletSnapshot.kind === "ready" ? (
-          <dl
-            className="block-burst-config-list block-burst-wallet-list"
-            aria-label="NPL 余额和授权"
-          >
-            <div>
-              <dt>钱包余额</dt>
-              <dd>{formatNpl(walletSnapshot.balance)}</dd>
-            </div>
-            <div>
-              <dt>已授权额度</dt>
-              <dd>{formatNpl(walletSnapshot.allowance)}</dd>
-            </div>
-          </dl>
-        ) : config.writesEnabled && walletAddress ? (
-          <p className="field-help">NPL 余额和授权会在写链前重新校验。</p>
-        ) : null}
-        {readState.kind === "ready" && readState.positions.length > 0 ? (
-          <div className="block-burst-positions" aria-label="我的爆区块本金单">
-            {readState.positions.slice(0, 4).map((position) => (
-              <article key={position.id} className="block-burst-position">
-                <div>
-                  <strong>本金单 #{position.id}</strong>
-                  <span>
-                    {position.closed
-                      ? "已关闭"
-                      : `${String(position.joinedPhase).padStart(2, "0")} 期进入`}
-                  </span>
-                </div>
-                <dl>
-                  <div>
-                    <dt>本金</dt>
-                    <dd>{formatNpl(position.amount)}</dd>
-                  </div>
-                  <div>
-                    <dt>可领</dt>
-                    <dd>{formatNpl(position.claimablePrincipal)}</dd>
-                  </div>
-                  <div>
-                    <dt>剩余权重</dt>
-                    <dd>{formatNpl(position.activePrincipal)}</dd>
-                  </div>
-                </dl>
-              </article>
-            ))}
-          </div>
-        ) : null}
-      </section>
 
       <section
         className="section-block block-burst-rules"
@@ -1095,7 +1102,7 @@ export function BlockBurstScreen() {
           </div>
           <div>
             <dt>目标链</dt>
-            <dd>BSC {config.chainId}</dd>
+            <dd>主网 <small>BSC {config.chainId}</small></dd>
           </div>
           <div>
             <dt>写链开关</dt>
@@ -1121,8 +1128,19 @@ function Metric({ label, value }: { label: string; value: string | null }) {
   );
 }
 
-function ReadinessItem({ label, ready }: { label: string; ready: boolean }) {
+function ReadinessItem({
+  readyLabel,
+  waitingLabel,
+  ariaDescription,
+  ready,
+}: {
+  readyLabel: string;
+  waitingLabel: string;
+  ariaDescription: string;
+  ready: boolean;
+}) {
   const Icon = ready ? CheckCircle2 : Clock3;
+  const statusCopy = ready ? readyLabel : waitingLabel;
   return (
     <span
       className={
@@ -1130,9 +1148,10 @@ function ReadinessItem({ label, ready }: { label: string; ready: boolean }) {
           ? "block-burst-readiness__item is-ready"
           : "block-burst-readiness__item"
       }
+      aria-label={`${statusCopy}：${ariaDescription}`}
     >
       <Icon aria-hidden="true" size={16} />
-      {label}
+      <strong>{statusCopy}</strong>
     </span>
   );
 }
@@ -1160,7 +1179,7 @@ function BlockBurstActionButton({
         {children}
       </button>
       <p className="control-reason">
-        {reason ?? "每次写链都会弹出钱包确认，并等待 BSC receipt。"}
+        {reason ?? "每次写链都会弹出钱包确认，并等待链上回执。"}
       </p>
     </div>
   );
@@ -1192,7 +1211,7 @@ function BlockBurstWriteStatus({ state }: { state: WriteState }) {
         <h2>{success ? "交易已确认" : pending ? "交易处理中" : "交易未完成"}</h2>
         <p>{state.message}</p>
         {success ? (
-          <div className="block-burst-tx-list" aria-label="爆区块交易哈希">
+          <div className="block-burst-tx-list" aria-label="爆区块交易记录">
             {state.txHashes.map((hash) => (
               <a
                 key={hash}
@@ -1250,11 +1269,11 @@ function readBlockBurstConfig(): BlockBurstConfig {
   const chainId = parseChainId(rawChainId, errors);
   const nplToken =
     normalizeOptionalAddress(import.meta.env.VITE_BLOCK_BURST_NPL_TOKEN, "NPL Token", errors) ?? DEFAULT_NPL_TOKEN;
-  const proxy = normalizeOptionalAddress(import.meta.env.VITE_BLOCK_BURST_PROXY, "生产合约 Proxy", errors);
+  const proxy = normalizeOptionalAddress(import.meta.env.VITE_BLOCK_BURST_PROXY, "生产合约", errors);
   const rpcUrl = normalizeOptionalText(import.meta.env.VITE_BLOCK_BURST_RPC_URL);
   const writesEnabled = String(import.meta.env.VITE_BLOCK_BURST_ENABLE_WRITES ?? "").toLowerCase() === "true";
 
-  if (chainId !== DEFAULT_CHAIN_ID) errors.push("爆区块商城入口仅允许 BSC mainnet chainId 56。");
+  if (chainId !== DEFAULT_CHAIN_ID) errors.push("爆区块商城入口仅允许 BSC 主网 56。");
   return { chainId, nplToken, proxy, rpcUrl, writesEnabled, errors };
 }
 
@@ -1289,9 +1308,9 @@ function isReadConfigured(config: BlockBurstConfig) {
 }
 
 async function readBlockBurstSnapshot(config: BlockBurstConfig, walletAddress: string | null, signal?: AbortSignal) {
-  if (!config.proxy || !config.rpcUrl) throw new Error("生产 Proxy 或只读 RPC 未配置。");
+  if (!config.proxy || !config.rpcUrl) throw new Error("生产合约或只读链上节点未配置。");
   const chainIdHex = await rpc<string>(config.rpcUrl, "eth_chainId", [], signal);
-  if (normalizeChainId(chainIdHex) !== config.chainId) throw new Error(`RPC 链 ID 为 ${chainIdHex}，不是配置的 BSC ${config.chainId}。`);
+  if (normalizeChainId(chainIdHex) !== config.chainId) throw new Error(`链上节点返回的网络编号为 ${chainIdHex}，不是配置的 BSC ${config.chainId}。`);
 
   const [pool, next] = await Promise.all([callPoolState(config, signal), callNextExplosion(config, signal)]);
   validateBlockBurstPool(config, pool);
@@ -1371,7 +1390,7 @@ async function callUserPositions(config: BlockBurstConfig, wallet: string, signa
 }
 
 async function callNplAllowance(config: BlockBurstConfig, owner: string, signal?: AbortSignal) {
-  if (!config.proxy) throw new Error("生产 Proxy 未配置。");
+  if (!config.proxy) throw new Error("生产合约未配置。");
   const abi = await getErc20Interface();
   const value = await ethCallTo(config, config.nplToken, abi.encodeFunctionData("allowance", [owner, config.proxy]), signal);
   return BigInt(String(abi.decodeFunctionResult("allowance", value)[0]));
@@ -1384,13 +1403,13 @@ async function callNplBalance(config: BlockBurstConfig, owner: string, signal?: 
 }
 
 async function ethCall(config: BlockBurstConfig, abi: import("ethers").Interface, functionName: string, args: readonly unknown[], signal?: AbortSignal) {
-  if (!config.proxy) throw new Error("生产 Proxy 未配置。");
+  if (!config.proxy) throw new Error("生产合约未配置。");
   const data = abi.encodeFunctionData(functionName, [...args]);
   return ethCallTo(config, config.proxy, data, signal);
 }
 
 async function ethCallTo(config: BlockBurstConfig, to: string, data: string, signal?: AbortSignal) {
-  if (!config.rpcUrl) throw new Error("只读 RPC 未配置。");
+  if (!config.rpcUrl) throw new Error("只读链上节点未配置。");
   return rpc<string>(config.rpcUrl, "eth_call", [{ to, data }, "latest"], signal);
 }
 
@@ -1402,10 +1421,10 @@ async function rpc<T>(rpcUrl: string, method: string, params: readonly unknown[]
   };
   if (signal) requestInit.signal = signal;
   const response = await fetch(rpcUrl, requestInit);
-  if (!response.ok) throw new Error(`RPC 请求失败：HTTP ${response.status}`);
+  if (!response.ok) throw new Error(`链上节点请求失败：HTTP ${response.status}`);
   const payload = (await response.json()) as JsonRpcResponse<T>;
-  if (payload.error) throw new Error(payload.error.message ?? `RPC 错误 ${payload.error.code ?? ""}`.trim());
-  if (payload.result === undefined) throw new Error("RPC 返回缺少 result。");
+  if (payload.error) throw new Error(payload.error.message ?? `链上节点错误 ${payload.error.code ?? ""}`.trim());
+  if (payload.result === undefined) throw new Error("链上节点返回内容不完整。");
   return payload.result;
 }
 
@@ -1426,7 +1445,7 @@ function blockBurstWriteReason(
   pendingWrite: PendingWrite | null,
 ) {
   if (config.errors.length > 0) return "爆区块配置无效，写链入口关闭。";
-  if (!config.proxy || !config.rpcUrl) return "生产合约或只读 RPC 未配置，写链入口关闭。";
+  if (!config.proxy || !config.rpcUrl) return "生产合约或只读链上节点未配置，写链入口关闭。";
   if (!config.writesEnabled) return "VITE_BLOCK_BURST_ENABLE_WRITES 未显式开启，商城不发送爆区块交易。";
   if (readState.kind !== "ready") return "链上状态未确认，商城不发送爆区块交易。";
   if (!walletAddress) return "请先连接爆区块钱包后再执行爆区块写链。";
@@ -1637,10 +1656,10 @@ async function ensureBlockBurstChain(ethereum: Eip1193ProviderLike, chainId: num
   try {
     await ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: expectedHex }] });
   } catch {
-    throw new Error("请将钱包切换到 BSC Mainnet (56) 后重试。");
+    throw new Error("请将钱包切换到 BSC 主网（56）后重试。");
   }
   const switched = await ethereum.request({ method: "eth_chainId" });
-  if (normalizeChainId(switched) !== chainId) throw new Error("钱包未切换到 BSC Mainnet (56)。");
+  if (normalizeChainId(switched) !== chainId) throw new Error("钱包未切换到 BSC 主网（56）。");
 }
 
 function normalizeChainId(value: unknown) {
@@ -1665,7 +1684,7 @@ async function encodeErc20Function(functionName: string, args: readonly unknown[
 }
 
 function functionSelector(data: string) {
-  if (!/^0x[0-9a-fA-F]{8}/.test(data)) throw new Error("交易 calldata 缺少函数选择器。");
+  if (!/^0x[0-9a-fA-F]{8}/.test(data)) throw new Error("交易内容缺少函数选择器。");
   return data.slice(0, 10).toLowerCase();
 }
 
@@ -1678,22 +1697,22 @@ async function sendWalletTransaction(config: BlockBurstConfig, from: string, to:
     method: "eth_sendTransaction",
     params: [{ from, to, data }],
   });
-  if (typeof txHash !== "string" || !isTxHash(txHash)) throw new Error("钱包未返回有效交易哈希。");
+  if (typeof txHash !== "string" || !isTxHash(txHash)) throw new Error("钱包未返回有效交易编号。");
   return txHash;
 }
 
 async function waitForTransactionReceipt(config: BlockBurstConfig, txHash: string, expected?: PendingWrite) {
-  if (!config.rpcUrl) throw new Error("只读 RPC 未配置，无法确认交易。");
+  if (!config.rpcUrl) throw new Error("只读链上节点未配置，无法确认交易。");
   for (let attempt = 0; attempt < TX_RECEIPT_ATTEMPTS; attempt += 1) {
     const receipt = await rpc<TransactionReceiptRpc | null>(config.rpcUrl, "eth_getTransactionReceipt", [txHash]);
     if (receipt) {
       if (typeof receipt.transactionHash !== "string" || receipt.transactionHash.toLowerCase() !== txHash.toLowerCase()) {
-        throw new Error("RPC 返回的交易回执与提交哈希不一致，已停止刷新。");
+        throw new Error("链上节点返回的交易回执与提交记录不一致，已停止刷新。");
       }
       if (expected) validateReceiptAgainstPending(receipt, expected);
       if (String(receipt.status).toLowerCase() !== "0x1") throw new Error(`链上交易执行失败：${txHash}`);
-      if (!isPositiveHexQuantity(receipt.blockNumber)) throw new Error("RPC 返回的交易回执缺少有效区块号。");
-      if (!isHash(receipt.blockHash)) throw new Error("RPC 返回的交易回执缺少有效区块哈希。");
+      if (!isPositiveHexQuantity(receipt.blockNumber)) throw new Error("链上节点返回的交易回执缺少有效区块号。");
+      if (!isHash(receipt.blockHash)) throw new Error("链上节点返回的交易回执缺少有效区块哈希。");
       if (expected) {
         const tx = await rpc<TransactionRpc | null>(config.rpcUrl, "eth_getTransactionByHash", [txHash]);
         validateTransactionAgainstPending(tx, expected);
@@ -1707,17 +1726,17 @@ async function waitForTransactionReceipt(config: BlockBurstConfig, txHash: strin
 
 function validateReceiptAgainstPending(receipt: TransactionReceiptRpc, expected: PendingWrite) {
   if (receipt.from && receipt.from.toLowerCase() !== expected.wallet.toLowerCase()) {
-    throw new Error("RPC 返回的交易发送方与当前钱包不一致。");
+    throw new Error("链上节点返回的交易发送方与当前钱包不一致。");
   }
   if (receipt.to && receipt.to.toLowerCase() !== expected.target.toLowerCase()) {
-    throw new Error("RPC 返回的交易目标与爆区块目标不一致。");
+    throw new Error("链上节点返回的交易目标与爆区块目标不一致。");
   }
 }
 
 function validateTransactionAgainstPending(tx: TransactionRpc | null, expected: PendingWrite) {
-  if (!tx) throw new Error("RPC 未返回交易详情，无法校验 calldata。");
+  if (!tx) throw new Error("链上节点未返回交易详情，无法校验交易内容。");
   if (typeof tx.hash !== "string" || tx.hash.toLowerCase() !== expected.txHash.toLowerCase()) {
-    throw new Error("RPC 返回的交易详情与提交哈希不一致。");
+    throw new Error("链上节点返回的交易详情与提交记录不一致。");
   }
   if (typeof tx.from !== "string" || tx.from.toLowerCase() !== expected.wallet.toLowerCase()) {
     throw new Error("交易详情发送方与当前钱包不一致。");
@@ -1748,9 +1767,9 @@ function formatNpl(value: bigint) {
   const whole = value / NPL_BASE;
   if (whole >= TRILLION) return `${formatBigRatio(whole, TRILLION)} 万亿`;
   if (whole >= 100_000_000n) return `${formatBigRatio(whole, 100_000_000n)} 亿`;
-  const fraction = value % NPL_BASE;
-  const compactFraction = fraction.toString().padStart(NPL_DECIMALS, "0").replace(/0+$/, "").slice(0, 6);
-  return compactFraction ? `${whole}.${compactFraction} NPL` : `${whole} NPL`;
+  const cents = (value * 100n + NPL_BASE / 2n) / NPL_BASE;
+  if (value > 0n && cents === 0n) return "<0.01 NPL";
+  return `${(cents / 100n).toLocaleString("en-US")}.${(cents % 100n).toString().padStart(2, "0")} NPL`;
 }
 
 function formatBigRatio(value: bigint, divisor: bigint) {

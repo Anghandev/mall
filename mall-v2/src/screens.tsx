@@ -60,6 +60,7 @@ import {
   type SettlementRequestProjection,
 } from '@abu24k/core-artifacts';
 
+import { BrandImage } from './brand-image';
 import {
   DisabledAction,
   EmptyState,
@@ -69,7 +70,6 @@ import {
   StatusNotice,
 } from './components';
 import type { BuyerEvidenceAction, PublishedSeckillSessionProjection } from './core-client';
-import { brandAssetUrl } from './deployment-paths';
 import { useMallRuntime, type MallRuntimeValue } from './mall-runtime';
 
 export function SeckillScreen() {
@@ -115,18 +115,26 @@ export function SeckillScreen() {
       <ScreenHeader
         eyebrow="60 分钟主场"
         title="秒杀大厅"
-        description="以链上最终确认时间为准"
+        description="看活动、看奖励、看剩余时间，准备好就直接抢"
         trailing={<SeckillPhasePill phase={session?.phase} />}
       />
 
       <section className="seckill-hero" aria-label="秒杀活动状态">
-        <img src={brandAssetUrl('prize-vault.png')} alt="黑金秒杀奖池保险柜" />
+        <BrandImage
+          filename="prize-vault.png"
+          alt="黑金秒杀奖池保险柜"
+          width={1024}
+          height={1024}
+          decoding="async"
+          loading="eager"
+          fetchPriority="high"
+        />
         <div className="seckill-hero__overlay">
           <p>接力大奖池</p>
           <strong className="amount-placeholder">
             {session ? formatUsdtNumber(session.prizePoolUsdt) : '--'}
           </strong>
-          <span>{session ? `USDT · 场次 ${shortHash(session.sessionId)}` : '等待活动状态同步'}</span>
+          <span>{session ? 'USDT · 当前活动实时同步' : '等待活动状态同步'}</span>
         </div>
       </section>
 
@@ -171,13 +179,13 @@ export function SeckillScreen() {
       {runtime.seckillSessionState === 'loading' ? <p className="loading-copy" role="status">正在同步权威场次…</p> : null}
       {runtime.seckillSessionState === 'error' ? (
         <div className="catalog-retry">
-          <StatusNotice title="场次同步失败" tone="warning">已停止倒计时、活动动作和事件流，不使用本地场次兜底。</StatusNotice>
+          <StatusNotice title="活动同步失败" tone="warning">暂时不能参与，刷新成功后会恢复倒计时和抢购入口。</StatusNotice>
           <button className="button button--secondary" type="button" onClick={() => void runtime.reloadSeckill()} disabled={runtime.busy}>
             <RefreshCw aria-hidden="true" size={18} /> 重新同步
           </button>
         </div>
       ) : null}
-      {runtime.seckillSessionState === 'empty' ? <EmptyState title="暂无已发布场次">Core 当前没有可展示的秒杀场次。</EmptyState> : null}
+      {runtime.seckillSessionState === 'empty' ? <EmptyState title="暂无活动">现在还没有可参与的秒杀，开场后这里会显示商品和倒计时。</EmptyState> : null}
 
       {session ? <SeckillSessionDashboard session={session} /> : null}
 
@@ -186,15 +194,15 @@ export function SeckillScreen() {
       <section className="section-block" aria-labelledby="relay-feed-title">
         <div className="section-heading">
           <div>
-            <p className="eyebrow">CHAIN FINAL EVENTS</p>
-            <h2 id="relay-feed-title">接力风云</h2>
+            <p className="eyebrow">实时动态</p>
+            <h2 id="relay-feed-title">最新抢购动态</h2>
           </div>
           <span className={`realtime-state realtime-state--${runtime.seckillRealtimeState.toLowerCase()}`}>
             <Radio aria-hidden="true" size={16} /> {realtimeStateLabel(runtime.seckillRealtimeState)}
           </span>
         </div>
         {runtime.seckillEvents.length === 0 ? (
-          <EmptyState title="暂无已确认动态">只展示已去重、可恢复游标的链上最终事件，连接中断时不插入临时记录。</EmptyState>
+          <EmptyState title="暂无抢购动态">还没有新的成功抢购，页面会自动刷新最新动态。</EmptyState>
         ) : (
           <ol className="relay-feed" aria-live="polite">
             {runtime.seckillEvents.map((event) => <RelayEvent event={event} key={event.eventId} />)}
@@ -237,14 +245,14 @@ function SeckillActionCard({
   const readyCopy = session
     ? seckillActionReason(runtime, session, productAvailable, mainCountdown, relayCountdown)
     : runtime.seckillSessionState === 'loading'
-      ? '正在同步 Core 场次'
-      : '等待 Core 发布可参与场次';
+      ? '正在刷新活动信息'
+      : '等待下一场活动开放';
   return (
     <section className="seckill-action-card" aria-labelledby="seckill-action-title">
       <div>
-        <p className="eyebrow">NEXT ACTION</p>
-        <h2 id="seckill-action-title">{canConfigure ? '现在可以配置秒杀订单' : '当前不可参与'}</h2>
-        <p>{canConfigure ? '先确认规则，再选择规格、履约方式和地址。' : readyCopy}</p>
+        <p className="eyebrow">参与入口</p>
+        <h2 id="seckill-action-title">{canConfigure ? '现在可以抢' : '暂时不能抢'}</h2>
+        <p>{canConfigure ? '确认规则后进入下单页，选择规格、履约方式和地址。' : readyCopy}</p>
       </div>
       <button
         className="button button--primary"
@@ -253,38 +261,44 @@ function SeckillActionCard({
         onClick={onConfigure}
       >
         <WalletCards aria-hidden="true" size={18} />
-        配置秒杀订单
+        立即抢购
       </button>
     </section>
   );
 }
 
 function SeckillSessionDashboard({ session }: { session: PublishedSeckillSessionProjection }) {
+  const publicStatus = seckillPhaseCopy(session);
   return (
     <section className="section-block seckill-dashboard" aria-labelledby="current-session-title">
       <div className="section-heading">
-        <div><p className="eyebrow">AUTHORITATIVE SESSION</p><h2 id="current-session-title">{session.product.title}</h2></div>
+        <div><p className="eyebrow">当前活动</p><h2 id="current-session-title">{session.product.title}</h2></div>
         <Zap aria-hidden="true" size={19} />
       </div>
       <dl className="seckill-facts">
         <div><dt>秒杀价</dt><dd>{formatUsdtAmount(session.product.seckillListPriceUsdt)}</dd></div>
-        <div><dt>可用库存</dt><dd>{session.inventory.available}</dd></div>
-        <div><dt>已售 / 预留</dt><dd>{session.inventory.sold} / {session.inventory.reserved}</dd></div>
-        <div><dt>策略版本</dt><dd>{session.policyVersion}</dd></div>
+        <div><dt>剩余可抢</dt><dd>{session.inventory.available}</dd></div>
+        <div><dt>成功抢购</dt><dd>{session.inventory.sold}</dd></div>
+        <div><dt>活动奖励</dt><dd>奖池 + BNM</dd></div>
       </dl>
-      <p className="phase-copy">{seckillPhaseCopy(session)}</p>
-      <dl className="seckill-publication" aria-label="场次最终发布证据">
-        <div><dt>治理动作</dt><dd><code>{session.governanceActionId}</code></dd></div>
-        <div><dt>规则内容哈希</dt><dd><code>{session.rulesContentHash}</code></dd></div>
-        <div><dt>最终发布交易</dt><dd><code>{session.publicationTxHash}</code></dd></div>
-      </dl>
-      {session.lastBuyerWallet ? <p className="last-buyer">最后接力 {shortAddress(session.lastBuyerWallet)}</p> : null}
+      <p className="phase-copy">{publicStatus}</p>
+      {session.lastBuyerWallet ? <p className="last-buyer">最新抢购用户 {shortAddress(session.lastBuyerWallet)}</p> : null}
       {session.phase === 'SETTLED' ? (
         session.winnerWallet
-          ? <div className="winner-callout"><BadgeCheck aria-hidden="true" size={20} /><span>本场赢家</span><strong>{shortAddress(session.winnerWallet)}</strong></div>
-          : <p className="field-help">本场已最终结算，Core 未发布赢家钱包。</p>
+          ? <div className="winner-callout"><BadgeCheck aria-hidden="true" size={20} /><span>本场中奖用户</span><strong>{shortAddress(session.winnerWallet)}</strong></div>
+          : <p className="field-help">本场已结算，没有产生可展示的中奖用户。</p>
       ) : null}
-      <SeckillPrizeOutcome session={session} />
+      <SeckillPrizeOutcome session={session} publicView />
+      <details className="technical-disclosure">
+        <summary>查看高级记录</summary>
+        <dl className="seckill-publication" aria-label="场次最终发布证据">
+          <div><dt>活动编号</dt><dd><code title={session.sessionId}>{shortHash(session.sessionId)}</code></dd></div>
+          <div><dt>高级规则编号</dt><dd>{session.policyVersion}</dd></div>
+          <div><dt>发布动作</dt><dd><code title={session.governanceActionId}>{shortHash(session.governanceActionId)}</code></dd></div>
+          <div><dt>规则凭证</dt><dd><code title={session.rulesContentHash}>{shortHash(session.rulesContentHash)}</code></dd></div>
+          <div><dt>发布凭证</dt><dd><code title={session.publicationTxHash}>{shortHash(session.publicationTxHash)}</code></dd></div>
+        </dl>
+      </details>
     </section>
   );
 }
@@ -293,15 +307,18 @@ function SeckillHistory({ sessions }: { sessions: readonly PublishedSeckillSessi
   return (
     <section className="section-block" aria-labelledby="seckill-history-title">
       <div className="section-heading"><h2 id="seckill-history-title">历史战报</h2><History aria-hidden="true" size={18} /></div>
-      {sessions.length === 0 ? <p className="section-copy">Core 当前没有已结算或强制关闭的历史场次。</p> : (
+      {sessions.length === 0 ? <p className="section-copy">当前没有已结束的历史活动。</p> : (
         <div className="seckill-history-list">
           {sessions.map((session) => (
             <article key={session.sessionId}>
               <div><strong>{session.product.title}</strong><SeckillPhasePill phase={session.phase} /></div>
               <p>奖池 {formatUsdtAmount(session.prizePoolUsdt)} · 已售 {session.inventory.sold}</p>
               <p>{session.winnerWallet ? `赢家 ${shortAddress(session.winnerWallet)}` : '无已发布赢家'}</p>
-              <SeckillPrizeOutcome session={session} compact />
-              <p>发布证据 {shortHash(session.publicationTxHash)}</p>
+              <SeckillPrizeOutcome session={session} compact publicView />
+              <details className="technical-disclosure technical-disclosure--compact">
+                <summary>查看高级记录</summary>
+                <p title={session.publicationTxHash}>发布凭证 {shortHash(session.publicationTxHash)}</p>
+              </details>
             </article>
           ))}
         </div>
@@ -314,9 +331,12 @@ function RelayEvent({ event }: { event: RealtimeEventEnvelope }) {
   const payload = event.payload as Readonly<Record<string, unknown>>;
   return (
     <li>
-      <div><strong>{shortAddress(String(payload.buyerWallet))}</strong><time dateTime={event.occurredAt}>{formatIso(event.occurredAt)}</time></div>
-      <p>链上最终购买，Core 已发布接力延长 {String(payload.extensionSeconds)} 秒</p>
-      <span>游标 {event.cursor} · {shortHash(String(payload.transactionHash))}</span>
+      <div><strong>用户 {shortAddress(String(payload.buyerWallet))}</strong><time dateTime={event.occurredAt}>{formatRelativeTime(event.occurredAt)}</time></div>
+      <p>成功抢购，接力时间 +{String(payload.extensionSeconds)} 秒</p>
+      <details className="technical-disclosure technical-disclosure--compact">
+        <summary>查看高级记录</summary>
+        <span>记录 {event.cursor} · {shortHash(String(payload.transactionHash))}</span>
+      </details>
     </li>
   );
 }
@@ -338,7 +358,7 @@ export function MallScreen() {
       <ScreenHeader
         eyebrow="24K SELECT"
         title="常规商城"
-        description="商品、规格与价格以签名报价为准"
+        description="挑商品、选规格，付款前会再次确认价格"
       />
 
       <PublishedContent
@@ -348,7 +368,15 @@ export function MallScreen() {
       />
 
       <section className="catalog-banner">
-        <img src={brandAssetUrl('market-banner.png')} alt="24K商城黑金精选陈列" />
+        <BrandImage
+          filename="market-banner.png"
+          alt="24K商城黑金精选陈列"
+          width={1024}
+          height={1024}
+          decoding="async"
+          loading="eager"
+          fetchPriority="high"
+        />
         <div className="catalog-banner__copy">
           <span>24K SELECT</span>
           <strong>消费记录，履约后释放 BNM</strong>
@@ -358,19 +386,19 @@ export function MallScreen() {
       <section aria-labelledby="category-title" className="section-block section-block--flat">
         <div className="section-heading">
           <h2 id="category-title">商品分类</h2>
-          <span className="muted-label">Core 目录</span>
+          <span className="muted-label">全部分类</span>
         </div>
         {runtime.taxonomyState === 'loading' ? (
           <div className="category-skeleton" aria-label="正在加载商品分类"><span /><span /><span /><span /></div>
         ) : null}
         {runtime.taxonomyState === 'empty' ? (
-          <EmptyState title="暂无已发布分类">Core 当前没有启用中的公开类目或标签。</EmptyState>
+          <EmptyState title="暂无商品分类">分类还没整理好，可以稍后再来看看。</EmptyState>
         ) : null}
         {runtime.taxonomyState === 'error' ? (
           <div className="catalog-retry">
-            <StatusNotice title="分类与标签同步失败" tone="warning">当前不使用本地分类或缓存标签替代。</StatusNotice>
+            <StatusNotice title="分类加载失败" tone="warning">分类暂时没加载出来，请刷新后再试。</StatusNotice>
             <button className="button button--secondary" type="button" onClick={() => void runtime.reloadTaxonomy()} disabled={runtime.busy}>
-              <RefreshCw aria-hidden="true" size={18} /> 重新同步分类
+              <RefreshCw aria-hidden="true" size={18} /> 刷新分类
             </button>
           </div>
         ) : null}
@@ -391,13 +419,13 @@ export function MallScreen() {
         </div>
       ) : null}
       {runtime.catalogState === 'empty' ? (
-        <EmptyState title="暂无可售商品">目录已成功同步，当前没有通过商家、保证金与商品状态校验的 SKU。</EmptyState>
+        <EmptyState title="暂无可买商品">现在还没有上架可购买的商品。</EmptyState>
       ) : null}
       {runtime.catalogState === 'error' ? (
         <div className="catalog-retry">
-          <StatusNotice title="商品目录同步失败" tone="warning">当前不展示缓存商品或示例价格。</StatusNotice>
+          <StatusNotice title="商品加载失败" tone="warning">商品暂时没加载出来，请刷新后再试。</StatusNotice>
           <button className="button button--secondary" type="button" onClick={() => void runtime.reloadCatalog()} disabled={runtime.busy}>
-            <RefreshCw aria-hidden="true" size={18} /> 重新同步
+            <RefreshCw aria-hidden="true" size={18} /> 刷新商品
           </button>
         </div>
       ) : null}
@@ -461,7 +489,7 @@ export function MallScreen() {
         </div>
       ) : null}
       {runtime.catalogState === 'ready' && visibleProducts.length === 0 ? (
-        <EmptyState title="当前筛选无商品">筛选结果仅使用 Core 发布的类目与标签关联。</EmptyState>
+        <EmptyState title="当前筛选无商品">换个分类或清空筛选试试。</EmptyState>
       ) : null}
     </div>
   );
@@ -476,7 +504,7 @@ export function ProductDetailScreen({ productId }: { productId: string }) {
 
   return (
     <div className="screen screen--detail screen--product-detail">
-      <ScreenHeader eyebrow="PRODUCT DETAIL" title="商品详情" description="商品、媒体、规格与库存均来自 Core" backTo="/mall" />
+      <ScreenHeader eyebrow="商品详情" title="商品详情" description="商品、图片、规格与库存均由系统实时确认" backTo="/mall" />
 
       {runtime.catalogState === 'loading' ? <div className="product-detail-skeleton" aria-label="正在加载商品详情"><span /><span /><span /></div> : null}
       {runtime.catalogState === 'error' ? (
@@ -488,7 +516,7 @@ export function ProductDetailScreen({ productId }: { productId: string }) {
         </div>
       ) : null}
       {runtime.catalogState !== 'loading' && runtime.catalogState !== 'error' && !product ? (
-        <EmptyState title="商品不可用">该商品未出现在当前 Core 可售目录中，请返回商城重新选择。</EmptyState>
+        <EmptyState title="商品不可用">该商品当前不可售，请返回商城重新选择。</EmptyState>
       ) : null}
 
       {product ? (
@@ -520,7 +548,7 @@ export function ProductDetailScreen({ productId }: { productId: string }) {
 
           <section className="product-detail-copy" aria-labelledby="product-detail-title">
             <div>
-              <p className="eyebrow">CORE PRODUCT · {product.productId}</p>
+              <p className="eyebrow">商品编号 · {shortHash(product.productId)}</p>
               <h2 id="product-detail-title">{product.title}</h2>
               {product.subtitle ? <p className="product-detail-copy__subtitle">{product.subtitle}</p> : null}
             </div>
@@ -559,7 +587,7 @@ export function ProductDetailScreen({ productId }: { productId: string }) {
             <div className="product-detail-skus">
               {product.skus.map((sku) => (
                 <article className={sku.seckill ? 'product-detail-sku is-seckill' : 'product-detail-sku'} key={sku.skuId}>
-                  <div><strong>{skuLabel(sku.attributes, sku.skuId)}</strong><code>{sku.skuId}</code></div>
+                  <div><strong>{skuLabel(sku.attributes, sku.skuId)}</strong><code title={sku.skuId}>{shortHash(sku.skuId)}</code></div>
                   <span>{sku.seckill ? `活动库存 ${sku.seckill.inventory.available}` : `普通库存 ${sku.stockAvailable}`}</span>
                   <span>{sku.seckill ? `${seckillOverlayLabel(sku.seckill.phase)} · 普通结算禁用` : formatUsdtAmount(sku.listPriceUsdt)}</span>
                 </article>
@@ -568,7 +596,7 @@ export function ProductDetailScreen({ productId }: { productId: string }) {
           </section>
 
           {product.skus.some((sku) => sku.seckill) ? (
-            <StatusNotice title="秒杀进行中，普通购买不可用" tone="warning">带秒杀遮罩的 SKU 不进入普通购买；请从秒杀大厅绑定当前权威场次。</StatusNotice>
+          <StatusNotice title="秒杀进行中，普通购买不可用">带秒杀标记的规格不走普通购买；请从秒杀大厅下单。</StatusNotice>
           ) : null}
 
           <div className="product-detail-buybar">
@@ -608,16 +636,25 @@ export function StoresScreen() {
   return (
     <div className="screen screen--stores">
       <ScreenHeader
-        eyebrow="O2O STORES"
+        eyebrow="附近门店"
         title="线下门店"
-        description="位置、营业状态与行政区划需实时校验"
+        description="按地区查找可自提门店"
       />
 
-      <img className="store-hero" src={brandAssetUrl('store-front.png')} alt="24K商城线下门店空间" />
+      <BrandImage
+        className="store-hero"
+        filename="store-front.png"
+        alt="24K商城线下门店空间"
+        width={1024}
+        height={1024}
+        decoding="async"
+        loading="eager"
+        fetchPriority="high"
+      />
 
       <div className="store-tools">
         <fieldset className="location-filter">
-          <legend>行政区筛选</legend>
+          <legend>地区筛选</legend>
           <label>
             国家
             <select value="CN" disabled aria-label="国家">
@@ -634,31 +671,31 @@ export function StoresScreen() {
                 setDistrictCode('');
               }}
             >
-              <option value="">全部城市代码</option>
-              {cityCodes.map((code) => <option key={code} value={code}>城市代码 {code}</option>)}
+              <option value="">全部城市</option>
+              {cityCodes.map((code) => <option key={code} value={code}>城市 {code}</option>)}
             </select>
           </label>
           <label>
             区县
             <select value={districtCode} aria-label="区县" disabled={!cityCode} onChange={(event) => setDistrictCode(event.target.value)}>
-              <option value="">全部区县代码</option>
-              {districtCodes.map((code) => <option key={code} value={code}>区县代码 {code}</option>)}
+              <option value="">全部区县</option>
+              {districtCodes.map((code) => <option key={code} value={code}>区县 {code}</option>)}
             </select>
           </label>
         </fieldset>
         <div className="split-actions">
           <button className="button button--secondary" type="button" onClick={() => void runtime.reloadStores()} disabled={runtime.busy}>
-            <RefreshCw aria-hidden="true" size={18} /> 重新同步门店
+            <RefreshCw aria-hidden="true" size={18} /> 刷新门店
           </button>
         </div>
       </div>
 
       {runtime.storesState === 'loading' ? <StoreListSkeleton /> : null}
       {runtime.storesState === 'error' ? (
-        <StatusNotice title="门店同步失败" tone="warning">当前不展示缓存门店或示例地址。</StatusNotice>
+        <StatusNotice title="门店加载失败" tone="warning">门店信息暂时没加载出来，请刷新后再试。</StatusNotice>
       ) : null}
       {runtime.storesState === 'empty' || (runtime.storesState === 'ready' && visibleStores.length === 0) ? (
-        <EmptyState title="当前地区暂无门店">当前 Core 门店投影中没有匹配的六位行政区代码。</EmptyState>
+        <EmptyState title="当前地区暂无门店">这个地区暂时没有可自提门店，可以换个城市或区县看看。</EmptyState>
       ) : null}
       {runtime.storesState === 'ready' && visibleStores.length > 0 ? (
         <div className="store-list" aria-label="可用自提门店">
@@ -695,9 +732,9 @@ function StoreRow({ store }: { store: MerchantStore }) {
       </div>
       <StoreMediaGallery store={store} />
       <dl className="store-row__facts">
-        <div><dt>行政区</dt><dd>{store.regionCode}</dd></div>
+        <div><dt>服务地区</dt><dd>按门店地址为准</dd></div>
         <div><dt>营业时间</dt><dd>{store.businessHours}</dd></div>
-        <div><dt>版本</dt><dd>v{store.version}</dd></div>
+        <div><dt>服务方式</dt><dd>到店自提</dd></div>
       </dl>
       <div className="store-row__actions">
         <a className="button button--secondary" href={`tel:${store.phone}`} aria-label={`拨打 ${store.name} 电话`}>
@@ -737,10 +774,10 @@ export function AssetsScreen() {
   const loadedShoppingCount = runtime.orders.length - loadedSeckillCount;
   const ledgerSummaries = ledgerStateSummaries(runtime);
   const orderItems = [
-    { label: '待付款', icon: Clock3, count: runtime.buyerOverview?.orderCounts.pendingPayment.status ?? null },
-    { label: '待发货', icon: PackageOpen, count: runtime.buyerOverview?.orderCounts.pendingShipment.count ?? null },
-    { label: '待收货', icon: Truck, count: runtime.buyerOverview?.orderCounts.pendingReceipt.count ?? null },
-    { label: '售后 / 仲裁', icon: ShieldAlert, count: runtime.buyerOverview?.orderCounts.afterSale.count ?? null },
+    { label: '待付款', icon: Clock3, count: orderCountText(runtime.buyerOverview?.orderCounts.pendingPayment) },
+    { label: '待发货', icon: PackageOpen, count: orderCountText(runtime.buyerOverview?.orderCounts.pendingShipment) },
+    { label: '待收货', icon: Truck, count: orderCountText(runtime.buyerOverview?.orderCounts.pendingReceipt) },
+    { label: '售后 / 仲裁', icon: ShieldAlert, count: orderCountText(runtime.buyerOverview?.orderCounts.afterSale) },
   ];
   const assetTasks = [
     { title: '查订单', copy: '付款、发货、收货', to: '/assets/orders', icon: Package },
@@ -751,7 +788,7 @@ export function AssetsScreen() {
 
   return (
     <div className="screen screen--assets">
-      <ScreenHeader eyebrow="PERSONAL LEDGER" title="我的资产" description="消费、交付与收益状态统一对账" />
+      <ScreenHeader eyebrow="我的账户" title="我的资产" description="查看订单、地址、通知和可领取收益" />
 
       <section className="profile-strip" aria-labelledby="profile-title">
         <div className="avatar-placeholder">
@@ -761,7 +798,7 @@ export function AssetsScreen() {
         </div>
         <div className="profile-strip__copy">
           <h2 id="profile-title">{runtime.buyerProfile?.nickname ?? (runtime.session ? '未设置昵称' : '未连接钱包')}</h2>
-          <p>买家 UID：{runtime.buyerProfile?.accountId ?? (runtime.session ? '正在同步' : '请先登录')}</p>
+          <p>账号编号：{runtime.buyerProfile?.accountId ?? (runtime.session ? '正在加载' : '请先连接钱包')}</p>
         </div>
         <div className="profile-strip__actions">
           <button
@@ -786,9 +823,9 @@ export function AssetsScreen() {
       {runtime.buyerProfileState === 'loading' ? <div className="account-skeleton" aria-label="正在加载买家资料" /> : null}
       {runtime.session && runtime.buyerProfileState === 'error' ? (
         <div className="catalog-retry">
-          <StatusNotice title="资料同步失败" tone="warning">不使用钱包地址伪造 UID 或昵称。</StatusNotice>
+          <StatusNotice title="资料加载失败" tone="warning">个人资料暂时没加载出来，请刷新后再试。</StatusNotice>
           <button className="button button--secondary" type="button" onClick={() => void runtime.reloadBuyerAccount()} disabled={runtime.busy}>
-            <RefreshCw aria-hidden="true" size={18} /> 重新同步
+            <RefreshCw aria-hidden="true" size={18} /> 刷新资料
           </button>
         </div>
       ) : null}
@@ -796,7 +833,7 @@ export function AssetsScreen() {
         <BuyerProfileForm onClose={() => setEditingProfile(false)} />
       ) : null}
       {runtime.buyerProfile?.avatarAssetId && runtime.buyerAvatarState === 'error' ? (
-        <p className="field-error" role="status">头像媒体服务未配置或不可用，资料其他字段仍来自 Core。</p>
+        <p className="field-error" role="status">头像暂时加载失败，昵称和账号信息不受影响。</p>
       ) : null}
 
       <section className="asset-task-grid" aria-label="常用资产操作">
@@ -836,10 +873,10 @@ export function AssetsScreen() {
       <section className="section-block" aria-labelledby="activity-title">
         <div className="section-heading">
           <div>
-            <p className="eyebrow">TWO TRACKS</p>
-            <h2 id="activity-title">行为追踪</h2>
+            <p className="eyebrow">消费记录</p>
+            <h2 id="activity-title">我的记录</h2>
           </div>
-          <Link to="/assets/activity" className="icon-button" aria-label="查看行为追踪">
+          <Link to="/assets/activity" className="icon-button" aria-label="查看我的记录">
             <ChevronRight aria-hidden="true" size={20} />
           </Link>
         </div>
@@ -862,8 +899,8 @@ export function AssetsScreen() {
       <section className="section-block ledger-state-panel" aria-labelledby="ledger-state-title">
         <div className="section-heading">
           <div>
-            <p className="eyebrow">THREE STATES</p>
-            <h2 id="ledger-state-title">收益三态</h2>
+            <p className="eyebrow">收益状态</p>
+            <h2 id="ledger-state-title">收益概览</h2>
           </div>
           <FileClock aria-hidden="true" size={19} />
         </div>
@@ -872,9 +909,9 @@ export function AssetsScreen() {
             <article key={summary.title} className="ledger-state-card">
               <h3>{summary.title}</h3>
               <dl>
-                <div><dt>累计值</dt><dd>{summary.total}</dd></div>
-                <div><dt>可用值</dt><dd>{summary.available}</dd></div>
-                <div><dt>锁定中值</dt><dd>{summary.locked}</dd></div>
+                <div><dt>累计</dt><dd>{summary.total}</dd></div>
+                <div><dt>可领取</dt><dd>{summary.available}</dd></div>
+                <div><dt>锁定中</dt><dd>{summary.locked}</dd></div>
               </dl>
               <p>{summary.copy}</p>
             </article>
@@ -883,11 +920,19 @@ export function AssetsScreen() {
       </section>
 
       <section className="ledger-banner" aria-labelledby="ledger-title">
-        <img src={brandAssetUrl('bnm-ledger.png')} alt="BNM 资产凭证视觉" />
+        <BrandImage
+          filename="bnm-ledger.png"
+          alt="BNM 资产凭证视觉"
+          width={1024}
+          height={1024}
+          decoding="async"
+          loading="eager"
+          fetchPriority="high"
+        />
         <div>
-          <p className="eyebrow">LOCKED / AVAILABLE</p>
-          <h2 id="ledger-title">收益对账中心</h2>
-          <p>仅展示当前钱包已验证的收益资格与权威账目。</p>
+          <p className="eyebrow">收益明细</p>
+          <h2 id="ledger-title">收益中心</h2>
+          <p>连接钱包后查看可领取、锁定中和结算记录。</p>
           <Link className="button button--light" to="/assets/rewards">
             查看收益 <ChevronRight aria-hidden="true" size={17} />
           </Link>
@@ -922,7 +967,7 @@ function BuyerProfileForm({ onClose }: { onClose(): void }) {
           onChange={(event) => setAvatarFile(event.target.files?.[0] ?? null)}
           aria-describedby="avatar-upload-help"
         />
-        <span id="avatar-upload-help" className="field-help">JPG、PNG 或 WebP，最大 10 MB；必须经过 provider-sealed 验证后才会绑定。</span>
+        <span id="avatar-upload-help" className="field-help">支持 JPG、PNG 或 WebP，最大 10 MB；上传成功后会自动绑定到资料。</span>
       </label>
       <div className="profile-form__actions">
         <button className="button button--secondary" type="button" onClick={onClose} disabled={runtime.busy}>取消</button>
@@ -958,7 +1003,7 @@ export function AddressScreen() {
   return (
     <div className="screen screen--detail">
       <ScreenHeader
-        eyebrow="DELIVERY PROFILE"
+        eyebrow="收货地址"
         title="我的收货地址"
         description="个人信息只提交到经过发布的安全服务"
         backTo={location.state && typeof location.state === 'object' && 'returnTo' in location.state && location.state.returnTo === '/checkout' ? '/checkout' : '/assets'}
@@ -975,7 +1020,7 @@ export function AddressScreen() {
         }}
       >
         <div className="section-heading">
-          <div><p className="eyebrow">MANUAL ADDRESS</p><h2 id="manual-address-title">新增收货地址</h2></div>
+          <div><p className="eyebrow">手动填写地址</p><h2 id="manual-address-title">新增收货地址</h2></div>
           <MapPinned aria-hidden="true" size={19} />
         </div>
         <div className="form-grid">
@@ -1121,7 +1166,7 @@ export function OrdersScreen() {
 
   return (
     <div className="screen screen--detail">
-      <ScreenHeader eyebrow="FULFILLMENT" title="我的订单" description="交付动作仅由允许操作开放" backTo="/assets" />
+      <ScreenHeader eyebrow="我的订单" title="我的订单" description="交付动作仅由允许操作开放" backTo="/assets" />
       <div className="segmented-control order-tabs" role="tablist" aria-label="订单状态">
         {tabs.map((tab) => (
           <button
@@ -1151,7 +1196,7 @@ export function OrdersScreen() {
       ) : null}
       {runtime.session && ['ready', 'empty'].includes(runtime.ordersState) && visibleOrders.length === 0 ? (
         <EmptyState title={`暂无可显示的${active}订单`}>
-          订单分组来自 Core 当前状态，不用本地时间推断。
+          订单分组来自系统当前状态，不用本地时间推断。
         </EmptyState>
       ) : null}
       {visibleOrders.length > 0 ? (
@@ -1238,17 +1283,17 @@ function OrderRow({
       </header>
 
       <dl className="order-row__identity">
-        <div><dt>商品</dt><dd>{order.productId}</dd></div>
-        <div><dt>规格</dt><dd>{order.skuId}</dd></div>
+        <div><dt>商品</dt><dd title={order.productId}>{shortHash(order.productId)}</dd></div>
+        <div><dt>规格</dt><dd title={order.skuId}>{shortHash(order.skuId)}</dd></div>
         <div><dt>数量</dt><dd>{order.quantity}</dd></div>
         <div><dt>创建时间</dt><dd>{formatIso(order.createdAt)}</dd></div>
         <div><dt>商品 USDT</dt><dd>{formatUsdtAmount(order.exactAmounts.productUsdtPaymentAmount)}</dd></div>
-        <div><dt>平台技术服务费 USDT</dt><dd>{formatUsdtAmount(order.exactAmounts.platformServiceFeeUsdt)}</dd></div>
-        <div><dt>Custody 商品 USDT</dt><dd>{formatUsdtAmount(order.exactAmounts.custodyProductUsdt)}</dd></div>
+        <div><dt>平台服务费 USDT</dt><dd>{formatUsdtAmount(order.exactAmounts.platformServiceFeeUsdt)}</dd></div>
+        <div><dt>商家货款 USDT</dt><dd>{formatUsdtAmount(order.exactAmounts.custodyProductUsdt)}</dd></div>
         <div><dt>运费 USDT</dt><dd>{formatUsdtAmount(order.exactAmounts.freightUsdt)}</dd></div>
         <div><dt>USDT 实付</dt><dd>{formatUsdtAmount(order.exactAmounts.usdtPaymentAmount)}</dd></div>
-        <div><dt>NPL 支付</dt><dd>{order.exactAmounts.nplPaymentAmount}</dd></div>
-        <div className="order-row__tx"><dt>付款 TxHash</dt><dd>{order.paymentTxHash ? <code>{order.paymentTxHash}</code> : '尚未提交'}</dd></div>
+        <div><dt>NPL 支付</dt><dd>{formatNplAmount(order.exactAmounts.nplPaymentAmount)}</dd></div>
+        <div className="order-row__tx"><dt>付款记录</dt><dd>{order.paymentTxHash ? <code title={order.paymentTxHash}>{shortHash(order.paymentTxHash)}</code> : '尚未提交'}</dd></div>
         <div><dt>付款记录</dt><dd>{order.paidAt ? formatIso(order.paidAt) : '待付款'}</dd></div>
         <div><dt>付款最终确认</dt><dd>{order.paymentFinalizedAt ? formatIso(order.paymentFinalizedAt) : '确认中'}</dd></div>
       </dl>
@@ -1277,13 +1322,13 @@ function OrderRow({
             {order.balances.map((balance, index) => (
               <div key={`${balance.asset}-${balance.state}-${index}`}>
                 <span>{balance.asset === 'BNM_POINTS' ? 'BNM 后台积分' : balance.asset}</span>
-                <strong>{formatAssetNumber(balance.amount, balance.asset)}</strong>
+                <strong>{formatAssetDisplayAmount(balance.amount, balance.asset)}</strong>
                 <span>{balance.asset === 'BNM_POINTS' && !['LOCKED', 'AVAILABLE'].includes(balance.state) ? '状态不可用' : balanceStateLabel(balance.state)}</span>
               </div>
             ))}
           </div>
-        ) : <p>Core 尚未返回资产状态</p>}
-        <p className="field-help">BNM 与收益释放只按 Core 的 Locked / Available 状态展示，履约最终确认前不前端伪造到账。</p>
+        ) : <p>系统暂未返回资产状态</p>}
+        <p className="field-help">BNM 与收益只按系统确认的“锁定中 / 可用”状态展示；履约最终确认前不会提前显示到账。</p>
       </section>
 
       {order.requests.length > 0 ? (
@@ -1292,7 +1337,7 @@ function OrderRow({
             {order.requests.map((request) => (
               <div key={request.requestId}>
                 <span>{requestTypeLabel(request.requestType)}</span>
-                <strong>{request.state}</strong>
+                <strong>{requestStateLabel(request.state)}</strong>
                 <time dateTime={request.requestedAt}>{formatIso(request.requestedAt)}</time>
               </div>
             ))}
@@ -1331,8 +1376,8 @@ function OrderRow({
             {buyerActions.map((action) => {
               const supported = isBuyerEvidenceAction(action.action);
               const reason = action.enabled
-                ? supported ? 'Core 已允许，可提交订单证据' : unsupportedBuyerActionReason(action.action)
-                : action.reasonCode ?? 'Core 当前未允许该操作';
+                ? supported ? '系统已允许，可提交订单凭证' : unsupportedBuyerActionReason(action.action)
+                : action.reasonCode ?? '系统当前不允许该操作';
               const reasonId = `action-${order.orderId.slice(2, 10)}-${action.action}`;
               return (
                 <div key={action.action}>
@@ -1395,12 +1440,12 @@ function OrderEvidenceForm({
       onSubmit={(event) => {
         event.preventDefault();
         setSubmitted(false);
-        void onSubmit({ reasonCode, file }).then(setSubmitted);
+        void onSubmit({ reasonCode: reasonCode.trim() || defaultBuyerActionReason(action), file }).then(setSubmitted);
       }}
     >
       <div className="order-evidence-form__header">
         <div>
-          <p className="eyebrow">CORE EVIDENCE</p>
+          <p className="eyebrow">订单凭证</p>
           <h4>{actionLabel(action)}</h4>
         </div>
         <button className="icon-button" type="button" aria-label="关闭证据表单" onClick={onClose} disabled={busy}>
@@ -1408,18 +1453,18 @@ function OrderEvidenceForm({
         </button>
       </div>
       <label className="field" htmlFor={`${fieldId}-reason`}>
-        原因代码
+        处理原因
         <input
           id={`${fieldId}-reason`}
           value={reasonCode}
-          required
+
           minLength={2}
           maxLength={64}
           pattern="[A-Z][A-Z0-9_]{1,63}"
           autoCapitalize="characters"
           autoComplete="off"
           spellCheck={false}
-          placeholder="大写字母、数字或下划线"
+          placeholder="不填则自动生成"
           onChange={(event) => {
             setReasonCode(event.currentTarget.value.toUpperCase());
             setSubmitted(false);
@@ -1441,12 +1486,12 @@ function OrderEvidenceForm({
       </label>
       {file ? <p className="selected-evidence-file">{file.name} · {file.size} bytes</p> : null}
       <div className="order-evidence-form__actions">
-        <button className="button button--primary" type="submit" disabled={busy || reasonCode.length < 2}>
+        <button className="button button--primary" type="submit" disabled={busy}>
           <Send aria-hidden="true" size={17} /> {busy ? '提交中' : '封装证据并提交'}
         </button>
         <button className="button button--secondary" type="button" onClick={onClose} disabled={busy}>取消</button>
       </div>
-      {submitted ? <p className="evidence-success" role="status">操作已由 Core 接收，订单状态已重新同步。</p> : null}
+      {submitted ? <p className="evidence-success" role="status">操作已由系统接收，订单状态已重新同步。</p> : null}
     </form>
   );
 }
@@ -1458,7 +1503,7 @@ function OrderTarget({ target }: { target: FulfillmentTarget }) {
       <div>
         <h3>{target.fulfillmentMode === 'DELIVERY' ? target.payload.recipientName : target.payload.name}</h3>
         <p>{target.fulfillmentMode === 'DELIVERY' ? `${target.payload.phone} · ${target.payload.address}` : target.payload.address}</p>
-        <span>行政区 {target.regionCode} · 快照 {shortHash(target.targetHash)}</span>
+        <details className="technical-disclosure technical-disclosure--compact"><summary>高级地址凭证</summary><span>行政区 {target.regionCode} · 快照 {shortHash(target.targetHash)}</span></details>
       </div>
     </section>
   );
@@ -1470,7 +1515,7 @@ export function ActivityScreen() {
 
   return (
     <div className="screen screen--detail">
-      <ScreenHeader eyebrow="ACTIVITY LEDGER" title="行为追踪" description="每笔消费与资产状态逐单对应" backTo="/assets" />
+      <ScreenHeader eyebrow="购物记录" title="行为追踪" description="每笔消费与资产状态逐单对应" backTo="/assets" />
       <div className="segmented-control segmented-control--two" role="tablist" aria-label="行为类型">
         <button role="tab" aria-selected={active === 'seckill'} className={active === 'seckill' ? 'is-active' : ''} onClick={() => setActive('seckill')} type="button">
           <Zap aria-hidden="true" size={17} /> 秒杀参与
@@ -1495,11 +1540,11 @@ function SeckillActivityContent({ runtime }: { runtime: MallRuntimeValue }) {
     return <p className="loading-copy" role="status">正在同步秒杀奖项记录…</p>;
   }
   if (runtime.seckillSessionState === 'error' && sessions.length === 0) {
-    return <StatusNotice title="秒杀奖项同步失败" tone="warning">不展示缓存的候选人、奖金或链上付款状态。</StatusNotice>;
+    return <StatusNotice title="秒杀奖项同步失败" tone="warning">不展示缓存的候选人、奖金或奖金付款状态。</StatusNotice>;
   }
   const prizeSessions = sessions.filter((session) => session.prizeSettlement !== null);
   if (prizeSessions.length === 0) {
-    return <EmptyState title="暂无奖项结算记录">Core 尚未为当前场次或历史场次发布候选审核、滚池或付款结果。</EmptyState>;
+    return <EmptyState title="暂无奖项结算记录">系统暂未发布候选审核、滚入下期或付款结果。</EmptyState>;
   }
   return (
     <div className="shopping-statement-list" aria-label="秒杀奖项记录">
@@ -1523,10 +1568,12 @@ function SeckillPrizeOutcome({
   session,
   viewerWallet,
   compact = false,
+  publicView = false,
 }: {
   session: PublishedSeckillSessionProjection;
   viewerWallet?: string;
   compact?: boolean;
+  publicView?: boolean;
 }) {
   const prize = session.prizeSettlement;
   if (!prize) return null;
@@ -1534,6 +1581,51 @@ function SeckillPrizeOutcome({
     && prize.candidate.buyerWallet.toLowerCase() === viewerWallet.toLowerCase());
   const winnerIsViewer = Boolean(viewerWallet && session.winnerWallet
     && session.winnerWallet.toLowerCase() === viewerWallet.toLowerCase());
+  if (publicView) {
+    return (
+      <section className={`seckill-prize-outcome${compact ? ' seckill-prize-outcome--compact' : ''}`}>
+        <div className="section-heading section-heading--compact">
+          <h3>大奖结果</h3>
+          <span className="status-pill">{seckillPrizeStateLabel(prize.state)}</span>
+        </div>
+        <dl className="seckill-facts seckill-facts--public-prize">
+          <div><dt>奖池金额</dt><dd>{formatUsdtAmount(prize.poolAmountUsdt)}</dd></div>
+          <div><dt>候选用户</dt><dd>{prize.candidate ? shortAddress(prize.candidate.buyerWallet) : '暂无'}</dd></div>
+          <div><dt>最终赢家</dt><dd>{session.winnerWallet ? shortAddress(session.winnerWallet) : '待公布'}</dd></div>
+          <div><dt>奖励发放</dt><dd>{prize.payout ? seckillPayoutStateLabel(prize.payout.state) : '等待结算'}</dd></div>
+        </dl>
+        {candidateIsViewer && prize.state === 'REVIEW_PENDING' ? <p className="field-help">你是当前候选用户，正在等待审核。</p> : null}
+        {winnerIsViewer ? <p className="field-help">你是本场已确认赢家。</p> : null}
+        <details className="technical-disclosure technical-disclosure--compact">
+          <summary>查看高级记录</summary>
+          <dl className="seckill-publication" aria-label="秒杀大奖结算证据">
+            <div><dt>候选截止时间</dt><dd><time dateTime={prize.cutoffAt}>{prize.cutoffAt}</time></dd></div>
+            <div><dt>奖池快照凭证</dt><dd><code title={prize.poolSnapshotHash}>{shortHash(prize.poolSnapshotHash)}</code></dd></div>
+            {prize.candidate ? <>
+              <div><dt>候选订单</dt><dd><code title={prize.candidate.orderId}>{shortHash(prize.candidate.orderId)}</code></dd></div>
+              <div><dt>高级确认位置</dt><dd>区块 {prize.candidate.blockNumber} · 记录 {prize.candidate.logIndex}</dd></div>
+            </> : null}
+            {prize.review ? <>
+              <div><dt>审核结果</dt><dd>{prize.review.decision === 'APPROVED' ? '已通过' : '已驳回'} · {prize.review.reasonCode}</dd></div>
+              <div><dt>审核钱包</dt><dd>{shortAddress(prize.review.reviewedBy)}</dd></div>
+              <div><dt>审核时间</dt><dd><time dateTime={prize.review.reviewedAt}>{prize.review.reviewedAt}</time></dd></div>
+            </> : null}
+            {prize.rolloverTargetSessionId ? <div><dt>滚入场次</dt><dd><code title={prize.rolloverTargetSessionId}>{shortHash(prize.rolloverTargetSessionId)}</code></dd></div> : null}
+            {prize.rolloverJournalId ? <div><dt>滚池记录</dt><dd><code title={prize.rolloverJournalId}>{shortHash(prize.rolloverJournalId)}</code></dd></div> : null}
+            {prize.payout ? <>
+              {prize.payout.requestId ? <div><dt>结算申请</dt><dd><code title={prize.payout.requestId}>{shortHash(prize.payout.requestId)}</code></dd></div> : null}
+              {prize.payout.transferIds.map((transferId) => (
+                <div key={transferId}><dt>转账记录</dt><dd><code title={transferId}>{shortHash(transferId)}</code></dd></div>
+              ))}
+              {prize.payout.finalExecutionTxHashes.map((txHash) => (
+                <div key={txHash}><dt>到账记录</dt><dd><code title={txHash}>{shortHash(txHash)}</code></dd></div>
+              ))}
+            </> : null}
+          </dl>
+        </details>
+      </section>
+    );
+  }
   return (
     <section className={`seckill-prize-outcome${compact ? ' seckill-prize-outcome--compact' : ''}`}>
       <div className="section-heading section-heading--compact">
@@ -1545,27 +1637,27 @@ function SeckillPrizeOutcome({
       <dl className="seckill-publication" aria-label="秒杀大奖结算证据">
         <div><dt>候选截止时间</dt><dd><time dateTime={prize.cutoffAt}>{prize.cutoffAt}</time></dd></div>
         <div><dt>奖池快照</dt><dd>{formatUsdtAmount(prize.poolAmountUsdt)}</dd></div>
-        <div><dt>快照哈希</dt><dd><code>{prize.poolSnapshotHash}</code></dd></div>
+        <details className="technical-disclosure technical-disclosure--compact"><summary>高级奖池凭证</summary><div><dt>快照凭证</dt><dd><code title={prize.poolSnapshotHash}>{shortHash(prize.poolSnapshotHash)}</code></dd></div></details>
         {prize.candidate ? <>
-          <div><dt>候选订单</dt><dd><code>{prize.candidate.orderId}</code></dd></div>
+          <div><dt>候选订单</dt><dd><code title={prize.candidate.orderId}>{shortHash(prize.candidate.orderId)}</code></dd></div>
           <div><dt>候选钱包</dt><dd>{shortAddress(prize.candidate.buyerWallet)}</dd></div>
-          <div><dt>候选链上位置</dt><dd>区块 {prize.candidate.blockNumber} · Log {prize.candidate.logIndex}</dd></div>
+          <details className="technical-disclosure technical-disclosure--compact"><summary>高级候选确认位置</summary><div><dt>确认位置</dt><dd>区块 {prize.candidate.blockNumber} · 记录 {prize.candidate.logIndex}</dd></div></details>
         </> : null}
         {prize.review ? <>
           <div><dt>有效性审核</dt><dd>{prize.review.decision === 'APPROVED' ? '已通过' : '已驳回'} · {prize.review.reasonCode}</dd></div>
           <div><dt>审核钱包</dt><dd>{shortAddress(prize.review.reviewedBy)}</dd></div>
           <div><dt>审核时间</dt><dd><time dateTime={prize.review.reviewedAt}>{prize.review.reviewedAt}</time></dd></div>
         </> : null}
-        {prize.rolloverTargetSessionId ? <div><dt>滚入场次</dt><dd><code>{prize.rolloverTargetSessionId}</code></dd></div> : null}
-        {prize.rolloverJournalId ? <div><dt>滚池分录</dt><dd><code>{prize.rolloverJournalId}</code></dd></div> : null}
+        {prize.rolloverTargetSessionId ? <div><dt>滚入场次</dt><dd><code title={prize.rolloverTargetSessionId}>{shortHash(prize.rolloverTargetSessionId)}</code></dd></div> : null}
+        {prize.rolloverJournalId ? <div><dt>滚池记录</dt><dd><code title={prize.rolloverJournalId}>{shortHash(prize.rolloverJournalId)}</code></dd></div> : null}
         {prize.payout ? <>
-          <div><dt>链上付款</dt><dd>{seckillPayoutStateLabel(prize.payout.state)}</dd></div>
-          {prize.payout.requestId ? <div><dt>结算申请</dt><dd><code>{prize.payout.requestId}</code></dd></div> : null}
+          <div><dt>奖金付款</dt><dd>{seckillPayoutStateLabel(prize.payout.state)}</dd></div>
+          {prize.payout.requestId ? <div><dt>结算申请</dt><dd><code title={prize.payout.requestId}>{shortHash(prize.payout.requestId)}</code></dd></div> : null}
           {prize.payout.transferIds.map((transferId) => (
-            <div key={transferId}><dt>转账记录</dt><dd><code>{transferId}</code></dd></div>
+            <div key={transferId}><dt>转账记录</dt><dd><code title={transferId}>{shortHash(transferId)}</code></dd></div>
           ))}
           {prize.payout.finalExecutionTxHashes.map((txHash) => (
-            <div key={txHash}><dt>最终执行交易</dt><dd><code>{txHash}</code></dd></div>
+            <div key={txHash}><dt>到账记录</dt><dd><code title={txHash}>{shortHash(txHash)}</code></dd></div>
           ))}
         </> : null}
       </dl>
@@ -1577,7 +1669,7 @@ function ShoppingStatementContent({ runtime }: { runtime: MallRuntimeValue }) {
   if (!runtime.session) {
     return (
       <EmptyState title="连接买家钱包后查看">
-        购物记录仅向当前 SIWE 买家会话开放，未鉴权时不请求或展示订单数据。
+        购物记录仅向当前买家钱包开放，未连接钱包时不请求或展示订单数据。
       </EmptyState>
     );
   }
@@ -1601,7 +1693,7 @@ function ShoppingStatementContent({ runtime }: { runtime: MallRuntimeValue }) {
   if (runtime.shoppingStatementsState === 'empty') {
     return (
       <EmptyState title="暂无购物记录">
-        当前买家钱包没有链上最终确认的普通或边界转日常订单。
+        当前买家钱包没有最终确认确认的普通或边界转日常订单。
       </EmptyState>
     );
   }
@@ -1641,27 +1733,27 @@ function ShoppingStatementRow({ statement }: { statement: MallRuntimeValue['shop
         <span className="status-pill">{orderStateLabel(statement.orderState)}</span>
       </header>
       <dl className="shopping-statement__facts">
-        <div><dt>商品</dt><dd>{statement.productId}</dd></div>
-        <div><dt>规格</dt><dd>{statement.skuId}</dd></div>
+        <div><dt>商品</dt><dd title={statement.productId}>{shortHash(statement.productId)}</dd></div>
+        <div><dt>规格</dt><dd title={statement.skuId}>{shortHash(statement.skuId)}</dd></div>
         <div><dt>数量</dt><dd>{statement.quantity}</dd></div>
         <div><dt>BNM 状态</dt><dd>{statement.bnm.state === 'LOCKED' ? '已锁定' : '可用'}</dd></div>
         <div><dt>商品 USDT</dt><dd>{formatUsdtAmount(statement.paymentAmounts.productUsdtPaymentAmount)}</dd></div>
-        <div><dt>平台技术服务费 USDT</dt><dd>{formatUsdtAmount(statement.paymentAmounts.platformServiceFeeUsdt)}</dd></div>
-        <div><dt>Custody 商品 USDT</dt><dd>{formatUsdtAmount(statement.paymentAmounts.custodyProductUsdt)}</dd></div>
+        <div><dt>平台服务费 USDT</dt><dd>{formatUsdtAmount(statement.paymentAmounts.platformServiceFeeUsdt)}</dd></div>
+        <div><dt>商家货款 USDT</dt><dd>{formatUsdtAmount(statement.paymentAmounts.custodyProductUsdt)}</dd></div>
         <div><dt>运费 USDT</dt><dd>{formatUsdtAmount(statement.paymentAmounts.freightUsdt)}</dd></div>
         <div><dt>USDT 实付</dt><dd>{formatUsdtAmount(statement.paymentAmounts.usdtPaymentAmount)}</dd></div>
-        <div><dt>NPL 实付</dt><dd>{statement.paymentAmounts.nplPaymentAmount} 原子单位</dd></div>
-        <div><dt>BNM 后台积分</dt><dd>{statement.bnm.amount} 原子单位</dd></div>
+        <div><dt>NPL 实付</dt><dd>{formatNplAmount(statement.paymentAmounts.nplPaymentAmount)}</dd></div>
+        <div><dt>BNM 后台积分</dt><dd>{formatBnmAmount(statement.bnm.amount)}</dd></div>
         <div><dt>下单时间</dt><dd><time dateTime={statement.createdAt}>{statement.createdAt}</time></dd></div>
         <div><dt>付款最终确认</dt><dd><time dateTime={statement.paymentFinalizedAt}>{statement.paymentFinalizedAt}</time></dd></div>
         <div><dt>履约最终时间</dt><dd>{statement.fulfilledAt ? <time dateTime={statement.fulfilledAt}>{statement.fulfilledAt}</time> : '尚未最终履约'}</dd></div>
-        <div className="shopping-statement__wide"><dt>订单 ID</dt><dd><code>{statement.orderId}</code></dd></div>
-        <div className="shopping-statement__wide"><dt>付款 TxHash</dt><dd><code>{statement.paymentTxHash}</code></dd></div>
+        <div className="shopping-statement__wide"><dt>订单编号</dt><dd><code title={statement.orderId}>{shortHash(statement.orderId)}</code></dd></div>
+        <div className="shopping-statement__wide"><dt>付款记录</dt><dd><code title={statement.paymentTxHash}>{shortHash(statement.paymentTxHash)}</code></dd></div>
       </dl>
       <section className="shopping-statement__journals" aria-label="BNM 账本来源">
-        <div className="section-heading section-heading--compact"><h3>BNM journal provenance</h3><FileClock aria-hidden="true" size={17} /></div>
+        <div className="section-heading section-heading--compact"><h3>BNM 来源记录</h3><FileClock aria-hidden="true" size={17} /></div>
         <ul>
-          {statement.bnm.journalIds.map((journalId) => <li key={journalId}><code>{journalId}</code></li>)}
+          {statement.bnm.journalIds.map((journalId) => <li key={journalId}><code title={journalId}>{shortHash(journalId)}</code></li>)}
         </ul>
       </section>
     </article>
@@ -1689,7 +1781,7 @@ export function RewardsScreen() {
 
   return (
     <div className="screen screen--detail screen--rewards">
-      <ScreenHeader eyebrow="REWARD LEDGER" title="收益对账" description="Core 账本与普通钱包结算状态逐项对账" backTo="/assets" />
+      <ScreenHeader eyebrow="收益对账" title="收益对账" description="查看 BNM、NPL 收益和秒杀奖金状态" backTo="/assets" />
 
       <section className="reward-rail" aria-labelledby="bnm-rail-title">
         <div className="reward-rail__header">
@@ -1706,14 +1798,14 @@ export function RewardsScreen() {
               const balance = bnmTotals.find((item) => item.state === state);
               return (
               <div key={state}>
-                <span>{state === 'LOCKED' ? 'Locked' : 'Available'}</span>
-                <strong>{balance?.amount ?? '--'}</strong>
+                <span>{state === 'LOCKED' ? '锁定中' : '可用'}</span>
+                <strong>{formatBnmAmount(balance?.amount)}</strong>
                 <span>BNM</span>
               </div>
               );
             })}
           </div>
-        ) : <p className="section-copy">当前钱包没有 Core 发布的 BNM totals。</p>}
+        ) : <p className="section-copy">当前钱包暂无 BNM 汇总。</p>}
         {bnmOrderBalances.length > 0 ? (
           <details className="bnm-provenance">
             <summary>查看订单来源</summary>
@@ -1721,18 +1813,18 @@ export function RewardsScreen() {
             {bnmOrderBalances.map((balance) => (
               <div key={`${balance.orderId}-${balance.state}`}>
                 <span>订单 {shortHash(balance.orderId)}</span>
-                <strong>{balance.amount}</strong>
+                <strong>{formatBnmAmount(balance.amount)}</strong>
                 <span>{balanceStateLabel(balance.state)}</span>
               </div>
             ))}
             </div>
           </details>
         ) : null}
-        <p className="field-help"><FileClock aria-hidden="true" size={15} /> BNM 仅有 Locked / Available，不是代币，也不进入链上结算。</p>
+        <p className="field-help"><FileClock aria-hidden="true" size={15} /> BNM 只有“锁定中 / 可用”两种状态，不是代币，也不进入链上结算。</p>
         <Link className="text-link" to="/assets/orders">查看订单与履约来源 <ChevronRight aria-hidden="true" size={15} /></Link>
       </section>
 
-      {!runtime.session ? <StatusNotice title="请先验证钱包">连接钱包后同步该钱包的收益、申请和链上最终状态。</StatusNotice> : null}
+      {!runtime.session ? <StatusNotice title="请先验证钱包">连接钱包后同步该钱包的收益、申请和最终确认状态。</StatusNotice> : null}
       {runtime.settlementsState === 'loading' ? <p className="loading-copy" role="status">正在同步收益账本…</p> : null}
       {runtime.settlementsState === 'error' ? (
         <div className="catalog-retry">
@@ -1756,8 +1848,8 @@ export function RewardsScreen() {
         />
       ))}
 
-      <StatusNotice title="签名申请，不发链上交易">
-        可用收益由钱包签署一次性结算意图，平台普通执行钱包逐笔发起转账并承担 Gas；只有达到 15 次确认的执行交易才表示 Settled。
+      <StatusNotice title="签名申请，平台打款">
+        可用收益由钱包签名申请，平台逐笔打款并承担手续费；只有达到 15 次确认才表示已到账。
       </StatusNotice>
     </div>
   );
@@ -1785,10 +1877,10 @@ function TransferableRewardRail({
       <div className="reward-rail__header">
         <div className="reward-rail__icon"><Banknote aria-hidden="true" size={22} /></div>
         <div>
-          <p className="eyebrow">{rail}</p>
+          <p className="eyebrow">{rail === 'REWARD_NPL' ? 'NPL 收益' : '秒杀奖金'}</p>
           <h2 id={`${rail}-title`}>{rail === 'REWARD_NPL' ? 'NPL 收益' : '秒杀 USDT 奖金'}</h2>
         </div>
-        <span className="status-pill">Core 账本</span>
+        <span className="status-pill">系统账本</span>
       </div>
       <dl className="settlement-lifecycle" aria-label="结算生命周期金额">
         {states.map((state) => {
@@ -1801,7 +1893,7 @@ function TransferableRewardRail({
         <button className="button button--primary" type="button" onClick={() => onRequest(available.amount)} disabled={busy}>
           <WalletCards aria-hidden="true" size={18} /> 签名申请结算 {formatAssetDisplayAmount(available.amount, available.asset)}
         </button>
-      ) : <p className="field-help">只有 Core 标记为 Available 的金额才能创建签名结算申请。</p>}
+      ) : <p className="field-help">只有系统标记为“可用”的金额才能创建签名结算申请。</p>}
       {railRequests.length > 0 ? (
         <div className="settlement-request-list" aria-label="结算申请记录">
           {railRequests.map((request) => (
@@ -1811,8 +1903,8 @@ function TransferableRewardRail({
                 ? ` · 转账 ${request.transfer_ids.map(shortHash).join('、')}`
                 : ''}</p>
               {request.final_execution_tx_hashes.length > 0 ? request.final_execution_tx_hashes.map((txHash) => (
-                <p className="safe-hash" key={txHash}><span>最终执行交易</span><code>{txHash}</code></p>
-              )) : <p>普通钱包执行交易尚未达到 15 次确认</p>}
+                <p className="safe-hash" key={txHash}><span>到账记录</span><code title={txHash}>{shortHash(txHash)}</code></p>
+              )) : <p>平台打款还在确认中，到账后会自动更新。</p>}
             </article>
           ))}
         </div>
@@ -1834,7 +1926,7 @@ function RewardSubtypeBreakdown({ balances }: { balances: readonly SettlementBal
           <strong>{rewardSubtypeLabel(subtype)}</strong>
           <div>
             {balances.filter((balance) => balance.rewardSubtype === subtype).map((balance) => (
-              <span key={`${subtype}-${balance.state}`}>{settlementStateLabel(balance.state)} {balance.amount}</span>
+              <span key={`${subtype}-${balance.state}`}>{settlementStateLabel(balance.state)} {formatNplAmount(balance.amount)}</span>
             ))}
           </div>
         </article>
@@ -1847,7 +1939,7 @@ export function NotificationsScreen() {
   const runtime = useMallRuntime();
   return (
     <div className="screen screen--detail">
-      <ScreenHeader eyebrow="INBOX" title="通知中心" description="订单、BNM 与链上结算消息" backTo="/assets" />
+      <ScreenHeader eyebrow="通知中心" title="通知中心" description="订单、BNM 与到账消息" backTo="/assets" />
       {!runtime.session ? <StatusNotice title="请先验证钱包">通知只按当前已验证钱包读取。</StatusNotice> : null}
       {runtime.session ? (
         <section className="notification-settings" aria-labelledby="notification-setting-title">
@@ -1866,13 +1958,13 @@ export function NotificationsScreen() {
       {runtime.notificationsState === 'loading' ? <p className="loading-copy" role="status">正在同步通知…</p> : null}
       {runtime.notificationsState === 'error' ? (
         <div className="catalog-retry">
-          <StatusNotice title="通知同步失败" tone="warning">不会使用本地示例消息替代 Core inbox。</StatusNotice>
+          <StatusNotice title="通知同步失败" tone="warning">不会使用本地示例消息替代系统通知。</StatusNotice>
           <button className="button button--secondary" type="button" onClick={() => void runtime.reloadNotifications()} disabled={runtime.busy}>
             <RefreshCw aria-hidden="true" size={18} /> 重新同步
           </button>
         </div>
       ) : null}
-      {runtime.notificationsState === 'empty' ? <EmptyState title="暂无通知">新消息会由 Core 按当前钱包和主题投递。</EmptyState> : null}
+      {runtime.notificationsState === 'empty' ? <EmptyState title="暂无通知">新消息会按当前钱包和主题投递。</EmptyState> : null}
       {runtime.notificationsState === 'ready' ? (
         <div className="notification-list" aria-label="通知列表">
           {runtime.notifications.map((item) => (
@@ -1946,7 +2038,7 @@ export function CheckoutScreen() {
   return (
     <div className="screen screen--detail screen--checkout">
       <ScreenHeader
-        eyebrow={runtime.selectedSeckillSessionId ? 'SECKILL ORDER SETUP' : 'ORDER SETUP'}
+        eyebrow={runtime.selectedSeckillSessionId ? '秒杀下单' : '普通下单'}
         title={runtime.selectedSeckillSessionId ? '秒杀订单配置' : '订单配置'}
         description="规格、数量与履约方式需完整确认"
         backTo={runtime.selectedSeckillSessionId ? '/seckill' : product ? `/mall/products/${encodeURIComponent(product.productId)}` : '/mall'}
@@ -1954,15 +2046,15 @@ export function CheckoutScreen() {
 
       {runtime.selectedSeckillSessionId && runtime.seckillSession ? (
         <StatusNotice title="已绑定权威秒杀场次">
-          {shortHash(runtime.seckillSession.sessionId)} · {formatUsdtAmount(runtime.seckillSession.product.seckillListPriceUsdt)}；最终归类仍由 PaymentRouter 区块时间决定。
+          {shortHash(runtime.seckillSession.sessionId)} · {formatUsdtAmount(runtime.seckillSession.product.seckillListPriceUsdt)}；是否命中秒杀以奖金付款时间为准。
         </StatusNotice>
       ) : null}
 
       {!product ? (
-        <StatusNotice title="请先选择商品" tone="warning">返回商城从 Core 可售目录选择商品，当前页面不会补入示例 SKU。</StatusNotice>
+        <StatusNotice title="请先选择商品" tone="warning">返回商城选择可售商品，当前页面不会补入示例规格。</StatusNotice>
       ) : null}
       {product && !runtime.session ? (
-        <StatusNotice title="需要钱包登录">连接钱包并签署 SIWE 登录挑战后，Core 才会为当前买家预留库存。</StatusNotice>
+        <StatusNotice title="需要钱包登录">连接钱包后，系统才能为当前买家预留库存。</StatusNotice>
       ) : null}
 
       <CheckoutFlow
@@ -2000,7 +2092,7 @@ export function CheckoutScreen() {
       ) : null}
       {product && runtime.bootstrap && !runtime.bootstrap.writesEnabled ? (
         <StatusNotice title="新支付当前已安全停用" tone="warning">
-          {runtime.bootstrap.blockCode ?? 'ConfigurationRequired'}：Core 当前阻止新支付，不创建新报价。
+          系统当前阻止新支付，暂不创建新报价。
         </StatusNotice>
       ) : null}
 
@@ -2008,7 +2100,7 @@ export function CheckoutScreen() {
         <section className="section-block product-core-detail" aria-labelledby="product-core-detail-title">
           <div className="section-heading">
             <div>
-              <p className="eyebrow">CORE PRODUCT</p>
+              <p className="eyebrow">商品信息</p>
               <h2 id="product-core-detail-title">{product.title}</h2>
             </div>
             <ShoppingBag aria-hidden="true" size={19} />
@@ -2044,7 +2136,7 @@ export function CheckoutScreen() {
               </button>
             ))}
           </div>
-        ) : <div className="selection-placeholder">SKU 选项将随商品目录同步</div>}
+        ) : <div className="selection-placeholder">规格选项将随商品目录同步</div>}
       </section>
 
       <fieldset className="fulfillment-mode">
@@ -2076,7 +2168,7 @@ export function CheckoutScreen() {
       </section>
 
       <div className="checkout-total">
-        <span>Core 签名报价</span>
+        <span>系统报价</span>
         <strong>{runtime.quote ? formatUsdtAmount(primaryIntent(runtime.quote).listPriceUsdt) : '--'}</strong>
       </div>
       <button
@@ -2087,15 +2179,15 @@ export function CheckoutScreen() {
           ? runtime.requestSeckillQuote(runtime.selectedSeckillSessionId)
           : runtime.requestOrdinaryQuote())}
       >
-        {runtime.busy ? '正在预留库存' : runtime.selectedSeckillSessionId ? '创建双腿秒杀报价' : '创建签名报价'}
+        {runtime.busy ? '正在预留库存' : runtime.selectedSeckillSessionId ? '生成秒杀报价' : '生成付款报价'}
       </button>
       {!canQuote ? <p className="control-reason">{quoteDisabledReason(runtime)}</p> : null}
       {runtime.quote ? (
         <section className="reservation-summary" aria-labelledby="reservation-title">
-          <div><p className="eyebrow">ATOMIC RESERVATION</p><h2 id="reservation-title">库存已预留</h2></div>
+          <div><p className="eyebrow">库存预留</p><h2 id="reservation-title">库存已预留</h2></div>
           <dl>
-            <div><dt>订单</dt><dd>{runtime.quote.orderId}</dd></div>
-            <div><dt>预留</dt><dd>{primaryIntent(runtime.quote).reservationId}</dd></div>
+            <div><dt>订单</dt><dd title={runtime.quote.orderId}>{shortHash(runtime.quote.orderId)}</dd></div>
+            <div><dt>预留编号</dt><dd title={primaryIntent(runtime.quote).reservationId}>{shortHash(primaryIntent(runtime.quote).reservationId)}</dd></div>
             <div><dt>报价截止</dt><dd>{formatTimestamp(primaryIntent(runtime.quote).deadline)}</dd></div>
           </dl>
           <Link className="button button--primary" to="/checkout/review">核对报价 <ChevronRight aria-hidden="true" size={17} /></Link>
@@ -2146,7 +2238,7 @@ function CheckoutTargetSelector() {
     <section className="checkout-target" aria-labelledby="checkout-target-title">
       <div className="section-heading">
         <div>
-          <p className="eyebrow">CORE TARGET</p>
+          <p className="eyebrow">收货信息</p>
           <h2 id="checkout-target-title">{runtime.fulfillmentMode === 'DELIVERY' ? '快递目标' : '自提门店'}</h2>
         </div>
         {runtime.fulfillmentMode === 'DELIVERY' ? <MapPinned aria-hidden="true" size={19} /> : <Store aria-hidden="true" size={19} />}
@@ -2158,7 +2250,7 @@ function CheckoutTargetSelector() {
           {runtime.session && runtime.buyerAddressesState === 'loading' ? <div className="address-list-skeleton" aria-label="正在加载结算地址" /> : null}
           {runtime.session && runtime.buyerAddressesState === 'error' ? (
             <div className="catalog-retry">
-              <StatusNotice title="地址同步失败" tone="warning">不使用浏览器输入或缓存地址替代 Core 地址簿。</StatusNotice>
+              <StatusNotice title="地址同步失败" tone="warning">不使用浏览器输入或缓存地址替代系统地址簿。</StatusNotice>
               <button className="button button--secondary" type="button" onClick={() => void runtime.reloadBuyerAccount()} disabled={runtime.busy}><RefreshCw aria-hidden="true" size={18} /> 重新同步</button>
             </div>
           ) : null}
@@ -2218,7 +2310,7 @@ function CheckoutTargetSelector() {
         <div className="fulfillment-preview" aria-live="polite">
           <BadgeCheck aria-hidden="true" size={22} />
           <div>
-            <h2>Core 目标已验证</h2>
+            <h2>收货信息已验证</h2>
             <p>{runtime.checkoutTarget.label}</p>
             <span>{shortHash(runtime.checkoutTarget.fulfillmentTargetHash)}</span>
           </div>
@@ -2242,21 +2334,21 @@ export function ReviewScreen() {
     ),
   );
   const reviewRows = [
-    { icon: Package, label: '商品与最终规格', value: runtime.selectedProduct && runtime.selectedSku ? `${runtime.selectedProduct.title} (${runtime.selectedProduct.productId}) · ${skuLabel(runtime.selectedSku.attributes, runtime.selectedSku.skuId)} (${runtime.selectedSku.skuId})` : '待签名预留' },
-    { icon: ScanLine, label: '数量与总价', value: intent ? `x${intent.quantity} · ${formatUsdtAmount(intent.listPriceUsdt)}` : '待签名报价' },
+    { icon: Package, label: '商品与最终规格', value: runtime.selectedProduct && runtime.selectedSku ? `${runtime.selectedProduct.title} · ${skuLabel(runtime.selectedSku.attributes, runtime.selectedSku.skuId)}` : '待预留' },
+    { icon: ScanLine, label: '数量与总价', value: intent ? `x${intent.quantity} · ${formatUsdtAmount(intent.listPriceUsdt)}` : '待报价' },
     { icon: Truck, label: '履约方式', value: intent ? (intent.fulfillmentMode === 0 ? '快递邮寄' : '到店自提') : '待确认' },
     { icon: MapPinned, label: '地址或门店', value: runtime.checkoutTarget?.label ?? (intent ? shortHash(intent.fulfillmentTargetHash) : '待权威校验') },
   ];
 
   return (
     <div className="screen screen--detail screen--review">
-      <ScreenHeader eyebrow="FINAL REVIEW" title="付前最终核对" description="五项信息全部绑定后才能广播" backTo="/checkout" />
+      <ScreenHeader eyebrow="付款前核对" title="付前最终核对" description="商品、地址、金额和钱包全部确认后再支付" backTo="/checkout" />
 
       <section className="review-payment-summary" aria-label="支付摘要">
         <div>
           <span>本次 USDT 实付</span>
           <strong>{formatUsdtAmount(intent?.usdtPaymentAmount)}</strong>
-          <small>{quote ? '来自 Core 签名报价' : '待创建报价'}</small>
+          <small>{quote ? '来自系统报价' : '待创建报价'}</small>
         </div>
         <div>
           <span>授权状态</span>
@@ -2279,7 +2371,7 @@ export function ReviewScreen() {
         <li>
           <span className="review-list__number">5</span>
           <WalletCards aria-hidden="true" size={19} />
-          <div><strong>钱包广播</strong><span>{quote ? `${quote.routerCall.functionName} · BSC 56` : '待安全配置'}</span></div>
+          <div><strong>钱包支付</strong><span>{quote ? '主网钱包支付' : '待安全配置'}</span></div>
         </li>
       </ol>
 
@@ -2289,7 +2381,8 @@ export function ReviewScreen() {
         <ShieldAlert aria-hidden="true" size={22} />
         <div>
           <h2 id="immutable-warning-title">付款前请最终确认</h2>
-          <p>付款成功后，商品、SKU、数量、履约方式与行政区 {runtime.checkoutTarget?.review.kind === 'DELIVERY' ? runtime.checkoutTarget.review.address.regionCode : runtime.checkoutTarget?.review.store.regionCode ?? '--'} 将写入订单快照，后续不可修改。Region hash：{runtime.checkoutTarget ? shortHash(runtime.checkoutTarget.regionCodeHash) : '--'}。</p>
+          <p>付款成功后，商品、规格、数量、履约方式与所在行政区将写入订单，后续不可修改。</p>
+          {runtime.checkoutTarget ? <details className="technical-disclosure technical-disclosure--compact"><summary>高级地址凭证</summary><code>{shortHash(runtime.checkoutTarget.regionCodeHash)}</code></details> : null}
         </div>
       </section>
 
@@ -2297,25 +2390,25 @@ export function ReviewScreen() {
         <Banknote aria-hidden="true" size={21} />
         <div>
           <h2 id="allowance-title">授权与支付</h2>
-          <p>额度不足时按 Core 要求申请 MaxUint256；额度足够时不重复授权。撤销使用 approve(0)。</p>
+          <p>如果钱包额度不足，会请你授权一次；额度足够时不会重复弹窗。你也可以随时点下面的“撤销额度”。</p>
         </div>
       </section>
 
       {quote ? (
         <section className="payment-intent" aria-labelledby="payment-intent-title">
-          <div className="section-heading"><h2 id="payment-intent-title">精确支付意图</h2><WalletCards aria-hidden="true" size={19} /></div>
+          <div className="section-heading"><h2 id="payment-intent-title">付款明细</h2><WalletCards aria-hidden="true" size={19} /></div>
           <dl>
             <div><dt>商品 USDT</dt><dd>{formatUsdtAmount(intent?.productUsdtPaymentAmount)}</dd></div>
-            <div><dt>平台技术服务费 USDT</dt><dd>{formatUsdtAmount(intent?.platformServiceFeeUsdt)}</dd></div>
-            <div><dt>Custody 商品 USDT</dt><dd>{formatUsdtAmount(intent?.custodyProductUsdt)}</dd></div>
+            <div><dt>平台服务费 USDT</dt><dd>{formatUsdtAmount(intent?.platformServiceFeeUsdt)}</dd></div>
+            <div><dt>商家货款 USDT</dt><dd>{formatUsdtAmount(intent?.custodyProductUsdt)}</dd></div>
             <div><dt>运费 USDT</dt><dd>{formatUsdtAmount(intent?.freightUsdt)}</dd></div>
             <div><dt>USDT 实付</dt><dd>{formatUsdtAmount(intent?.usdtPaymentAmount)}</dd></div>
-            <div><dt>NPL 支付</dt><dd>{intent?.nplPaymentAmount}</dd></div>
-            <div><dt>NPL Burn</dt><dd>{intent?.nplBurnAmount}</dd></div>
-            <div><dt>NPL 奖励钱包</dt><dd>{intent?.nplRewardAmount}</dd></div>
-            <div><dt>BNM Locked</dt><dd>{intent?.bnmAmount}</dd></div>
+            <div><dt>NPL 支付</dt><dd>{formatNplAmount(intent?.nplPaymentAmount)}</dd></div>
+            <div><dt>NPL 销毁</dt><dd>{formatNplAmount(intent?.nplBurnAmount)}</dd></div>
+            <div><dt>NPL 奖励钱包</dt><dd>{formatNplAmount(intent?.nplRewardAmount)}</dd></div>
+            <div><dt>BNM 锁定</dt><dd>{formatBnmAmount(intent?.bnmAmount)}</dd></div>
           </dl>
-          <p className="field-help">USDT 已按 18 位原子单位换算为两位展示；签名/广播仍使用 Core 原值，页面不重新计算或分配。</p>
+          <p className="field-help">金额已按普通小数展示；实际支付仍以系统报价为准。</p>
           {quote.approvalRequirements.map((requirement, index) => (
             <article className="approval-row" key={requirement.token}>
               <div><strong>{shortHash(requirement.token)}</strong><span>授权对象 {shortHash(requirement.spender)}</span></div>
@@ -2337,13 +2430,13 @@ export function ReviewScreen() {
         <section className="dual-quote" aria-labelledby="dual-quote-title">
           <div className="section-heading"><h2 id="dual-quote-title">秒杀与日常备用报价</h2><Zap aria-hidden="true" size={19} /></div>
           <div className="dual-quote__grid">
-            <div><strong>区块时间在场内</strong><span>商品 {formatUsdtAmount(quote.routerCall.intent.seckillPayment.listPriceUsdt)}</span><span>服务费 {formatUsdtAmount(quote.routerCall.intent.seckillPayment.platformServiceFeeUsdt)}</span><span>Custody 商品 {formatUsdtAmount(quote.routerCall.intent.seckillPayment.custodyProductUsdt)}</span><span>运费 {formatUsdtAmount(quote.routerCall.intent.seckillPayment.freightUsdt)}</span><span>USDT 实付 {formatUsdtAmount(quote.routerCall.intent.seckillPayment.usdtPaymentAmount)}</span><span>NPL {quote.routerCall.intent.seckillPayment.nplPaymentAmount}</span></div>
-            <div><strong>区块时间已过截止</strong><span>商品 {formatUsdtAmount(quote.routerCall.intent.fallbackPayment.listPriceUsdt)}</span><span>服务费 {formatUsdtAmount(quote.routerCall.intent.fallbackPayment.platformServiceFeeUsdt)}</span><span>Custody 商品 {formatUsdtAmount(quote.routerCall.intent.fallbackPayment.custodyProductUsdt)}</span><span>运费 {formatUsdtAmount(quote.routerCall.intent.fallbackPayment.freightUsdt)}</span><span>USDT 实付 {formatUsdtAmount(quote.routerCall.intent.fallbackPayment.usdtPaymentAmount)}</span><span>NPL {quote.routerCall.intent.fallbackPayment.nplPaymentAmount}</span></div>
+            <div><strong>付款在活动时间内</strong><span>商品 {formatUsdtAmount(quote.routerCall.intent.seckillPayment.listPriceUsdt)}</span><span>服务费 {formatUsdtAmount(quote.routerCall.intent.seckillPayment.platformServiceFeeUsdt)}</span><span>商家货款 {formatUsdtAmount(quote.routerCall.intent.seckillPayment.custodyProductUsdt)}</span><span>运费 {formatUsdtAmount(quote.routerCall.intent.seckillPayment.freightUsdt)}</span><span>USDT 实付 {formatUsdtAmount(quote.routerCall.intent.seckillPayment.usdtPaymentAmount)}</span><span>NPL {formatNplAmount(quote.routerCall.intent.seckillPayment.nplPaymentAmount)}</span></div>
+            <div><strong>付款超过活动截止</strong><span>商品 {formatUsdtAmount(quote.routerCall.intent.fallbackPayment.listPriceUsdt)}</span><span>服务费 {formatUsdtAmount(quote.routerCall.intent.fallbackPayment.platformServiceFeeUsdt)}</span><span>商家货款 {formatUsdtAmount(quote.routerCall.intent.fallbackPayment.custodyProductUsdt)}</span><span>运费 {formatUsdtAmount(quote.routerCall.intent.fallbackPayment.freightUsdt)}</span><span>USDT 实付 {formatUsdtAmount(quote.routerCall.intent.fallbackPayment.usdtPaymentAmount)}</span><span>NPL {formatNplAmount(quote.routerCall.intent.fallbackPayment.nplPaymentAmount)}</span></div>
           </div>
-          <p className="field-help">分类只由 PaymentRouter 的链上区块时间决定；截止后原子使用日常报价和独立库存预留。</p>
+          <p className="field-help">是否命中秒杀只看奖金付款时间；截止后自动使用普通报价和普通库存预留。</p>
           <label className="check-field approval-check">
             <input type="checkbox" checked={seckillAcknowledged} onChange={(event) => setSeckillAcknowledged(event.target.checked)} />
-            <span>我已同时核对两笔五分钟签名报价和链上分类规则</span>
+            <span>我已核对秒杀价和截止后普通价</span>
           </label>
         </section>
       ) : null}
@@ -2354,33 +2447,33 @@ export function ReviewScreen() {
         disabled={!quote || (requiresApproval && !approvalAcknowledged) || (isSeckillQuote && !seckillAcknowledged) || Boolean(runtime.submittedTxHash) || runtime.busy || !runtime.bootstrap?.writesEnabled || !runtime.walletWritesAuthorized}
         onClick={() => void runtime.broadcastPayment(approvalAcknowledged, seckillAcknowledged)}
       >
-        <WalletCards aria-hidden="true" size={18} /> {runtime.busy ? '正在处理' : '支付并广播'}
+        <WalletCards aria-hidden="true" size={18} /> {runtime.busy ? '正在处理' : '确认支付'}
       </button>
       {!runtime.walletWritesAuthorized ? (
-        <p className="control-reason">协调 manifest 尚未授权部署与 PAY_ORDER，不会向未发布合约广播。</p>
+        <p className="control-reason">当前支付尚未通过系统上线开关，不会发起钱包交易。</p>
       ) : null}
 
       {quote ? (
         <section className="payment-status" aria-labelledby="payment-status-title">
           <div className="section-heading"><h2 id="payment-status-title">支付同步</h2><Radio aria-hidden="true" size={19} /></div>
           <dl>
-            <div><dt>报价状态</dt><dd>{runtime.projection?.state ?? quote.state}</dd></div>
-            <div><dt>提交 TxHash</dt><dd>{runtime.projection?.submittedTxHash ?? runtime.submittedTxHash ?? quote.submittedTxHash ?? '未提交'}</dd></div>
-            <div><dt>链上分类</dt><dd>{runtime.projection?.finality?.classification ?? '待 Indexer'}</dd></div>
+            <div><dt>报价状态</dt><dd>{paymentStateLabel(runtime.projection?.state ?? quote.state)}</dd></div>
+            <div><dt>付款记录</dt><dd>{runtime.projection?.submittedTxHash || runtime.submittedTxHash || quote.submittedTxHash ? <code title={runtime.projection?.submittedTxHash ?? runtime.submittedTxHash ?? quote.submittedTxHash ?? undefined}>{shortHash(runtime.projection?.submittedTxHash ?? runtime.submittedTxHash ?? quote.submittedTxHash!)}</code> : '未提交'}</dd></div>
+            <div><dt>支付分类</dt><dd>{paymentClassificationLabel(runtime.projection?.finality?.classification)}</dd></div>
             <div><dt>确认数</dt><dd>{runtime.projection?.finality ? `${runtime.projection.finality.confirmations}/${runtime.projection.finality.requiredConfirmations}` : '--/15'}</dd></div>
-            <div><dt>最终性</dt><dd>{runtime.projection?.finality?.state ?? '待 Indexer'}</dd></div>
+            <div><dt>最终确认</dt><dd>{paymentStateLabel(runtime.projection?.finality?.state ?? 'PENDING')}</dd></div>
           </dl>
           <button className="button button--secondary" type="button" onClick={() => void runtime.refreshPayment()} disabled={runtime.busy || !runtime.session}>
-            <RefreshCw aria-hidden="true" size={18} /> 刷新 Core 投影
+            <RefreshCw aria-hidden="true" size={18} /> 刷新支付状态
           </button>
           {runtime.pendingSubmission ? (
             <button className="button button--secondary" type="button" onClick={() => void runtime.retrySubmission()} disabled={runtime.busy}>
               <RefreshCw aria-hidden="true" size={18} />
-              {runtime.pendingSubmission.phase === 'PENDING_CORE_SUBMISSION' ? '重试提交 TxHash' : '刷新 Core 投影'}
+              {runtime.pendingSubmission.phase === 'PENDING_CORE_SUBMISSION' ? '重试提交付款记录' : '刷新支付状态'}
             </button>
           ) : null}
         </section>
-      ) : <StatusNotice title="尚未创建签名报价">返回订单配置选择 Core 商品和 SKU，由 Core 原子预留库存后再核对。</StatusNotice>}
+      ) : <StatusNotice title="尚未创建付款报价">返回订单配置选择商品和规格，由系统预留库存后再核对。</StatusNotice>}
     </div>
   );
 }
@@ -2397,7 +2490,7 @@ function CheckoutTargetReview({ target }: { target: NonNullable<MallRuntimeValue
           <div><dt>省 / 市 / 区</dt><dd>{address.province} / {address.city} / {address.district}</dd></div>
           <div><dt>详细地址</dt><dd>{address.formattedAddress}</dd></div>
           <div><dt>行政区代码</dt><dd>{address.regionCode}</dd></div>
-          <div><dt>目标哈希</dt><dd><code>{target.fulfillmentTargetHash}</code></dd></div>
+          <details className="technical-disclosure technical-disclosure--compact"><summary>高级收货凭证</summary><div><dt>目标凭证</dt><dd><code title={target.fulfillmentTargetHash}>{shortHash(target.fulfillmentTargetHash)}</code></dd></div></details>
         </dl>
       </section>
     );
@@ -2412,9 +2505,9 @@ function CheckoutTargetReview({ target }: { target: NonNullable<MallRuntimeValue
         <div><dt>营业时间</dt><dd>{store.businessHours}</dd></div>
         <div><dt>联系电话</dt><dd>{store.phone}</dd></div>
         <div><dt>行政区代码</dt><dd>{store.regionCode}</dd></div>
-        <div><dt>目标哈希</dt><dd><code>{target.fulfillmentTargetHash}</code></dd></div>
+        <details className="technical-disclosure technical-disclosure--compact"><summary>高级自提凭证</summary><div><dt>目标凭证</dt><dd><code title={target.fulfillmentTargetHash}>{shortHash(target.fulfillmentTargetHash)}</code></dd></div></details>
       </dl>
-      <p>请在营业时间内到店，并以 Core 订单状态和现场核销结果为准。</p>
+      <p>请在营业时间内到店，并以订单状态和现场核销结果为准。</p>
     </section>
   );
 }
@@ -2444,18 +2537,18 @@ function skuLabel(attributes: Readonly<Record<string, unknown>>, fallback: strin
 
 function quoteDisabledReason(runtime: MallRuntimeValue) {
   if (!runtime.selectedProduct) return '请先从商城选择商品';
-  if (!runtime.selectedSku) return '请手动选择一个可售 SKU';
+  if (!runtime.selectedSku) return '请手动选择一个可售规格';
   if (!runtime.selectedProduct.fulfillmentModes.includes(runtime.fulfillmentMode)) return '该商品未发布当前履约方式';
-  if (runtime.selectedSku.seckill && !runtime.selectedSeckillSessionId) return '该 SKU 正在活动阶段，普通结算已停用';
-  if (!runtime.session) return '请先连接钱包并完成 SIWE 登录';
-  if (!runtime.bootstrap) return '正在同步 Core 安全状态';
-  if (!runtime.bootstrap.writesEnabled) return '新支付当前被 Core 安全门禁阻断';
+  if (runtime.selectedSku.seckill && !runtime.selectedSeckillSessionId) return '该规格正在活动阶段，普通结算已停用';
+  if (!runtime.session) return '请先连接钱包';
+  if (!runtime.bootstrap) return '正在同步系统安全状态';
+  if (!runtime.bootstrap.writesEnabled) return '新支付当前被系统安全开关阻断';
   if (runtime.selectedSeckillSessionId && (
     runtime.seckillSession?.sessionId !== runtime.selectedSeckillSessionId
       || runtime.seckillSession.phase !== 'LIVE'
-  )) return 'Core 当前场次阶段不允许创建秒杀报价';
+  )) return '系统当前场次阶段不允许创建秒杀报价';
   if (!runtime.checkoutTarget || runtime.checkoutTarget.fulfillmentMode !== runtime.fulfillmentMode) {
-    return runtime.fulfillmentMode === 'DELIVERY' ? '请先选择 Core 已保存的收货地址' : '请先选择自提门店';
+    return runtime.fulfillmentMode === 'DELIVERY' ? '请先选择已保存的收货地址' : '请先选择自提门店';
   }
   return '请完成当前配置';
 }
@@ -2522,13 +2615,7 @@ function useAuthoritativeCountdown(
 }
 
 function SeckillPhasePill({ phase }: { phase?: SeckillSessionProjection['phase'] | undefined }) {
-  const label = phase ? ({
-    PREHEAT: '预热',
-    LIVE: '进行中',
-    SETTLING: '结算中',
-    SETTLED: '已结算',
-    FORCE_CLOSED: '已关闭',
-  } as const)[phase] : '未同步';
+  const label = phase ? seckillPhaseText(phase) : '未同步';
   const tone = phase === 'LIVE' || phase === 'SETTLED'
     ? 'status-pill--success'
     : phase === 'SETTLING'
@@ -2537,15 +2624,25 @@ function SeckillPhasePill({ phase }: { phase?: SeckillSessionProjection['phase']
   return <span className={`status-pill ${tone}`}>{label}</span>;
 }
 
+function seckillPhaseText(phase: SeckillSessionProjection['phase']) {
+  return ({
+    PREHEAT: '预热',
+    LIVE: '进行中',
+    SETTLING: '结算中',
+    SETTLED: '已结算',
+    FORCE_CLOSED: '已关闭',
+  } as const)[phase];
+}
+
 function seckillPhaseCopy(session: PublishedSeckillSessionProjection) {
   return ({
-    PREHEAT: `预热中，Core 发布开始时间 ${formatIso(session.startsAt)}。`,
-    LIVE: '主场和接力均以 Core 时间锚与已发布截止时间显示，页面不改变阶段。',
-    SETTLING: `大奖结算窗口 ${formatIso(session.settlementEarliestAt)} 至 ${formatIso(session.settlementDeadline)}。`,
+    PREHEAT: `预热中，${formatIso(session.startsAt)} 开始。`,
+    LIVE: '活动进行中，倒计时和库存会自动同步。',
+    SETTLING: `抢购已结束，大奖正在结算，预计 ${formatIso(session.settlementDeadline)} 前完成。`,
     SETTLED: session.winnerWallet
-      ? '大奖赢家已冻结，奖金按 Core 投影进入普通钱包结算生命周期。'
+      ? '本场已结算，中奖用户和奖励状态已公布。'
       : session.prizeSettlement?.state === 'ROLLED_OVER'
-        ? '本场无有效赢家，已有奖池已按 Core 分录滚入下一场。'
+        ? '本场没有有效赢家，奖池已滚入下一场。'
         : '场次已最终结算。',
     FORCE_CLOSED: '场次已由治理流程强制关闭，不再接受秒杀报价。',
   } as const)[session.phase];
@@ -2563,10 +2660,10 @@ function seckillPrizeStateLabel(state: SeckillPrizeSettlementProjection['state']
 
 function seckillPayoutStateLabel(state: NonNullable<SeckillPrizeSettlementProjection['payout']>['state']) {
   return ({
-    AVAILABLE: 'Available',
-    REQUESTED: 'Requested',
-    SUBMITTED: 'Submitted',
-    SETTLED: 'Settled',
+    AVAILABLE: '可用',
+    REQUESTED: '已申请',
+    SUBMITTED: '已提交',
+    SETTLED: '已到账',
     RETRYABLE: '可重试',
     QUARANTINED: '已隔离',
     FAILED_CLOSED: '已关闭',
@@ -2580,12 +2677,12 @@ function seckillActionReason(
   mainCountdown: CountdownState,
   relayCountdown: CountdownState,
 ) {
-  if (session.phase !== 'LIVE') return `Core 当前阶段为 ${session.phase}，不创建秒杀报价`;
-  if (!mainCountdown.ready || !relayCountdown.ready) return 'Core serverTime 或 deadline 缺失，已停用秒杀配置';
-  if (mainCountdown.expired || relayCountdown.expired) return 'Core deadline 已到 0，正在重新同步场次';
-  if (BigInt(session.inventory.available) === 0n) return 'Core 场次库存已售罄';
-  if (!productAvailable) return '场次商品与当前可售目录不一致';
-  if (!runtime.bootstrap?.writesEnabled) return 'Core 当前安全门禁阻断新支付';
+  if (session.phase !== 'LIVE') return `当前状态为${seckillPhaseText(session.phase)}，暂时不能抢`;
+  if (!mainCountdown.ready || !relayCountdown.ready) return '活动时间还没同步完成，暂时不能抢';
+  if (mainCountdown.expired || relayCountdown.expired) return '倒计时已结束，正在刷新活动状态';
+  if (BigInt(session.inventory.available) === 0n) return '本场库存已抢完';
+  if (!productAvailable) return '当前商品还没准备好，暂时不能抢';
+  if (!runtime.bootstrap?.writesEnabled) return '平台当前暂停新支付，暂时不能抢';
   return '秒杀订单暂不可配置';
 }
 
@@ -2596,25 +2693,25 @@ function ledgerStateSummaries(runtime: MallRuntimeValue) {
   const regionalSubtypes: readonly RewardSubtype[] = ['DISTRICT', 'CITY', 'PROVINCE', 'REGION'];
   return [
     {
-      title: 'BNM 积分三态',
-      total: readable ? sumAtomicStrings(points.map((point) => point.amount)) : '--',
-      available: readable ? sumAtomicStrings(points.filter((point) => point.state === 'AVAILABLE').map((point) => point.amount)) : '--',
-      locked: readable ? sumAtomicStrings(points.filter((point) => point.state === 'LOCKED').map((point) => point.amount)) : '--',
-      copy: '后端积分，只展示 Locked / Available，不是代币。',
+      title: 'BNM 积分',
+      total: readable ? formatBnmAmount(sumAtomicStrings(points.map((point) => point.amount))) : '--',
+      available: readable ? formatBnmAmount(sumAtomicStrings(points.filter((point) => point.state === 'AVAILABLE').map((point) => point.amount))) : '--',
+      locked: readable ? formatBnmAmount(sumAtomicStrings(points.filter((point) => point.state === 'LOCKED').map((point) => point.amount))) : '--',
+      copy: 'BNM 是平台积分，履约完成后会从锁定变为可领取。',
     },
     {
       title: '创世节点 NPL',
-      total: readable ? sumAtomicStrings(balances.filter((balance) => balance.rewardSubtype === 'GENESIS').map((balance) => balance.amount)) : '--',
-      available: readable ? sumAtomicStrings(balances.filter((balance) => balance.rewardSubtype === 'GENESIS' && balance.state === 'AVAILABLE').map((balance) => balance.amount)) : '--',
-      locked: readable ? sumAtomicStrings(balances.filter((balance) => balance.rewardSubtype === 'GENESIS' && balance.state === 'LOCKED').map((balance) => balance.amount)) : '--',
-      copy: '节点收益来自 Core 账本，申请后进入普通钱包结算生命周期。',
+      total: readable ? formatNplAmount(sumAtomicStrings(balances.filter((balance) => balance.rewardSubtype === 'GENESIS').map((balance) => balance.amount))) : '--',
+      available: readable ? formatNplAmount(sumAtomicStrings(balances.filter((balance) => balance.rewardSubtype === 'GENESIS' && balance.state === 'AVAILABLE').map((balance) => balance.amount))) : '--',
+      locked: readable ? formatNplAmount(sumAtomicStrings(balances.filter((balance) => balance.rewardSubtype === 'GENESIS' && balance.state === 'LOCKED').map((balance) => balance.amount))) : '--',
+      copy: '节点收益到账后，可以在收益中心申请结算。',
     },
     {
       title: '区域代理 NPL',
-      total: readable ? sumAtomicStrings(balances.filter((balance) => balance.rewardSubtype && regionalSubtypes.includes(balance.rewardSubtype)).map((balance) => balance.amount)) : '--',
-      available: readable ? sumAtomicStrings(balances.filter((balance) => balance.rewardSubtype && regionalSubtypes.includes(balance.rewardSubtype) && balance.state === 'AVAILABLE').map((balance) => balance.amount)) : '--',
-      locked: readable ? sumAtomicStrings(balances.filter((balance) => balance.rewardSubtype && regionalSubtypes.includes(balance.rewardSubtype) && balance.state === 'LOCKED').map((balance) => balance.amount)) : '--',
-      copy: '区域归属来自付款快照里的行政区划，不在前端重算。',
+      total: readable ? formatNplAmount(sumAtomicStrings(balances.filter((balance) => balance.rewardSubtype && regionalSubtypes.includes(balance.rewardSubtype)).map((balance) => balance.amount))) : '--',
+      available: readable ? formatNplAmount(sumAtomicStrings(balances.filter((balance) => balance.rewardSubtype && regionalSubtypes.includes(balance.rewardSubtype) && balance.state === 'AVAILABLE').map((balance) => balance.amount))) : '--',
+      locked: readable ? formatNplAmount(sumAtomicStrings(balances.filter((balance) => balance.rewardSubtype && regionalSubtypes.includes(balance.rewardSubtype) && balance.state === 'LOCKED').map((balance) => balance.amount))) : '--',
+      copy: '区域收益按下单时确认的地址归属统计。',
     },
   ] as const;
 }
@@ -2632,19 +2729,30 @@ function formatUsdtNumber(amount: string | null | undefined) {
   return formatAtomicFixed(amount, 18, 2);
 }
 
-function formatAssetDisplayAmount(amount: string, asset: string) {
-  if (asset === 'USDT') return formatUsdtAmount(amount);
-  if (asset === 'BNM_POINTS') return `${amount} BNM`;
-  return `${amount} ${asset}`;
+function formatNplAmount(amount: string | null | undefined) {
+  const value = formatAtomicFixed(amount, 18, 2);
+  return value === '--' ? value : `${value} NPL`;
 }
 
-function formatAssetNumber(amount: string, asset: string) {
-  return asset === 'USDT' ? formatUsdtNumber(amount) : amount;
+function formatBnmAmount(amount: string | null | undefined) {
+  const value = formatAtomicFixed(amount, 18, 2);
+  return value === '--' ? value : `${value} BNM`;
+}
+
+function formatAssetDisplayAmount(amount: string | null | undefined, asset: string) {
+  if (asset === 'USDT') return formatUsdtAmount(amount);
+  if (asset === 'NPL') return formatNplAmount(amount);
+  if (asset === 'BNM_POINTS' || asset === 'BNM') return formatBnmAmount(amount);
+  const value = formatAtomicFixed(amount, 18, 2);
+  return value === '--' ? value : `${value} ${asset}`;
 }
 
 function formatApprovalAmount(token: string, amount: string | undefined) {
   if (amount === undefined) return '读取中';
-  return token.toLowerCase() === chainIdentity.usdtAddress.toLowerCase() ? formatUsdtAmount(amount) : amount;
+  const normalized = token.toLowerCase();
+  if (normalized === chainIdentity.usdtAddress.toLowerCase()) return formatUsdtAmount(amount);
+  if (normalized === chainIdentity.nplAddress.toLowerCase()) return formatNplAmount(amount);
+  return formatAtomicFixed(amount, 18, 2);
 }
 
 function formatAtomicFixed(amount: string | null | undefined, decimals: number, fractionDigits: number) {
@@ -2927,7 +3035,7 @@ function isBuyerEvidenceAction(action: AllowedActionName): action is BuyerEviden
 }
 
 function unsupportedBuyerActionReason(action: AllowedActionName) {
-  if (action === 'OPEN_TAKEOVER') return 'Core 尚未发布 OPEN_TAKEOVER 的订单证据动作';
+  if (action === 'OPEN_TAKEOVER') return '当前订单暂不支持买家直接发起平台接管';
   if (action === 'VERIFY_PICKUP') return '自提核销证据仅授权门店或平台角色';
   return '当前 Mall 买家证据流程不支持该操作';
 }
@@ -2951,6 +3059,15 @@ function activityCountState(state: MallRuntimeValue['ordersState'], authenticate
   if (!authenticated) return '未登录';
   if (state === 'loading' || state === 'idle') return '同步中';
   return '同步失败';
+}
+
+function orderCountText(metric: Readonly<{ status: string; count: string | null }> | null | undefined) {
+  if (!metric) return null;
+  if (metric.status === 'AVAILABLE') return metric.count ?? '0';
+  if (metric.status === 'DecisionBlocked') return '--';
+  if (metric.status === 'ExternalBlocked') return '外部暂停';
+  if (metric.status === 'ConfigurationRequired') return '配置中';
+  return '--';
 }
 
 function orderMatchesTab(order: FulfillmentOrder, tab: string) {
@@ -2987,7 +3104,7 @@ function finalityLabel(status: FulfillmentOrder['finalityStatus']) {
     CONFIRMED: '已确认',
     REPLACED: '交易已替换',
     REORGED: '链重组',
-    FINAL: '链上最终',
+    FINAL: '最终确认',
   } as const)[status];
 }
 
@@ -3020,6 +3137,16 @@ function requestTypeLabel(type: FulfillmentOrder['requests'][number]['requestTyp
   return ({ EXCHANGE: '换货', DELAY: '延期', ARBITRATION: '仲裁', FORCED_RECEIPT: '强制收货审查' } as const)[type];
 }
 
+function requestStateLabel(state: FulfillmentOrder['requests'][number]['state']) {
+  return ({
+    OPEN: '待处理',
+    APPROVED: '已通过',
+    REJECTED: '已拒绝',
+    CANCELLED: '已取消',
+    CLOSED: '已关闭',
+  } as Record<string, string>)[state] ?? state;
+}
+
 function actionLabel(action: AllowedAction['action']) {
   return ({
     REQUEST_EXCHANGE: '申请换货',
@@ -3031,6 +3158,15 @@ function actionLabel(action: AllowedAction['action']) {
   } as Partial<Record<AllowedAction['action'], string>>)[action] ?? action;
 }
 
+function defaultBuyerActionReason(action: BuyerEvidenceAction) {
+  return ({
+    REQUEST_EXCHANGE: 'BUYER_REQUEST_EXCHANGE',
+    REQUEST_DELAY: 'BUYER_REQUEST_DELAY',
+    CONFIRM_RECEIPT: 'BUYER_CONFIRM_RECEIPT',
+    OPEN_ARBITRATION: 'BUYER_OPEN_ARBITRATION',
+  } as const)[action];
+}
+
 function railForBalance(balance: SettlementBalance): Extract<SettlementRail, 'REWARD_NPL' | 'PRIZE_USDT'> | null {
   if (balance.asset === 'NPL' && balance.purpose === 'REWARD_LIABILITY') return 'REWARD_NPL';
   if (balance.asset === 'USDT' && balance.purpose === 'SECKILL_PRIZE_LIABILITY') return 'PRIZE_USDT';
@@ -3039,16 +3175,40 @@ function railForBalance(balance: SettlementBalance): Extract<SettlementRail, 'RE
 
 function settlementStateLabel(state: SettlementBalance['state'] | SettlementRequestProjection['state']) {
   return ({
-    LOCKED: 'Locked',
-    AVAILABLE: 'Available',
-    REQUESTED: 'Requested',
-    SUBMITTED: 'Submitted',
-    SETTLED: 'Settled',
-    DISPUTED: 'Disputed',
+    LOCKED: '锁定中',
+    AVAILABLE: '可用',
+    REQUESTED: '已申请',
+    SUBMITTED: '已提交',
+    SETTLED: '已结算',
+    DISPUTED: '争议中',
     RETRYABLE: '可重试',
     QUARANTINED: '已隔离',
     FAILED_CLOSED: '已关闭',
   } as const)[state];
+}
+
+function paymentStateLabel(state: string | null | undefined) {
+  if (!state) return '等待确认';
+  return ({
+    QUOTED: '已报价',
+    SUBMITTED: '已提交',
+    PENDING: '确认中',
+    CONFIRMED: '已确认',
+    FINAL: '已完成',
+    REPLACED: '交易已替换',
+    REORGED: '链上回滚',
+    FAILED: '失败',
+    EXPIRED: '已过期',
+  } as Record<string, string>)[state] ?? state;
+}
+
+function paymentClassificationLabel(value: string | null | undefined) {
+  if (!value) return '等待系统确认';
+  return ({
+    ORDINARY: '普通订单',
+    SECKILL: '秒杀订单',
+    FALLBACK_RETAIL: '普通兜底订单',
+  } as Record<string, string>)[value] ?? value;
 }
 
 function notificationStateLabel(state: MallRuntimeValue['notifications'][number]['deliveryState']) {
@@ -3123,7 +3283,7 @@ function notificationFieldLabel(key: string) {
     aggregateId: '业务单号',
     orderId: '订单号',
     shipmentId: '发货记录',
-    trackingNumberHash: '物流单号哈希',
+    trackingNumberHash: '物流单号凭证',
     carrierCode: '承运商',
     logisticsEventId: '物流事件',
     provider: '物流服务商',
@@ -3132,16 +3292,16 @@ function notificationFieldLabel(key: string) {
     occurredAt: '物流更新时间',
     requestId: '结算申请',
     rail: '结算类型',
-    safeTxHash: '链上交易',
-    executionTxHash: '执行交易',
+    chainTxHash: '钱包交易记录',
+    executionTxHash: '到账记录',
     state: '状态',
     amount: '数量',
     stateVersion: 'BNM 状态版本',
     method: '履约方式',
-    lockedUsdtAmount: 'Locked USDT',
-    lockedNplAmount: 'Locked NPL',
-    availableUsdtAmount: 'Available USDT',
-    availableNplAmount: 'Available NPL',
+    lockedUsdtAmount: '锁定 USDT',
+    lockedNplAmount: '锁定 NPL',
+    availableUsdtAmount: '可用 USDT',
+    availableNplAmount: '可用 NPL',
     rewardSubtypes: '收益类型',
     campaignId: '活动编号',
     transactionHash: '支付交易',
@@ -3154,7 +3314,7 @@ function notificationFieldLabel(key: string) {
 
 function notificationFieldValue(key: string, value: string | number | boolean) {
   const text = String(value);
-  if (key === 'state') return ({ LOCKED: 'Locked（锁定）', AVAILABLE: 'Available（可用）' } as Record<string, string>)[text] ?? text;
+  if (key === 'state') return ({ LOCKED: '锁定中', AVAILABLE: '可用' } as Record<string, string>)[text] ?? text;
   if (key === 'method') return ({ PICKUP_VERIFICATION: '自提核销', CUSTOMER_RECEIPT: '客户确认收货', FORCED_RECEIPT: '强制收货', ARBITRATION: '仲裁履约' } as Record<string, string>)[text] ?? text;
   if (key === 'rail') return ({ REWARD_NPL: 'NPL 收益', PRIZE_USDT: 'USDT 奖励' } as Record<string, string>)[text] ?? text;
   if (key.toLowerCase().includes('usdtamount')) return formatUsdtAmount(text);
@@ -3188,6 +3348,17 @@ function formatIso(value: string) {
     hour: '2-digit',
     minute: '2-digit',
   }).format(new Date(timestamp));
+}
+
+function formatRelativeTime(value: string) {
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return formatIso(value);
+  const elapsedSeconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
+  if (elapsedSeconds < 10) return '刚刚';
+  if (elapsedSeconds < 60) return `${elapsedSeconds} 秒前`;
+  const elapsedMinutes = Math.floor(elapsedSeconds / 60);
+  if (elapsedMinutes < 60) return `${elapsedMinutes} 分钟前`;
+  return formatIso(value);
 }
 
 export const mallScreenRequirementEvidence = Object.freeze({

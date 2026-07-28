@@ -87,6 +87,10 @@ function renderAt(path = '/seckill', services = offlineServices()) {
   );
 }
 
+function shortHashForTest(value: string) {
+  return `${value.slice(0, 10)}…${value.slice(-8)}`;
+}
+
 function NotificationConnectionProbe() {
   const runtime = useMallRuntime();
   return (
@@ -128,7 +132,7 @@ describe('Mall V2 payment consumer', () => {
       },
       sharedInterface: '@abu24k/core-artifacts',
     });
-    await waitFor(() => expect(screen.getByText('暂无可售商品')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('暂无可买商品')).toBeTruthy());
   });
 
   it('renders public taxonomy and short-lived Core media without constructing provider URLs', async () => {
@@ -229,7 +233,10 @@ describe('Mall V2 payment consumer', () => {
     expect(Array.from(navigation.querySelectorAll('a')).map((link) => link.textContent?.trim())).toEqual(labels);
     await user.click(within(navigation).getByRole('link', { name: '爆区块' }));
     expect(screen.getByRole('heading', { name: '爆区块' })).toBeTruthy();
-    expect(screen.getByText(/独立玩法入口/)).toBeTruthy();
+    expect(screen.getByText(/DEFI共识顶层逻辑/)).toBeTruthy();
+    const accountHeading = screen.getByRole('heading', { name: '我的本金权重' });
+    const nextHeading = screen.getByRole('heading', { name: '下一次爆区块' });
+    expect(Boolean(accountHeading.compareDocumentPosition(nextHeading) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
   });
 
   it('fails the block burst page closed until a production contract is configured', () => {
@@ -237,7 +244,7 @@ describe('Mall V2 payment consumer', () => {
 
     expect(screen.getByRole('heading', { name: '爆区块' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: '生产合约未配置' })).toBeTruthy();
-    expect(screen.getByText(/MicroTest 不作为生产入口/)).toBeTruthy();
+    expect(screen.getByText(/测试入口不作为生产入口/)).toBeTruthy();
     for (const label of ['打入 NPL', '领取本金', '领取奖励', '爆区块']) {
       expect(screen.getByRole('button', { name: label }).hasAttribute('disabled')).toBe(true);
     }
@@ -269,7 +276,7 @@ describe('Mall V2 payment consumer', () => {
 
       const nextSection = screen.getByRole('heading', { name: '下一次爆区块' }).closest('section')!;
       expect(await within(nextSection).findByLabelText('当前期数2 / 10')).toBeTruthy();
-      expect(within(nextSection).getByLabelText('已入本金150 NPL')).toBeTruthy();
+      expect(within(nextSection).getByLabelText('已入本金150.00 NPL')).toBeTruthy();
       expect(within(nextSection).getByLabelText('本期目标200 万亿')).toBeTruthy();
       expect(within(nextSection).getByLabelText('本期进度 0%')).toBeTruthy();
       expect(within(nextSection).getByText('暂停中')).toBeTruthy();
@@ -278,8 +285,8 @@ describe('Mall V2 payment consumer', () => {
       expect(authenticate).not.toHaveBeenCalled();
       expect(await screen.findByRole('button', { name: '切换爆区块钱包' })).toBeTruthy();
       const accountSection = screen.getByRole('heading', { name: '我的本金权重' }).closest('section')!;
-      expect(await within(accountSection).findByLabelText('未领取本金25 NPL')).toBeTruthy();
-      expect(within(accountSection).getByLabelText('待领奖励3 NPL')).toBeTruthy();
+      expect(await within(accountSection).findByLabelText('未领取本金25.00 NPL')).toBeTruthy();
+      expect(within(accountSection).getByLabelText('待领奖励3.00 NPL')).toBeTruthy();
       expect(within(accountSection).getByLabelText('本金单数1')).toBeTruthy();
       expect(await screen.findByText('本金单 #7')).toBeTruthy();
       expect(fetchSpy).toHaveBeenCalled();
@@ -361,7 +368,7 @@ describe('Mall V2 payment consumer', () => {
 
       await user.click(screen.getByRole('button', { name: '连接爆区块钱包' }));
       expect(authenticate).not.toHaveBeenCalled();
-      expect(await screen.findByLabelText('未领取本金25 NPL')).toBeTruthy();
+      expect(await screen.findByLabelText('未领取本金25.00 NPL')).toBeTruthy();
       expect(await screen.findByText('钱包余额')).toBeTruthy();
       await user.type(screen.getByLabelText('打入 NPL 数量'), '1.25');
       await user.click(screen.getByRole('button', { name: /授权并打入 NPL|打入 NPL/ }));
@@ -394,14 +401,15 @@ describe('Mall V2 payment consumer', () => {
 
     await user.click(screen.getByRole('button', { name: '连接钱包' }));
     expect(await screen.findByRole('heading', { name: buyerProfile.nickname! })).toBeTruthy();
-    expect(screen.getByText('买家 UID：10001')).toBeTruthy();
-    expect(screen.getByText('DecisionBlocked', { selector: '.order-status-item strong' })).toBeTruthy();
+    expect(screen.getByText('账号编号：10001')).toBeTruthy();
+    expect(screen.getByText('--', { selector: '.order-status-item strong' })).toBeTruthy();
+    expect(document.body.textContent).not.toContain('DecisionBlocked');
     expect(screen.getByText('2', { selector: '.order-status-item strong' })).toBeTruthy();
     expect(screen.getByText('3', { selector: '.order-status-item strong' })).toBeTruthy();
     expect(screen.getByText('1', { selector: '.order-status-item strong' })).toBeTruthy();
-    expect(screen.getByRole('heading', { name: '收益三态' })).toBeTruthy();
-    expect(screen.getByRole('heading', { name: 'BNM 积分三态' })).toBeTruthy();
-    expect(screen.getByText(/不是代币/)).toBeTruthy();
+    expect(screen.getByRole('heading', { name: '收益概览' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'BNM 积分' })).toBeTruthy();
+    expect(screen.getByText(/履约完成后会从锁定变为可领取/)).toBeTruthy();
     expect(document.body.textContent).not.toContain(deliveryOrder.buyerWallet);
   });
 
@@ -413,20 +421,19 @@ describe('Mall V2 payment consumer', () => {
     }));
 
     await user.click(screen.getByRole('button', { name: '连接钱包' }));
-    const summary = await screen.findByRole('heading', { name: '收益三态' });
+    const summary = await screen.findByRole('heading', { name: '收益概览' });
     const panel = summary.closest('section')!;
-    const bnm = within(panel).getByRole('heading', { name: 'BNM 积分三态' }).closest('article')!;
-    expect(within(bnm).getByText('1000')).toBeTruthy();
-    expect(within(bnm).getByText('300')).toBeTruthy();
-    expect(within(bnm).getByText('700')).toBeTruthy();
+    const bnm = within(panel).getByRole('heading', { name: 'BNM 积分' }).closest('article')!;
+    expect(within(bnm).getAllByText('<0.01 BNM')).toHaveLength(3);
+    expect(document.body.textContent).not.toMatch(/BNM 原子单位/);
 
     const genesis = within(panel).getByRole('heading', { name: '创世节点 NPL' }).closest('article')!;
-    expect(within(genesis).getAllByText('20')).toHaveLength(2);
-    expect(within(genesis).getAllByText('0')).toHaveLength(1);
+    expect(within(genesis).getAllByText('<0.01 NPL')).toHaveLength(2);
+    expect(within(genesis).getByText('0.00 NPL')).toBeTruthy();
 
     const regional = within(panel).getByRole('heading', { name: '区域代理 NPL' }).closest('article')!;
-    expect(within(regional).getAllByText('30')).toHaveLength(2);
-    expect(within(regional).getByText('0')).toBeTruthy();
+    expect(within(regional).getAllByText('<0.01 NPL')).toHaveLength(2);
+    expect(within(regional).getByText('0.00 NPL')).toBeTruthy();
   });
 
   it('labels seckill and shopping counts as loaded-page statistics without placeholders', async () => {
@@ -439,7 +446,7 @@ describe('Mall V2 payment consumer', () => {
     }));
 
     await user.click(screen.getByRole('button', { name: '连接钱包' }));
-    const tracking = (await screen.findByRole('heading', { name: '行为追踪' })).closest('section')!;
+    const tracking = (await screen.findByRole('heading', { name: '我的记录' })).closest('section')!;
     expect(within(tracking).queryByText('--')).toBeNull();
     expect(within(tracking).getAllByText('1')).toHaveLength(2);
     expect(within(tracking).getAllByText('已加载')).toHaveLength(2);
@@ -460,12 +467,14 @@ describe('Mall V2 payment consumer', () => {
 
       await screen.findByRole('heading', { name: product.title });
       await openProductCheckout(user);
-      expect(screen.getByText(`${blockCode}：Core 当前阻止新支付，不创建新报价。`)).toBeTruthy();
+      expect(screen.getByRole('heading', { name: '新支付当前已安全停用' })).toBeTruthy();
+      expect(screen.getByText('系统当前阻止新支付，暂不创建新报价。')).toBeTruthy();
+      expect(document.body.textContent).not.toContain(blockCode);
       expect(screen.queryByText('SIGNER_UNAVAILABLE')).toBeNull();
     },
   );
 
-  it('updates nickname only after a provider-sealed BUYER_AVATAR upload', async () => {
+  it('updates nickname only after a verified buyer avatar upload', async () => {
     const user = userEvent.setup();
     const file = new File([new Uint8Array([1, 2, 3, 4])], 'avatar.png', { type: 'image/png' });
     const intent = avatarUploadIntent();
@@ -615,7 +624,7 @@ describe('Mall V2 payment consumer', () => {
 
     await user.click(screen.getByRole('button', { name: /42码 \/ 黑金/ }));
     await prepareDeliveryTarget(user);
-    await user.click(screen.getByRole('button', { name: '创建签名报价' }));
+    await user.click(screen.getByRole('button', { name: '生成付款报价' }));
 
     await screen.findByRole('heading', { name: '库存已预留' });
     expect(createOrdinaryQuote).toHaveBeenCalledWith('buyer-session', {
@@ -636,18 +645,18 @@ describe('Mall V2 payment consumer', () => {
     expect(screen.getByText('82.80 USDT')).toBeTruthy();
     expect(screen.getAllByText('10.00 USDT').length).toBeGreaterThan(0);
     expect(screen.getAllByText('94.00 USDT').length).toBeGreaterThan(0);
-    expect(screen.getByText(quote.intent.nplPaymentAmount)).toBeTruthy();
-    expect(screen.getByText(/pay · BSC 56/)).toBeTruthy();
-    expect(screen.getByText(/USDT 已按 18 位原子单位换算为两位展示/)).toBeTruthy();
+    expect(screen.getByText('72.00 NPL')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: '付款明细' })).toBeTruthy();
+    expect(screen.getByText(/实际支付仍以系统报价为准/)).toBeTruthy();
     expect(screen.getByText('当前 0.00 USDT')).toBeTruthy();
     expect(screen.getByText('需要授权')).toBeTruthy();
     expect(screen.getByText('额度足够')).toBeTruthy();
     expect(screen.getByRole('heading', { name: '完整收货信息' })).toBeTruthy();
     expect(screen.getByText(buyerSavedAddress.phone)).toBeTruthy();
     expect(screen.getByText(`${buyerSavedAddress.province} / ${buyerSavedAddress.city} / ${buyerSavedAddress.district}`)).toBeTruthy();
-    expect(screen.getByText(/行政区 210202 将写入订单快照/)).toBeTruthy();
-    expect(screen.getByRole('button', { name: /支付并广播/ }).hasAttribute('disabled')).toBe(true);
-    expect(screen.getByText(/manifest 尚未授权部署/)).toBeTruthy();
+    expect(screen.getByText(/付款成功后，商品、规格、数量、履约方式与所在行政区将写入订单/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: /确认支付/ }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByText(/当前支付尚未通过系统上线开关/)).toBeTruthy();
   });
 
   it('renders exact Core finality and never promotes a submitted hash to final', async () => {
@@ -664,12 +673,12 @@ describe('Mall V2 payment consumer', () => {
     await openProductCheckout(user);
     await user.click(screen.getByRole('button', { name: /42码 \/ 黑金/ }));
     await prepareDeliveryTarget(user);
-    await user.click(screen.getByRole('button', { name: '创建签名报价' }));
+    await user.click(screen.getByRole('button', { name: '生成付款报价' }));
     await user.click(await screen.findByRole('link', { name: /核对报价/ }));
-    await user.click(screen.getByRole('button', { name: '刷新 Core 投影' }));
+    await user.click(screen.getByRole('button', { name: '刷新支付状态' }));
 
-    await waitFor(() => expect(screen.getByText(HASH_3)).toBeTruthy());
-    expect(screen.getAllByText('待 Indexer')).toHaveLength(2);
+    await waitFor(() => expect(screen.getByTitle(HASH_3)).toBeTruthy());
+    expect(screen.getAllByText('确认中').length).toBeGreaterThan(0);
     expect(screen.getByText('--/15')).toBeTruthy();
   });
 
@@ -683,8 +692,8 @@ describe('Mall V2 payment consumer', () => {
     await user.click(screen.getByRole('button', { name: '连接钱包' }));
     await openProductCheckout(user);
     await user.click(screen.getByRole('button', { name: /42码 \/ 黑金/ }));
-    expect(screen.getByRole('button', { name: '创建签名报价' }).hasAttribute('disabled')).toBe(true);
-    expect(screen.getByText('请先选择 Core 已保存的收货地址')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '生成付款报价' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByText('请先选择已保存的收货地址')).toBeTruthy();
     expect(createOrdinaryQuote).not.toHaveBeenCalled();
     expect(screen.queryByRole('heading', { name: '库存已预留' })).toBeNull();
   });
@@ -716,19 +725,19 @@ describe('Mall V2 payment consumer', () => {
     await openProductCheckout(user);
     await user.click(screen.getByRole('button', { name: /42码 \/ 黑金/ }));
     await prepareDeliveryTarget(user);
-    await user.click(screen.getByRole('button', { name: '创建签名报价' }));
+    await user.click(screen.getByRole('button', { name: '生成付款报价' }));
     await user.click(await screen.findByRole('link', { name: /核对报价/ }));
     await user.click(screen.getByRole('checkbox', { name: /无限额度授权风险/ }));
-    await user.click(screen.getByRole('button', { name: /支付并广播/ }));
+    await user.click(screen.getByRole('button', { name: /确认支付/ }));
 
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('submission network unavailable'));
-    expect(screen.getByText('链上交易待恢复跟踪')).toBeTruthy();
-    expect(screen.getByRole('button', { name: /支付并广播/ }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: '重试提交付款记录' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /确认支付/ }).hasAttribute('disabled')).toBe(true);
     expect(services.wallet.broadcastPayment).toHaveBeenCalledTimes(1);
     expect(saveSubmission).toHaveBeenCalledWith(pendingRecord(quote.orderId, HASH_3));
 
-    await user.click(screen.getByRole('button', { name: '重试提交 TxHash' }));
-    await waitFor(() => expect(screen.queryByText('链上交易待恢复跟踪')).toBeNull());
+    await user.click(screen.getByRole('button', { name: '重试提交付款记录' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: '重试提交付款记录' })).toBeNull());
     expect(submitPayment).toHaveBeenCalledTimes(2);
     expect(getPayment).toHaveBeenCalledTimes(1);
     expect(services.wallet.broadcastPayment).toHaveBeenCalledTimes(1);
@@ -748,13 +757,13 @@ describe('Mall V2 payment consumer', () => {
     renderAt('/checkout/review', services);
 
     await user.click(screen.getByRole('button', { name: '连接钱包' }));
-    await screen.findByText('链上交易待恢复跟踪');
-    await user.click(screen.getByRole('button', { name: '重试提交' }));
+    await screen.findByRole('button', { name: '重试提交付款凭证' });
+    await user.click(screen.getByRole('button', { name: '重试提交付款凭证' }));
 
-    await waitFor(() => expect(screen.queryByText('链上交易待恢复跟踪')).toBeNull());
+    await waitFor(() => expect(screen.queryByRole('button', { name: '重试提交付款记录' })).toBeNull());
     expect(submitPayment).toHaveBeenCalledWith('buyer-session', { orderId: quote.orderId, txHash: HASH_3 });
     expect(services.wallet.broadcastPayment).not.toHaveBeenCalled();
-    expect(screen.getByText(HASH_3)).toBeTruthy();
+    expect(screen.getByTitle(HASH_3)).toBeTruthy();
   });
 
   it('keeps a submitted hash until the Core projection is recoverable', async () => {
@@ -779,18 +788,18 @@ describe('Mall V2 payment consumer', () => {
     await openProductCheckout(user);
     await user.click(screen.getByRole('button', { name: /42码 \/ 黑金/ }));
     await prepareDeliveryTarget(user);
-    await user.click(screen.getByRole('button', { name: '创建签名报价' }));
+    await user.click(screen.getByRole('button', { name: '生成付款报价' }));
     await user.click(await screen.findByRole('link', { name: /核对报价/ }));
     await user.click(screen.getByRole('checkbox', { name: /无限额度授权风险/ }));
-    await user.click(screen.getByRole('button', { name: /支付并广播/ }));
+    await user.click(screen.getByRole('button', { name: /确认支付/ }));
 
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('projection unavailable'));
-    expect(screen.getByText('链上交易待恢复跟踪')).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: '刷新支付状态' }).length).toBeGreaterThan(0);
     expect(saveSubmission).toHaveBeenLastCalledWith(pendingRecord(quote.orderId, HASH_3, 'AWAITING_PROJECTION'));
     expect(submitPayment).toHaveBeenCalledTimes(1);
 
-    await user.click(screen.getByRole('button', { name: '刷新投影' }));
-    await waitFor(() => expect(screen.queryByText('链上交易待恢复跟踪')).toBeNull());
+    const refreshButtons = screen.getAllByRole('button', { name: '刷新支付状态' });
+    await user.click(refreshButtons.at(-1)!);
     expect(submitPayment).toHaveBeenCalledTimes(1);
     expect(getPayment).toHaveBeenCalledTimes(2);
     expect(services.wallet.broadcastPayment).toHaveBeenCalledTimes(1);
@@ -804,22 +813,22 @@ describe('Mall V2 payment consumer', () => {
     expect(screen.getByRole('dialog', { name: '秒杀规则' }).getAttribute('aria-modal')).toBe('true');
     expect(screen.getByText(/主场固定 60 分钟/)).toBeTruthy();
     expect(screen.getByText(/增加 30 秒/)).toBeTruthy();
-    expect(screen.getByText(/区块时间决定订单归类/)).toBeTruthy();
+    expect(screen.getByText(/系统按付款最终确认时间判断/)).toBeTruthy();
     expect(screen.getByText(/70% USDT \+ 30% 等值 NPL/)).toBeTruthy();
-    expect(screen.getByText(/Core 签名的五分钟精确报价/)).toBeTruthy();
+    expect(screen.getByText(/5 分钟有效报价/)).toBeTruthy();
     expect(screen.getByText(/USDT 标价 1:1.*后台积分/)).toBeTruthy();
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(document.activeElement).toBe(screen.getByRole('button', { name: '规则说明' }));
-    expect(await screen.findByText('暂无已发布场次')).toBeTruthy();
-    expect(screen.getByRole('button', { name: '配置秒杀订单' }).hasAttribute('disabled')).toBe(true);
+    expect(await screen.findByText('暂无活动')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '立即抢购' }).hasAttribute('disabled')).toBe(true);
   });
 
   it.each([
     ['PREHEAT', '预热中'],
-    ['LIVE', '主场和接力均以 Core 时间锚'],
-    ['SETTLING', '大奖结算窗口'],
-    ['SETTLED', '本场赢家'],
+    ['LIVE', '活动进行中'],
+    ['SETTLING', '抢购已结束'],
+    ['SETTLED', '本场中奖用户'],
   ] as const)('renders authoritative %s seckill state without deriving phase locally', async (phase, expected) => {
     const current = seckillSession({
       phase,
@@ -835,9 +844,9 @@ describe('Mall V2 payment consumer', () => {
     if (phase === 'LIVE') {
       expect(screen.getByText('00:59:00')).toBeTruthy();
       expect(screen.getByText('00:01:00')).toBeTruthy();
-      expect(screen.getByText(seckillGovernanceActionId)).toBeTruthy();
-      expect(screen.getByText(seckillRulesContentHash)).toBeTruthy();
-      expect(screen.getByText(seckillPublicationTxHash)).toBeTruthy();
+      expect(screen.getByTitle(seckillGovernanceActionId)).toBeTruthy();
+      expect(screen.getByTitle(seckillRulesContentHash)).toBeTruthy();
+      expect(screen.getByTitle(seckillPublicationTxHash)).toBeTruthy();
     }
   });
 
@@ -852,13 +861,13 @@ describe('Mall V2 payment consumer', () => {
       listSeckillSessionHistory,
     }));
 
-    expect(await screen.findByText(/主场和接力均以 Core 时间锚/)).toBeTruthy();
+    expect(await screen.findByText(/活动进行中/)).toBeTruthy();
     await act(async () => {
       slowInitialHistory.resolve({ items: [], nextCursor: null });
     });
 
-    expect(screen.getByText(/主场和接力均以 Core 时间锚/)).toBeTruthy();
-    expect(screen.queryByText('暂无已发布场次')).toBeNull();
+    expect(screen.getByText(/活动进行中/)).toBeTruthy();
+    expect(screen.queryByText('暂无活动')).toBeNull();
   });
 
   it('fails seckill configuration closed and reloads once when a Core deadline reaches zero', async () => {
@@ -867,8 +876,8 @@ describe('Mall V2 payment consumer', () => {
     renderAt('/seckill', readyServices({ getCurrentSeckillSession }));
 
     expect(await screen.findByText('00:00:00')).toBeTruthy();
-    expect(screen.getByRole('button', { name: '配置秒杀订单' }).hasAttribute('disabled')).toBe(true);
-    expect(screen.getByText(/deadline 已到 0/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: '立即抢购' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByText(/倒计时已结束/)).toBeTruthy();
     await waitFor(() => expect(getCurrentSeckillSession).toHaveBeenCalledTimes(2));
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(getCurrentSeckillSession).toHaveBeenCalledTimes(2);
@@ -885,7 +894,7 @@ describe('Mall V2 payment consumer', () => {
 
     expect(await screen.findByText('00:00:00')).toBeTruthy();
     await waitFor(() => expect(getCurrentSeckillSession).toHaveBeenCalledTimes(2));
-    expect(screen.getByRole('button', { name: '配置秒杀订单' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: '立即抢购' }).hasAttribute('disabled')).toBe(true);
     expect(screen.queryByRole('button', { name: '处理中' })).toBeNull();
 
     secondLoad.resolve(expired);
@@ -965,11 +974,11 @@ describe('Mall V2 payment consumer', () => {
     const user = userEvent.setup();
     renderAt('/seckill', services);
 
-    expect(await screen.findByText(/链上最终购买，Core 已发布接力延长 30 秒/)).toBeTruthy();
+    expect(await screen.findByText(/成功抢购，接力时间 \+30 秒/)).toBeTruthy();
     expect(screen.getByText('实时')).toBeTruthy();
     await user.click(screen.getByRole('button', { name: '历史战报' }));
     expect(screen.getByText(`赢家 0x1111…1111`)).toBeTruthy();
-    expect(screen.getByText(seckillPrizeExecutionTxHash)).toBeTruthy();
+    expect(screen.getByTitle(seckillPrizeExecutionTxHash)).toBeTruthy();
   });
 
   it('renders candidate review, rollover, quarantine and every prize payout state from Core', async () => {
@@ -1015,13 +1024,13 @@ describe('Mall V2 payment consumer', () => {
     }));
 
     expect(await screen.findByText('候选审核中')).toBeTruthy();
-    expect(screen.getByText(seckillCandidateOrderId)).toBeTruthy();
-    expect(screen.getByText('区块 32000000 · Log 4')).toBeTruthy();
+    expect(screen.getByTitle(seckillCandidateOrderId)).toBeTruthy();
+    expect(screen.getByText('区块 32000000 · 记录 4')).toBeTruthy();
     await user.click(screen.getByRole('button', { name: '历史战报' }));
-    for (const label of ['Available', 'Requested', 'Submitted', 'Settled', '已滚入下一场', '已隔离']) {
+    for (const label of ['可用', '已申请', '已提交', '已到账', '已滚入下一场', '已隔离']) {
       expect(screen.getAllByText(label).length).toBeGreaterThan(0);
     }
-    expect(screen.getByText(seckillPrizeExecutionTxHash)).toBeTruthy();
+    expect(screen.getByTitle(seckillPrizeExecutionTxHash)).toBeTruthy();
   });
 
   it('binds the current Core session to the existing dual-quote checkout', async () => {
@@ -1035,7 +1044,7 @@ describe('Mall V2 payment consumer', () => {
     const user = userEvent.setup();
     renderAt('/seckill', services);
 
-    const configure = await screen.findByRole('button', { name: '配置秒杀订单' });
+    const configure = await screen.findByRole('button', { name: '立即抢购' });
     await user.click(configure);
     expect(screen.queryByRole('heading', { name: '秒杀订单配置' })).toBeNull();
     expect(screen.getByRole('dialog', { name: '进入配置前确认规则' })).toBeTruthy();
@@ -1043,7 +1052,7 @@ describe('Mall V2 payment consumer', () => {
     expect(screen.getByRole('heading', { name: '秒杀订单配置' })).toBeTruthy();
     await user.click(screen.getByRole('button', { name: '连接钱包' }));
     await prepareDeliveryTarget(user);
-    await user.click(screen.getByRole('button', { name: '创建双腿秒杀报价' }));
+    await user.click(screen.getByRole('button', { name: '生成秒杀报价' }));
 
     await screen.findByRole('heading', { name: '库存已预留' });
     expect(createSeckillQuote).toHaveBeenCalledWith('buyer-session', seckillSessionId, expect.objectContaining({
@@ -1066,7 +1075,7 @@ describe('Mall V2 payment consumer', () => {
       listCatalog: vi.fn().mockResolvedValue([mismatchedProduct]),
     }));
 
-    await user.click(await screen.findByRole('button', { name: '配置秒杀订单' }));
+    await user.click(await screen.findByRole('button', { name: '立即抢购' }));
     await user.click(screen.getByRole('button', { name: '我已阅读并确认规则' }));
 
     expect((await screen.findByRole('alert')).textContent).toContain('overlay 不一致');
@@ -1104,7 +1113,7 @@ describe('Mall V2 payment consumer', () => {
     expect(screen.getByLabelText('国家')).toHaveProperty('value', 'CN');
     await user.selectOptions(screen.getByLabelText('城市'), '210200');
     expect(screen.queryByRole('heading', { name: otherCityStore.name })).toBeNull();
-    expect(within(screen.getByLabelText('区县')).getByRole('option', { name: '区县代码 210202' })).toBeTruthy();
+    expect(within(screen.getByLabelText('区县')).getByRole('option', { name: '区县 210202' })).toBeTruthy();
     await user.selectOptions(screen.getByLabelText('区县'), store.regionCode);
     expect(screen.queryByRole('heading', { name: fartherStore.name })).toBeNull();
     await user.selectOptions(screen.getByLabelText('区县'), '');
@@ -1128,9 +1137,9 @@ describe('Mall V2 payment consumer', () => {
     renderAt('/stores', readyServices({ listStores }));
 
     await screen.findByRole('heading', { name: store.name });
-    await user.click(screen.getByRole('button', { name: '重新同步门店' }));
+    await user.click(screen.getByRole('button', { name: '刷新门店' }));
 
-    expect(await screen.findByText('门店同步失败')).toBeTruthy();
+    expect(await screen.findByText('门店加载失败')).toBeTruthy();
     expect(screen.queryByRole('heading', { name: store.name })).toBeNull();
     expect(screen.queryByRole('img', { name: new RegExp(`${store.name} 门店图片`) })).toBeNull();
   });
@@ -1161,13 +1170,13 @@ describe('Mall V2 payment consumer', () => {
       storeId: store.storeId,
     });
     expect(screen.getByText(`${store.name} · ${store.address}`)).toBeTruthy();
-    expect(screen.getByRole('button', { name: '创建签名报价' }).hasAttribute('disabled')).toBe(false);
-    await user.click(screen.getByRole('button', { name: '创建签名报价' }));
+    expect(screen.getByRole('button', { name: '生成付款报价' }).hasAttribute('disabled')).toBe(false);
+    await user.click(screen.getByRole('button', { name: '生成付款报价' }));
     await user.click(await screen.findByRole('link', { name: /核对报价/ }));
     expect(screen.getByRole('heading', { name: '完整自提信息' })).toBeTruthy();
     expect(within(screen.getByRole('region', { name: '完整自提信息' })).getByText(store.businessHours)).toBeTruthy();
     expect(screen.getByText(/营业时间内到店/)).toBeTruthy();
-    expect(screen.getByText(/行政区 210202 将写入订单快照/)).toBeTruthy();
+    expect(screen.getByText('210202')).toBeTruthy();
   });
 
   it('fails closed when Core cannot bind the buyer saved address', async () => {
@@ -1186,7 +1195,7 @@ describe('Mall V2 payment consumer', () => {
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('地址目标服务暂不可用'));
     expect(createBuyerAddressTarget).toHaveBeenCalledWith('buyer-session', buyerSavedAddress.addressId, 'mall-test-idempotency');
     expect(screen.queryByLabelText('详细地址')).toBeNull();
-    expect(screen.getByRole('button', { name: '创建签名报价' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: '生成付款报价' }).hasAttribute('disabled')).toBe(true);
   });
 
   it('uploads and submits evidence for an enabled buyer exchange action', async () => {
@@ -1220,7 +1229,7 @@ describe('Mall V2 payment consumer', () => {
     expect(screen.getByText('SF1234567890')).toBeTruthy();
     expect(screen.getByText('易碎品，请当面签收')).toBeTruthy();
     expect(screen.getByText('运输中 · 05/18 13:00')).toBeTruthy();
-    expect(screen.getByText(deliveryOrder.exactAmounts.bnmAmount)).toBeTruthy();
+    expect(screen.getByText('120.00 BNM')).toBeTruthy();
     expect(screen.getByText(/13800138000/)).toBeTruthy();
     expect(screen.getByText('PARTIAL_LEGACY')).toBeTruthy();
     expect(screen.getByText(/OPEN →/)).toBeTruthy();
@@ -1228,11 +1237,11 @@ describe('Mall V2 payment consumer', () => {
     const exchange = screen.getByRole('button', { name: '申请换货' });
     expect(exchange.hasAttribute('disabled')).toBe(false);
     await user.click(exchange);
-    await user.type(screen.getByLabelText('原因代码'), 'package_damaged');
+    await user.type(screen.getByLabelText('处理原因'), 'package_damaged');
     await user.upload(screen.getByLabelText(/证据文件（可选）/), file);
     await user.click(screen.getByRole('button', { name: /封装证据并提交/ }));
 
-    expect(await screen.findByText('操作已由 Core 接收，订单状态已重新同步。')).toBeTruthy();
+    expect(await screen.findByText('操作已由系统接收，订单状态已重新同步。')).toBeTruthy();
     expect(createMediaUploadIntent).toHaveBeenCalledWith('buyer-session', {
       purpose: 'FULFILLMENT_EVIDENCE',
       resourceType: 'ORDER',
@@ -1280,7 +1289,7 @@ describe('Mall V2 payment consumer', () => {
     renderAt('/assets/orders', services);
 
     await user.click(screen.getByRole('button', { name: '连接钱包' }));
-    expect(await screen.findByText(deliveryOrder.paymentTxHash!)).toBeTruthy();
+    expect(await screen.findByTitle(deliveryOrder.paymentTxHash!)).toBeTruthy();
     expect(screen.getByText('数量').nextElementSibling?.textContent).toBe(deliveryOrder.quantity);
     await user.click(screen.getByRole('button', { name: '加载更多订单' }));
     await screen.findByText('秒杀 · 快递订单');
@@ -1307,7 +1316,7 @@ describe('Mall V2 payment consumer', () => {
 
     view.unmount();
     renderAt('/assets/orders', readyServices());
-    expect(screen.getByText('ConfigurationRequired：客服入口未配置')).toBeTruthy();
+    expect(screen.getByText('客服入口未配置')).toBeTruthy();
     expect(screen.queryByRole('link', { name: '联系客服' })).toBeNull();
   });
 
@@ -1337,9 +1346,9 @@ describe('Mall V2 payment consumer', () => {
 
     await user.click(screen.getByRole('button', { name: '连接钱包' }));
     await user.click(await screen.findByRole('button', { name: label }));
-    await user.type(screen.getByLabelText('原因代码'), 'buyer_confirmed');
+    await user.type(screen.getByLabelText('处理原因'), 'buyer_confirmed');
     await user.click(screen.getByRole('button', { name: /封装证据并提交/ }));
-    expect(await screen.findByText('操作已由 Core 接收，订单状态已重新同步。')).toBeTruthy();
+    expect(await screen.findByText('操作已由系统接收，订单状态已重新同步。')).toBeTruthy();
     expect(createOrderActionEvidence).toHaveBeenCalledWith('buyer-session', deliveryOrder.orderId, {
       action,
       reasonCode: 'BUYER_CONFIRMED',
@@ -1372,11 +1381,11 @@ describe('Mall V2 payment consumer', () => {
 
     await user.click(screen.getByRole('button', { name: '连接钱包' }));
     await user.click(await screen.findByRole('button', { name: '申请换货' }));
-    await user.type(screen.getByLabelText('原因代码'), 'package_damaged');
+    await user.type(screen.getByLabelText('处理原因'), 'package_damaged');
     await user.click(screen.getByRole('button', { name: /封装证据并提交/ }));
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('命令提交中断'));
     await user.click(screen.getByRole('button', { name: /封装证据并提交/ }));
-    expect(await screen.findByText('操作已由 Core 接收，订单状态已重新同步。')).toBeTruthy();
+    expect(await screen.findByText('操作已由系统接收，订单状态已重新同步。')).toBeTruthy();
     expect(createOrderActionEvidence).toHaveBeenCalledTimes(1);
     expect(requestExchange).toHaveBeenCalledTimes(2);
     expect(requestExchange.mock.calls[0]).toEqual(requestExchange.mock.calls[1]);
@@ -1402,7 +1411,7 @@ describe('Mall V2 payment consumer', () => {
     await user.click(screen.getByRole('button', { name: '连接钱包' }));
     expect((await screen.findByRole('button', { name: '平台接管' })).hasAttribute('disabled')).toBe(true);
     expect(screen.getByRole('button', { name: '自提核销' }).hasAttribute('disabled')).toBe(true);
-    expect(screen.getByText(/尚未发布 OPEN_TAKEOVER/)).toBeTruthy();
+    expect(screen.getByText(/当前订单暂不支持买家直接发起平台接管/)).toBeTruthy();
     expect(screen.getByText(/仅授权门店或平台角色/)).toBeTruthy();
     expect(screen.queryByLabelText(/证据$/)).toBeNull();
   });
@@ -1427,22 +1436,23 @@ describe('Mall V2 payment consumer', () => {
 
     await user.click(screen.getByRole('tab', { name: '消费购物' }));
     await user.click(screen.getByRole('button', { name: '连接钱包' }));
-    expect(await screen.findByText(ordinaryShoppingStatement.paymentTxHash)).toBeTruthy();
+    expect(await screen.findByTitle(ordinaryShoppingStatement.paymentTxHash)).toBeTruthy();
     expect(screen.getByText('14.00 USDT')).toBeTruthy();
     expect(screen.getByText('0.20 USDT')).toBeTruthy();
     expect(screen.getByText('13.80 USDT')).toBeTruthy();
     expect(screen.getByText('1.00 USDT')).toBeTruthy();
     expect(screen.getByText('15.00 USDT')).toBeTruthy();
-    expect(screen.getByText(`${ordinaryShoppingStatement.paymentAmounts.nplPaymentAmount} 原子单位`)).toBeTruthy();
-    expect(screen.getByText(`${ordinaryShoppingStatement.bnm.amount} 原子单位`)).toBeTruthy();
+    expect(screen.getByText('600.00 NPL')).toBeTruthy();
+    expect(screen.getByText('20.00 BNM')).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/原子单位/);
     expect(screen.getByText('可用')).toBeTruthy();
     expect(screen.getByText(ordinaryShoppingStatement.createdAt)).toBeTruthy();
     expect(screen.getByText(ordinaryShoppingStatement.paymentFinalizedAt)).toBeTruthy();
     expect(screen.getByText(ordinaryShoppingStatement.fulfilledAt!)).toBeTruthy();
-    for (const journalId of ordinaryShoppingStatement.bnm.journalIds) expect(screen.getByText(journalId)).toBeTruthy();
+    for (const journalId of ordinaryShoppingStatement.bnm.journalIds) expect(screen.getByTitle(journalId)).toBeTruthy();
 
     await user.click(screen.getByRole('button', { name: '加载下一页' }));
-    expect(await screen.findByText(fallbackShoppingStatement.paymentTxHash)).toBeTruthy();
+    expect(await screen.findByTitle(fallbackShoppingStatement.paymentTxHash)).toBeTruthy();
     expect(screen.getByText('边界转普通订单')).toBeTruthy();
     expect(screen.getByText('已锁定')).toBeTruthy();
     expect(screen.getByText('尚未最终履约')).toBeTruthy();
@@ -1495,7 +1505,7 @@ describe('Mall V2 payment consumer', () => {
 
     const records = await screen.findByLabelText('秒杀奖项记录');
     expect(within(records).getByText('候选审核中')).toBeTruthy();
-    expect(within(records).getByText(seckillCandidateOrderId)).toBeTruthy();
+    expect(within(records).getByTitle(seckillCandidateOrderId)).toBeTruthy();
     expect(within(records).getByText('已滚入下一场')).toBeTruthy();
     expect(within(records).queryByText(/DecisionBlocked：秒杀奖项记录未发布/)).toBeNull();
     await user.click(screen.getByRole('button', { name: '连接钱包' }));
@@ -1527,17 +1537,16 @@ describe('Mall V2 payment consumer', () => {
 
     await user.click(screen.getByRole('button', { name: '连接钱包' }));
     await screen.findByRole('heading', { name: 'NPL 收益' });
-    for (const label of ['Locked', 'Available', 'Requested', 'Submitted', 'Settled']) {
+    for (const label of ['锁定中', '可用', '已申请', '已提交', '已结算']) {
       expect(screen.getAllByText(label).length).toBeGreaterThan(0);
     }
     expect(screen.getByText(new RegExp(`${settlementTransferId.slice(0, 10)}…${settlementTransferId.slice(-8)}`))).toBeTruthy();
-    expect(screen.getByText(finalExecutionTxHash)).toBeTruthy();
+    expect(screen.getByTitle(finalExecutionTxHash)).toBeTruthy();
     for (const label of ['创世', '直推', '区县', '城市', '省', '大区', '运维', '取整余数']) {
       expect(screen.getAllByText(label).length).toBeGreaterThan(0);
     }
-    expect(screen.getByLabelText('BNM 账户总额').textContent).toContain('700');
-    expect(screen.getByLabelText('BNM 账户总额').textContent).toContain('300');
-    await user.click(screen.getByRole('button', { name: '签名申请结算 200 NPL' }));
+    expect(screen.getByLabelText('BNM 账户总额').textContent).toContain('<0.01 BNM');
+    await user.click(screen.getByRole('button', { name: '签名申请结算 <0.01 NPL' }));
 
     await waitFor(() => expect(createSettlementIntent).toHaveBeenCalledWith('buyer-session', {
       rail: 'REWARD_NPL',
@@ -1610,7 +1619,7 @@ describe('Mall V2 payment consumer', () => {
     await user.click(screen.getByRole('button', { name: '连接钱包' }));
     await screen.findByRole('heading', { name: 'NPL 收益' });
     expect(screen.queryByRole('heading', { name: '秒杀 USDT 奖金' })).toBeNull();
-    expect(screen.queryByRole('button', { name: /签名申请结算 60/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /签名申请结算 <0.01 USDT/ })).toBeNull();
   });
 
   it('hides genesis attribution when Core does not project genesis eligibility', async () => {
@@ -1672,10 +1681,10 @@ describe('Mall V2 payment consumer', () => {
     expect(screen.getByRole('heading', { name: 'BNM 已锁定' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'BNM 已可用' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: '活动通知' })).toBeTruthy();
-    expect(screen.getByText('物流单号哈希')).toBeTruthy();
+    expect(screen.getByText('物流单号凭证')).toBeTruthy();
     expect(screen.getByText('自提核销')).toBeTruthy();
-    expect(screen.getAllByText('Locked（锁定）')).toHaveLength(2);
-    expect(screen.getAllByText('Available（可用）')).toHaveLength(1);
+    expect(screen.getAllByText('锁定中')).toHaveLength(2);
+    expect(screen.getAllByText('可用')).toHaveLength(1);
     expect(screen.getByText('活动参数 · 版本')).toBeTruthy();
     expect(screen.getByText(finalExecutionTxHash)).toBeTruthy();
     expect(screen.getByRole('button', { name: `重新验证或切换钱包，当前 ${BUYER}` })).toBeTruthy();
@@ -2041,7 +2050,7 @@ function servicesWith(overrides: Partial<CoreClient>): MallServices {
 
 async function prepareDeliveryTarget(user: ReturnType<typeof userEvent.setup>) {
   await user.click(await screen.findByRole('button', { name: '使用默认地址' }));
-  await screen.findByText('Core 目标已验证');
+  await screen.findByText('收货信息已验证');
 }
 
 async function openProductCheckout(user: ReturnType<typeof userEvent.setup>) {

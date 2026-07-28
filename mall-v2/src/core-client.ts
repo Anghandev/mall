@@ -821,7 +821,7 @@ async function requestJson<T>(fetcher: FetchLike, url: string, init?: RequestIni
 
 function assertArtifactVersion(value: string) {
   if (value !== artifactVersion) {
-    throw new CoreClientError('ArtifactVersionMismatch', '商城与 Core 安全接口版本不一致');
+    throw new CoreClientError('ArtifactVersionMismatch', '商城安全服务版本不一致，请刷新页面');
   }
 }
 
@@ -829,7 +829,7 @@ function parseBootstrap(value: unknown): CorePaymentAvailability {
   const response = objectValue(value);
   assertArtifactVersion(stringValue(response.artifactVersion));
   if (response.status !== 'CORE_API_READY') {
-    throw new CoreClientError('InvalidResponse', 'Core 安全状态响应无效');
+    throw new CoreClientError('InvalidResponse', '商城安全状态响应无效');
   }
   const readiness = objectValue(response.readiness);
   const paymentDecisionBlocked = stringArray(readiness.paymentDecisionBlocked);
@@ -854,7 +854,7 @@ function parseWalletSession(value: unknown): WalletSession {
   const response = objectValue(value);
   const roles = stringArray(response.roles);
   if (!roles.every((role): role is UserRole => userRoles.includes(role as UserRole))) {
-    throw new CoreClientError('InvalidResponse', 'Core 返回了未知钱包角色');
+    throw new CoreClientError('InvalidResponse', '商城安全服务返回了未知钱包角色');
   }
   return {
     token: stringValue(response.token),
@@ -1873,7 +1873,7 @@ function parseNotificationEndpoint(value: unknown): NotificationEndpointProjecti
 
 function objectValue(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new CoreClientError('InvalidResponse', 'Core 响应格式无效');
+    throw new CoreClientError('InvalidResponse', '商城安全服务响应格式无效');
   }
   return value as Record<string, unknown>;
 }
@@ -1887,52 +1887,52 @@ function assertOnlyKeys(value: Record<string, unknown>, keys: readonly string[],
 
 function stringValue(value: unknown) {
   if (typeof value !== 'string' || value.length === 0) {
-    throw new CoreClientError('InvalidResponse', 'Core 响应字段无效');
+    throw new CoreClientError('InvalidResponse', '商城安全服务响应字段无效');
   }
   return value;
 }
 
 function boundedStringValue(value: unknown, maxLength: number) {
   if (typeof value !== 'string' || value.length > maxLength) {
-    throw new CoreClientError('InvalidResponse', 'Core 响应文本字段无效');
+    throw new CoreClientError('InvalidResponse', '商城安全服务响应文本字段无效');
   }
   return value;
 }
 
 function boundedNonEmptyStringValue(value: unknown, maxLength: number) {
   const text = stringValue(value);
-  if (text.length > maxLength) throw new CoreClientError('InvalidResponse', 'Core 响应文本字段过长');
+  if (text.length > maxLength) throw new CoreClientError('InvalidResponse', '商城安全服务响应文本字段过长');
   return text;
 }
 
 function boundedNumberValue(value: unknown, minimum: number, maximum: number) {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < minimum || value > maximum) {
-    throw new CoreClientError('InvalidResponse', 'Core 响应数值字段无效');
+    throw new CoreClientError('InvalidResponse', '商城安全服务响应数值字段无效');
   }
   return value;
 }
 
 function arrayValue(value: unknown): readonly unknown[] {
-  if (!Array.isArray(value)) throw new CoreClientError('InvalidResponse', 'Core 响应列表字段无效');
+  if (!Array.isArray(value)) throw new CoreClientError('InvalidResponse', '商城安全服务响应列表字段无效');
   return value;
 }
 
 function enumValue<T extends string>(value: unknown, values: readonly T[]): T {
   if (typeof value !== 'string' || !values.includes(value as T)) {
-    throw new CoreClientError('InvalidResponse', 'Core 响应枚举字段无效');
+    throw new CoreClientError('InvalidResponse', '商城安全服务响应枚举字段无效');
   }
   return value as T;
 }
 
 function addressValue(value: unknown) {
   const address = stringValue(value);
-  if (!/^0x[0-9a-fA-F]{40}$/.test(address)) throw new CoreClientError('InvalidResponse', 'Core 响应地址无效');
+  if (!/^0x[0-9a-fA-F]{40}$/.test(address)) throw new CoreClientError('InvalidResponse', '商城安全服务响应地址无效');
   return address;
 }
 
 function bytes32Value(value: unknown) {
   const hash = stringValue(value);
-  if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) throw new CoreClientError('InvalidResponse', 'Core 响应哈希无效');
+  if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) throw new CoreClientError('InvalidResponse', '商城安全服务响应编号无效');
   return hash;
 }
 
@@ -1942,13 +1942,13 @@ function optionalBytes32Value(value: unknown) {
 
 function atomicValue(value: unknown) {
   const amount = stringValue(value);
-  if (!/^(0|[1-9][0-9]*)$/.test(amount)) throw new CoreClientError('InvalidResponse', 'Core 响应金额无效');
+  if (!/^(0|[1-9][0-9]*)$/.test(amount)) throw new CoreClientError('InvalidResponse', '商城安全服务响应金额无效');
   return amount;
 }
 
 function isoValue(value: unknown) {
   const timestamp = stringValue(value);
-  if (!Number.isFinite(Date.parse(timestamp))) throw new CoreClientError('InvalidResponse', 'Core 响应时间无效');
+  if (!Number.isFinite(Date.parse(timestamp))) throw new CoreClientError('InvalidResponse', '商城安全服务响应时间无效');
   return timestamp;
 }
 
@@ -1958,26 +1958,26 @@ function optionalIsoValue(value: unknown) {
 
 function positiveIntegerValue(value: unknown) {
   if (!Number.isSafeInteger(value) || Number(value) < 1) {
-    throw new CoreClientError('InvalidResponse', 'Core 响应正整数无效');
+    throw new CoreClientError('InvalidResponse', '商城安全服务响应数字无效');
   }
   return Number(value);
 }
 
 function nonNegativeIntegerValue(value: unknown) {
   if (!Number.isSafeInteger(value) || Number(value) < 0) {
-    throw new CoreClientError('InvalidResponse', 'Core 响应非负整数无效');
+    throw new CoreClientError('InvalidResponse', '商城安全服务响应数字无效');
   }
   return Number(value);
 }
 
 function booleanValue(value: unknown) {
-  if (typeof value !== 'boolean') throw new CoreClientError('InvalidResponse', 'Core 响应布尔字段无效');
+  if (typeof value !== 'boolean') throw new CoreClientError('InvalidResponse', '商城安全服务响应开关字段无效');
   return value;
 }
 
 function stringArray(value: unknown) {
   if (!Array.isArray(value) || !value.every((item) => typeof item === 'string')) {
-    throw new CoreClientError('InvalidResponse', 'Core 响应列表字段无效');
+    throw new CoreClientError('InvalidResponse', '商城安全服务响应列表字段无效');
   }
   return value;
 }
