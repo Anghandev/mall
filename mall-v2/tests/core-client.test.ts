@@ -733,6 +733,12 @@ describe('coordinated Core HTTP client', () => {
     expect(calls).toHaveLength(4);
   });
 
+  it('accepts an empty current seckill session response', async () => {
+    await expect(createCoreClient({
+      fetch: vi.fn().mockResolvedValue(json(null)),
+    }).getCurrentSeckillSession()).resolves.toBeNull();
+  });
+
   it.each([
     ['REVIEW_PENDING', reviewPendingPrizeSettlement()],
     ['ROLLED_OVER', rolledOverPrizeSettlement()],

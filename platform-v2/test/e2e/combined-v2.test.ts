@@ -53,7 +53,7 @@ test('merchant order export is coordinated, consumed by Merchant and absent from
   assert.equal(operation?.operationId, 'exportMerchantOrders');
   assert.deepEqual(operation?.security, [{ bearerAuth: [] }]);
   assert.equal(merchantCore.artifactVersion, artifactVersion);
-  assert.match(merchantCore.reason, /订单导出能力已发布/);
+  assert.match(merchantCore.auditReason, /订单导出能力已发布/);
   assert.equal(adminBaseline.adminCapabilities.merchantOrderExport, false);
   assert.equal('merchantOrderExport' in mallBaseline, false);
 });
@@ -79,7 +79,7 @@ test('global clearing reads are authenticated, coordinated and Admin-only', () =
   assert.equal(adminBaseline.adminCapabilities.adminSettlementReconciliation, true);
   assert.equal('adminSettlementRequests' in mallBaseline, false);
   assert.equal('adminSettlementRequests' in merchantBaseline, false);
-  assert.match(merchantCore.reason, /\u6e05\u7b97\u8bfb\u53d6\u4fdd\u6301 Admin-only/);
+  assert.match(merchantCore.auditReason, /\u6e05\u7b97\u8bfb\u53d6\u4fdd\u6301 Admin-only/);
 });
 
 test('global search and product lifecycle batches are one coordinated Admin-only surface', () => {
@@ -176,7 +176,7 @@ test('takeover assignment and replacement fulfillment form one coordinated cross
   assert.equal(coordinatedManifest.capabilityStatus.replacementMerchantFulfillment, 'AVAILABLE');
   assert.equal(adminBaseline.adminCapabilities.takeoverCaseManagementHttp, true);
   assert.equal(adminBaseline.adminCapabilities.replacementMerchantFulfillment, true);
-  assert.match(merchantCore.reason, /\u66ff\u4ee3\u5546\u5bb6\u63a5\u7ba1/);
+  assert.match(merchantCore.auditReason, /\u66ff\u4ee3\u5546\u5bb6\u63a5\u7ba1/);
   assert.equal('takeoverCaseManagementHttp' in mallBaseline, false);
   assert.equal('takeoverCaseManagementHttp' in merchantBaseline, false);
 });
@@ -422,7 +422,7 @@ function readyPolicy(): FrozenPaymentPolicy {
     operationsBps: 400,
     platformFeeBps: 100,
     requiredConfirmations: 15,
-    merchantGuaranteeMinimumUsdt: 1_000n * 10n ** 18n,
+    merchantGuaranteeMinimumUsdt: 0n,
     platformServiceFeeWallet: '0x2222222222222222222222222222222222222223',
     usdtSettlementWallet: '0x3333333333333333333333333333333333333333',
     nplRewardWallet: '0x4444444444444444444444444444444444444444',

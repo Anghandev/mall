@@ -2192,7 +2192,14 @@ function seckillRuntimeOpenApiPaths(errorResponse) {
   });
   return {
     '/v2/seckill/sessions/current': {
-      get: read('getCurrentSeckillSession', 'SeckillSessionProjection'),
+      get: {
+        operationId: 'getCurrentSeckillSession',
+        parameters: [],
+        responses: {
+          200: response('Authoritative seckill projection or empty current state', { anyOf: [{ $ref: '#/components/schemas/SeckillSessionProjection' }, { type: 'null' }] }),
+          default: errorResponse,
+        },
+      },
     },
     '/v2/seckill/sessions/history': {
       get: read('listSeckillSessionHistory', 'SeckillSessionHistoryPage', cursorParameters),
@@ -6732,6 +6739,8 @@ export interface SeckillSessionProjection {
   publicationTxHash: Bytes32 | null;
   allowedActions: readonly string[];
 }
+
+export type SeckillCurrentSessionProjection = SeckillSessionProjection | null;
 
 export interface SeckillSessionHistoryPage {
   items: readonly SeckillSessionProjection[];

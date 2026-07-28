@@ -5817,7 +5817,7 @@
         "parameters": [],
         "responses": {
           "200": {
-            "description": "Authoritative seckill projection",
+            "description": "Authoritative seckill projection or empty current state",
             "headers": {
               "x-correlation-id": {
                 "schema": {
@@ -5828,7 +5828,14 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SeckillSessionProjection"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/SeckillSessionProjection"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
               }
             }

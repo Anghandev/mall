@@ -22,7 +22,7 @@ export function SettlementLedgerPanel() {
     void fetchSettlementLedger(session.token, controller.signal)
       .then(setProjection)
       .catch((cause) => {
-        if (!controller.signal.aborted) setError(asCoreError(cause, '签名结算投影不可用'));
+        if (!controller.signal.aborted) setError(asCoreError(cause, '签名结算投影暂时无法连接'));
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
@@ -48,7 +48,7 @@ export function SettlementLedgerPanel() {
               {projection.points.map((points) => <article key={`${points.pointsType}:${points.purpose}:${points.state}`}><span>{points.pointsType} 后台积分</span><strong>{formatBnm(points.amount)}</strong><small>{commonStateLabel(points.state)} · 不可链上转账</small></article>)}
             </div> : <div className="empty-inline"><WalletCards aria-hidden="true" /><div><strong>当前钱包没有资产或 BNM 余额</strong><p>系统当前没有可展示余额。</p></div></div>}
             {projection.requests.length ? (
-              <div className="table-scroll"><table className="data-table"><thead><tr><th>申请</th><th>类型 / 资产</th><th>金额</th><th>状态</th><th>到账记录</th></tr></thead><tbody>{projection.requests.map((request) => <tr key={request.request_id}><td><code title={request.request_id}>{shortId(request.request_id)}</code><small>{request.requested_at}</small></td><td><strong>{railLabel(request.rail)}</strong><small>{request.asset}</small></td><td><strong>{formatAssetAmount(request.amount, request.asset)}</strong><small title={request.recipient_address}>{shortAddress(request.recipient_address)}</small></td><td><span className="status-chip status-ready"><CheckCircle2 aria-hidden="true" />{commonStateLabel(request.state)}</span></td><td><code title={request.final_execution_tx_hashes[0] ?? undefined}>{request.final_execution_tx_hashes[0] ? shortId(request.final_execution_tx_hashes[0]) : '等待到账确认'}</code><small>{request.final_execution_tx_hashes.length} 笔已确认转账</small></td></tr>)}</tbody></table></div>
+              <div className="table-scroll"><table className="data-table"><thead><tr><th>申请</th><th>类型 / 资产</th><th>金额</th><th>状态</th><th>到账记录</th></tr></thead><tbody>{projection.requests.map((request) => <tr key={request.request_id}><td><code title={request.request_id}>{shortId(request.request_id)}</code><small>{request.requested_at}</small></td><td><strong>{railLabel(request.rail)}</strong><small>{request.asset}</small></td><td><strong>{formatAssetAmount(request.amount, request.asset)}</strong><small title={request.recipient_address}>{shortAddress(request.recipient_address)}</small></td><td><span className="status-chip status-ready"><CheckCircle2 aria-hidden="true" />{commonStateLabel(request.state)}</span></td><td><strong>{request.final_execution_tx_hashes.length ? '已到账' : '等待到账确认'}</strong><small>{request.final_execution_tx_hashes.length} 笔已确认转账</small>{request.final_execution_tx_hashes.length ? <details className="technical-details compact"><summary>客服核验编号</summary>{request.final_execution_tx_hashes.map((hash) => <code key={hash} title={hash}>{shortId(hash)}</code>)}</details> : null}</td></tr>)}</tbody></table></div>
             ) : <div className="empty-inline"><WalletCards aria-hidden="true" /><div><strong>当前钱包没有结算申请</strong><p>系统当前没有结算申请。</p></div></div>}
           </>
         ) : null}

@@ -48,11 +48,11 @@ export function HelpPage() {
               <CmsRichText content={item.content} />
               <footer className="policy-footer">
                 <span>{item.slug} / v{item.version}</span>
-                <strong>{item.policyVersion ? '规则已绑定' : '规则未绑定'}</strong><details className="technical-details compact"><summary>高级规则编号</summary><code>{item.policyVersion ?? '未绑定'}</code></details>
+                <strong>{item.policyVersion ? '规则已绑定' : '规则未绑定'}</strong><details className="technical-details compact"><summary>规则编号</summary><code>{item.policyVersion ?? '未绑定'}</code></details>
               </footer>
             </article>
           )) : (
-            <EmptyState blocked description="系统还没有发布适用于当前商家的中文秒杀规则。" title="当前规则内容不可用" />
+            <EmptyState blocked description="系统还没有发布适用于当前商家的中文秒杀规则。" title="当前规则内容未发布" />
           )}
         </section>
 

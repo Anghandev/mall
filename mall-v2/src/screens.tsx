@@ -289,16 +289,6 @@ function SeckillSessionDashboard({ session }: { session: PublishedSeckillSession
           : <p className="field-help">本场已结算，没有产生可展示的中奖用户。</p>
       ) : null}
       <SeckillPrizeOutcome session={session} publicView />
-      <details className="technical-disclosure">
-        <summary>查看高级记录</summary>
-        <dl className="seckill-publication" aria-label="场次最终发布证据">
-          <div><dt>活动编号</dt><dd><code title={session.sessionId}>{shortHash(session.sessionId)}</code></dd></div>
-          <div><dt>高级规则编号</dt><dd>{session.policyVersion}</dd></div>
-          <div><dt>发布动作</dt><dd><code title={session.governanceActionId}>{shortHash(session.governanceActionId)}</code></dd></div>
-          <div><dt>规则凭证</dt><dd><code title={session.rulesContentHash}>{shortHash(session.rulesContentHash)}</code></dd></div>
-          <div><dt>发布凭证</dt><dd><code title={session.publicationTxHash}>{shortHash(session.publicationTxHash)}</code></dd></div>
-        </dl>
-      </details>
     </section>
   );
 }
@@ -313,12 +303,8 @@ function SeckillHistory({ sessions }: { sessions: readonly PublishedSeckillSessi
             <article key={session.sessionId}>
               <div><strong>{session.product.title}</strong><SeckillPhasePill phase={session.phase} /></div>
               <p>奖池 {formatUsdtAmount(session.prizePoolUsdt)} · 已售 {session.inventory.sold}</p>
-              <p>{session.winnerWallet ? `赢家 ${shortAddress(session.winnerWallet)}` : '无已发布赢家'}</p>
+              <p>{session.winnerWallet ? '赢家已确认' : '无已发布赢家'}</p>
               <SeckillPrizeOutcome session={session} compact publicView />
-              <details className="technical-disclosure technical-disclosure--compact">
-                <summary>查看高级记录</summary>
-                <p title={session.publicationTxHash}>发布凭证 {shortHash(session.publicationTxHash)}</p>
-              </details>
             </article>
           ))}
         </div>
@@ -334,7 +320,7 @@ function RelayEvent({ event }: { event: RealtimeEventEnvelope }) {
       <div><strong>用户 {shortAddress(String(payload.buyerWallet))}</strong><time dateTime={event.occurredAt}>{formatRelativeTime(event.occurredAt)}</time></div>
       <p>成功抢购，接力时间 +{String(payload.extensionSeconds)} 秒</p>
       <details className="technical-disclosure technical-disclosure--compact">
-        <summary>查看高级记录</summary>
+        <summary>客服核验编号</summary>
         <span>记录 {event.cursor} · {shortHash(String(payload.transactionHash))}</span>
       </details>
     </li>
@@ -473,7 +459,7 @@ export function MallScreen() {
                 {overlay ? (
                   <div className="product-card__seckill" role="status">
                     <Zap aria-hidden="true" size={15} />
-                    <span>{overlay.phase === 'LIVE' ? '秒杀进行中，普通购买不可用，前往秒杀' : `${seckillOverlayLabel(overlay.phase)}，普通购买不可用`} · 活动价 {formatUsdtAmount(overlay.seckillListPriceUsdt)} · 剩余 {overlay.inventory.available}</span>
+                    <span>{overlay.phase === 'LIVE' ? '秒杀进行中，普通购买暂停，前往秒杀' : `${seckillOverlayLabel(overlay.phase)}，普通购买暂停`} · 活动价 {formatUsdtAmount(overlay.seckillListPriceUsdt)} · 剩余 {overlay.inventory.available}</span>
                   </div>
                 ) : null}
                 <dl>
@@ -516,7 +502,7 @@ export function ProductDetailScreen({ productId }: { productId: string }) {
         </div>
       ) : null}
       {runtime.catalogState !== 'loading' && runtime.catalogState !== 'error' && !product ? (
-        <EmptyState title="商品不可用">该商品当前不可售，请返回商城重新选择。</EmptyState>
+        <EmptyState title="商品当前不可售">该商品当前不可售，请返回商城重新选择。</EmptyState>
       ) : null}
 
       {product ? (
@@ -596,7 +582,7 @@ export function ProductDetailScreen({ productId }: { productId: string }) {
           </section>
 
           {product.skus.some((sku) => sku.seckill) ? (
-          <StatusNotice title="秒杀进行中，普通购买不可用">带秒杀标记的规格不走普通购买；请从秒杀大厅下单。</StatusNotice>
+          <StatusNotice title="秒杀进行中，普通购买暂停">带秒杀标记的规格不走普通购买；请从秒杀大厅下单。</StatusNotice>
           ) : null}
 
           <div className="product-detail-buybar">
@@ -788,7 +774,7 @@ export function AssetsScreen() {
 
   return (
     <div className="screen screen--assets">
-      <ScreenHeader eyebrow="我的账户" title="我的资产" description="查看订单、地址、通知和可领取收益" />
+      <ScreenHeader eyebrow="我的账户" title="我的资产" description="查看订单、地址、通知和可申请结算的收益" />
 
       <section className="profile-strip" aria-labelledby="profile-title">
         <div className="avatar-placeholder">
@@ -910,7 +896,7 @@ export function AssetsScreen() {
               <h3>{summary.title}</h3>
               <dl>
                 <div><dt>累计</dt><dd>{summary.total}</dd></div>
-                <div><dt>可领取</dt><dd>{summary.available}</dd></div>
+                <div><dt>{summary.title === 'BNM 积分' ? '可用' : '可申请'}</dt><dd>{summary.available}</dd></div>
                 <div><dt>锁定中</dt><dd>{summary.locked}</dd></div>
               </dl>
               <p>{summary.copy}</p>
@@ -932,7 +918,7 @@ export function AssetsScreen() {
         <div>
           <p className="eyebrow">收益明细</p>
           <h2 id="ledger-title">收益中心</h2>
-          <p>连接钱包后查看可领取、锁定中和结算记录。</p>
+          <p>连接钱包后查看可申请收益、锁定中收益和结算记录。</p>
           <Link className="button button--light" to="/assets/rewards">
             查看收益 <ChevronRight aria-hidden="true" size={17} />
           </Link>
@@ -1293,7 +1279,7 @@ function OrderRow({
         <div><dt>运费 USDT</dt><dd>{formatUsdtAmount(order.exactAmounts.freightUsdt)}</dd></div>
         <div><dt>USDT 实付</dt><dd>{formatUsdtAmount(order.exactAmounts.usdtPaymentAmount)}</dd></div>
         <div><dt>NPL 支付</dt><dd>{formatNplAmount(order.exactAmounts.nplPaymentAmount)}</dd></div>
-        <div className="order-row__tx"><dt>付款记录</dt><dd>{order.paymentTxHash ? <code title={order.paymentTxHash}>{shortHash(order.paymentTxHash)}</code> : '尚未提交'}</dd></div>
+        <div className="order-row__tx"><dt>钱包付款</dt><dd>{order.paymentTxHash ? '已提交' : '尚未提交'}</dd></div>
         <div><dt>付款记录</dt><dd>{order.paidAt ? formatIso(order.paidAt) : '待付款'}</dd></div>
         <div><dt>付款最终确认</dt><dd>{order.paymentFinalizedAt ? formatIso(order.paymentFinalizedAt) : '确认中'}</dd></div>
       </dl>
@@ -1307,7 +1293,7 @@ function OrderRow({
         {shipment ? (
           <dl className="order-row__identity">
             <div><dt>快递公司</dt><dd>{carrierLabel(shipment.carrierCode)}</dd></div>
-            <div><dt>运单号</dt><dd>{shipment.trackingNumber ?? '运单号暂不可用'}</dd></div>
+            <div><dt>运单号</dt><dd>{shipment.trackingNumber ?? '暂无运单号'}</dd></div>
             <div><dt>发货时间</dt><dd>{formatIso(shipment.createdAt)}</dd></div>
             {shipment.note ? <div><dt>发货备注</dt><dd>{shipment.note}</dd></div> : null}
             {logistics ? <div><dt>物流状态</dt><dd>{logisticsStatusLabel(logistics.status)} · {formatIso(logistics.occurredAt)}</dd></div> : null}
@@ -1323,7 +1309,7 @@ function OrderRow({
               <div key={`${balance.asset}-${balance.state}-${index}`}>
                 <span>{balance.asset === 'BNM_POINTS' ? 'BNM 后台积分' : balance.asset}</span>
                 <strong>{formatAssetDisplayAmount(balance.amount, balance.asset)}</strong>
-                <span>{balance.asset === 'BNM_POINTS' && !['LOCKED', 'AVAILABLE'].includes(balance.state) ? '状态不可用' : balanceStateLabel(balance.state)}</span>
+                <span>{balance.asset === 'BNM_POINTS' && !['LOCKED', 'AVAILABLE'].includes(balance.state) ? '状态待确认' : balanceStateLabel(balance.state)}</span>
               </div>
             ))}
           </div>
@@ -1503,7 +1489,7 @@ function OrderTarget({ target }: { target: FulfillmentTarget }) {
       <div>
         <h3>{target.fulfillmentMode === 'DELIVERY' ? target.payload.recipientName : target.payload.name}</h3>
         <p>{target.fulfillmentMode === 'DELIVERY' ? `${target.payload.phone} · ${target.payload.address}` : target.payload.address}</p>
-        <details className="technical-disclosure technical-disclosure--compact"><summary>高级地址凭证</summary><span>行政区 {target.regionCode} · 快照 {shortHash(target.targetHash)}</span></details>
+        <details className="technical-disclosure technical-disclosure--compact"><summary>地址核验信息</summary><span>行政区 {target.regionCode} · 快照 {shortHash(target.targetHash)}</span></details>
       </div>
     </section>
   );
@@ -1590,39 +1576,12 @@ function SeckillPrizeOutcome({
         </div>
         <dl className="seckill-facts seckill-facts--public-prize">
           <div><dt>奖池金额</dt><dd>{formatUsdtAmount(prize.poolAmountUsdt)}</dd></div>
-          <div><dt>候选用户</dt><dd>{prize.candidate ? shortAddress(prize.candidate.buyerWallet) : '暂无'}</dd></div>
-          <div><dt>最终赢家</dt><dd>{session.winnerWallet ? shortAddress(session.winnerWallet) : '待公布'}</dd></div>
+          <div><dt>候选状态</dt><dd>{candidateIsViewer ? '你是候选用户' : prize.candidate ? '已有候选用户' : '暂无候选'}</dd></div>
+          <div><dt>最终结果</dt><dd>{winnerIsViewer ? '你已中奖' : session.winnerWallet ? '已确认' : '待公布'}</dd></div>
           <div><dt>奖励发放</dt><dd>{prize.payout ? seckillPayoutStateLabel(prize.payout.state) : '等待结算'}</dd></div>
         </dl>
         {candidateIsViewer && prize.state === 'REVIEW_PENDING' ? <p className="field-help">你是当前候选用户，正在等待审核。</p> : null}
         {winnerIsViewer ? <p className="field-help">你是本场已确认赢家。</p> : null}
-        <details className="technical-disclosure technical-disclosure--compact">
-          <summary>查看高级记录</summary>
-          <dl className="seckill-publication" aria-label="秒杀大奖结算证据">
-            <div><dt>候选截止时间</dt><dd><time dateTime={prize.cutoffAt}>{prize.cutoffAt}</time></dd></div>
-            <div><dt>奖池快照凭证</dt><dd><code title={prize.poolSnapshotHash}>{shortHash(prize.poolSnapshotHash)}</code></dd></div>
-            {prize.candidate ? <>
-              <div><dt>候选订单</dt><dd><code title={prize.candidate.orderId}>{shortHash(prize.candidate.orderId)}</code></dd></div>
-              <div><dt>高级确认位置</dt><dd>区块 {prize.candidate.blockNumber} · 记录 {prize.candidate.logIndex}</dd></div>
-            </> : null}
-            {prize.review ? <>
-              <div><dt>审核结果</dt><dd>{prize.review.decision === 'APPROVED' ? '已通过' : '已驳回'} · {prize.review.reasonCode}</dd></div>
-              <div><dt>审核钱包</dt><dd>{shortAddress(prize.review.reviewedBy)}</dd></div>
-              <div><dt>审核时间</dt><dd><time dateTime={prize.review.reviewedAt}>{prize.review.reviewedAt}</time></dd></div>
-            </> : null}
-            {prize.rolloverTargetSessionId ? <div><dt>滚入场次</dt><dd><code title={prize.rolloverTargetSessionId}>{shortHash(prize.rolloverTargetSessionId)}</code></dd></div> : null}
-            {prize.rolloverJournalId ? <div><dt>滚池记录</dt><dd><code title={prize.rolloverJournalId}>{shortHash(prize.rolloverJournalId)}</code></dd></div> : null}
-            {prize.payout ? <>
-              {prize.payout.requestId ? <div><dt>结算申请</dt><dd><code title={prize.payout.requestId}>{shortHash(prize.payout.requestId)}</code></dd></div> : null}
-              {prize.payout.transferIds.map((transferId) => (
-                <div key={transferId}><dt>转账记录</dt><dd><code title={transferId}>{shortHash(transferId)}</code></dd></div>
-              ))}
-              {prize.payout.finalExecutionTxHashes.map((txHash) => (
-                <div key={txHash}><dt>到账记录</dt><dd><code title={txHash}>{shortHash(txHash)}</code></dd></div>
-              ))}
-            </> : null}
-          </dl>
-        </details>
       </section>
     );
   }
@@ -1637,11 +1596,11 @@ function SeckillPrizeOutcome({
       <dl className="seckill-publication" aria-label="秒杀大奖结算证据">
         <div><dt>候选截止时间</dt><dd><time dateTime={prize.cutoffAt}>{prize.cutoffAt}</time></dd></div>
         <div><dt>奖池快照</dt><dd>{formatUsdtAmount(prize.poolAmountUsdt)}</dd></div>
-        <details className="technical-disclosure technical-disclosure--compact"><summary>高级奖池凭证</summary><div><dt>快照凭证</dt><dd><code title={prize.poolSnapshotHash}>{shortHash(prize.poolSnapshotHash)}</code></dd></div></details>
+        <details className="technical-disclosure technical-disclosure--compact"><summary>奖池核验信息</summary><div><dt>快照凭证</dt><dd><code title={prize.poolSnapshotHash}>{shortHash(prize.poolSnapshotHash)}</code></dd></div></details>
         {prize.candidate ? <>
           <div><dt>候选订单</dt><dd><code title={prize.candidate.orderId}>{shortHash(prize.candidate.orderId)}</code></dd></div>
           <div><dt>候选钱包</dt><dd>{shortAddress(prize.candidate.buyerWallet)}</dd></div>
-          <details className="technical-disclosure technical-disclosure--compact"><summary>高级候选确认位置</summary><div><dt>确认位置</dt><dd>区块 {prize.candidate.blockNumber} · 记录 {prize.candidate.logIndex}</dd></div></details>
+          <details className="technical-disclosure technical-disclosure--compact"><summary>候选确认位置</summary><div><dt>确认位置</dt><dd>区块 {prize.candidate.blockNumber} · 记录 {prize.candidate.logIndex}</dd></div></details>
         </> : null}
         {prize.review ? <>
           <div><dt>有效性审核</dt><dd>{prize.review.decision === 'APPROVED' ? '已通过' : '已驳回'} · {prize.review.reasonCode}</dd></div>
@@ -1657,7 +1616,7 @@ function SeckillPrizeOutcome({
             <div key={transferId}><dt>转账记录</dt><dd><code title={transferId}>{shortHash(transferId)}</code></dd></div>
           ))}
           {prize.payout.finalExecutionTxHashes.map((txHash) => (
-            <div key={txHash}><dt>到账记录</dt><dd><code title={txHash}>{shortHash(txHash)}</code></dd></div>
+            <div key={txHash}><dt>客服核验编号</dt><dd><code title={txHash}>{shortHash(txHash)}</code></dd></div>
           ))}
         </> : null}
       </dl>
@@ -1747,8 +1706,8 @@ function ShoppingStatementRow({ statement }: { statement: MallRuntimeValue['shop
         <div><dt>下单时间</dt><dd><time dateTime={statement.createdAt}>{statement.createdAt}</time></dd></div>
         <div><dt>付款最终确认</dt><dd><time dateTime={statement.paymentFinalizedAt}>{statement.paymentFinalizedAt}</time></dd></div>
         <div><dt>履约最终时间</dt><dd>{statement.fulfilledAt ? <time dateTime={statement.fulfilledAt}>{statement.fulfilledAt}</time> : '尚未最终履约'}</dd></div>
-        <div className="shopping-statement__wide"><dt>订单编号</dt><dd><code title={statement.orderId}>{shortHash(statement.orderId)}</code></dd></div>
-        <div className="shopping-statement__wide"><dt>付款记录</dt><dd><code title={statement.paymentTxHash}>{shortHash(statement.paymentTxHash)}</code></dd></div>
+        <div className="shopping-statement__wide"><dt>订单</dt><dd>系统已记录</dd></div>
+        <div className="shopping-statement__wide"><dt>钱包付款</dt><dd>已确认</dd></div>
       </dl>
       <section className="shopping-statement__journals" aria-label="BNM 账本来源">
         <div className="section-heading section-heading--compact"><h3>BNM 来源记录</h3><FileClock aria-hidden="true" size={17} /></div>
@@ -1828,7 +1787,7 @@ export function RewardsScreen() {
       {runtime.settlementsState === 'loading' ? <p className="loading-copy" role="status">正在同步收益账本…</p> : null}
       {runtime.settlementsState === 'error' ? (
         <div className="catalog-retry">
-          <StatusNotice title="收益账本同步失败" tone="warning">不会展示缓存金额或伪造可领取状态。</StatusNotice>
+          <StatusNotice title="收益账本同步失败" tone="warning">不会展示缓存金额或伪造可申请状态。</StatusNotice>
           <button className="button button--secondary" type="button" onClick={() => void runtime.reloadSettlements()} disabled={runtime.busy}>
             <RefreshCw aria-hidden="true" size={18} /> 重新同步
           </button>
@@ -1903,7 +1862,7 @@ function TransferableRewardRail({
                 ? ` · 转账 ${request.transfer_ids.map(shortHash).join('、')}`
                 : ''}</p>
               {request.final_execution_tx_hashes.length > 0 ? request.final_execution_tx_hashes.map((txHash) => (
-                <p className="safe-hash" key={txHash}><span>到账记录</span><code title={txHash}>{shortHash(txHash)}</code></p>
+                <p className="safe-hash" key={txHash}><span>客服核验编号</span><code title={txHash}>{shortHash(txHash)}</code></p>
               )) : <p>平台打款还在确认中，到账后会自动更新。</p>}
             </article>
           ))}
@@ -2186,9 +2145,8 @@ export function CheckoutScreen() {
         <section className="reservation-summary" aria-labelledby="reservation-title">
           <div><p className="eyebrow">库存预留</p><h2 id="reservation-title">库存已预留</h2></div>
           <dl>
-            <div><dt>订单</dt><dd title={runtime.quote.orderId}>{shortHash(runtime.quote.orderId)}</dd></div>
-            <div><dt>预留编号</dt><dd title={primaryIntent(runtime.quote).reservationId}>{shortHash(primaryIntent(runtime.quote).reservationId)}</dd></div>
-            <div><dt>报价截止</dt><dd>{formatTimestamp(primaryIntent(runtime.quote).deadline)}</dd></div>
+            <div><dt>状态</dt><dd>库存已为你保留</dd></div>
+            <div><dt>有效期</dt><dd>{formatTimestamp(primaryIntent(runtime.quote).deadline)}</dd></div>
           </dl>
           <Link className="button button--primary" to="/checkout/review">核对报价 <ChevronRight aria-hidden="true" size={17} /></Link>
         </section>
@@ -2281,7 +2239,7 @@ function CheckoutTargetSelector() {
         <div className="pickup-options">
           {runtime.storesState === 'loading' ? <StoreListSkeleton /> : null}
           {runtime.storesState === 'empty' ? <p className="section-copy">当前没有可用自提门店。</p> : null}
-          {runtime.storesState === 'error' ? <p className="field-error">门店列表不可用，无法创建自提目标。</p> : null}
+          {runtime.storesState === 'error' ? <p className="field-error">门店列表读取失败，无法创建自提目标。</p> : null}
           {pickupStores.map((store) => (
             <article className="pickup-option" key={store.storeId}>
               <StoreMediaGallery store={store} compact />
@@ -2382,7 +2340,6 @@ export function ReviewScreen() {
         <div>
           <h2 id="immutable-warning-title">付款前请最终确认</h2>
           <p>付款成功后，商品、规格、数量、履约方式与所在行政区将写入订单，后续不可修改。</p>
-          {runtime.checkoutTarget ? <details className="technical-disclosure technical-disclosure--compact"><summary>高级地址凭证</summary><code>{shortHash(runtime.checkoutTarget.regionCodeHash)}</code></details> : null}
         </div>
       </section>
 
@@ -2458,7 +2415,7 @@ export function ReviewScreen() {
           <div className="section-heading"><h2 id="payment-status-title">支付同步</h2><Radio aria-hidden="true" size={19} /></div>
           <dl>
             <div><dt>报价状态</dt><dd>{paymentStateLabel(runtime.projection?.state ?? quote.state)}</dd></div>
-            <div><dt>付款记录</dt><dd>{runtime.projection?.submittedTxHash || runtime.submittedTxHash || quote.submittedTxHash ? <code title={runtime.projection?.submittedTxHash ?? runtime.submittedTxHash ?? quote.submittedTxHash ?? undefined}>{shortHash(runtime.projection?.submittedTxHash ?? runtime.submittedTxHash ?? quote.submittedTxHash!)}</code> : '未提交'}</dd></div>
+            <div><dt>钱包付款</dt><dd>{runtime.projection?.submittedTxHash || runtime.submittedTxHash || quote.submittedTxHash ? '已提交' : '未提交'}</dd></div>
             <div><dt>支付分类</dt><dd>{paymentClassificationLabel(runtime.projection?.finality?.classification)}</dd></div>
             <div><dt>确认数</dt><dd>{runtime.projection?.finality ? `${runtime.projection.finality.confirmations}/${runtime.projection.finality.requiredConfirmations}` : '--/15'}</dd></div>
             <div><dt>最终确认</dt><dd>{paymentStateLabel(runtime.projection?.finality?.state ?? 'PENDING')}</dd></div>
@@ -2469,7 +2426,7 @@ export function ReviewScreen() {
           {runtime.pendingSubmission ? (
             <button className="button button--secondary" type="button" onClick={() => void runtime.retrySubmission()} disabled={runtime.busy}>
               <RefreshCw aria-hidden="true" size={18} />
-              {runtime.pendingSubmission.phase === 'PENDING_CORE_SUBMISSION' ? '重试提交付款记录' : '刷新支付状态'}
+              {runtime.pendingSubmission.phase === 'PENDING_CORE_SUBMISSION' ? '重试同步付款' : '刷新支付状态'}
             </button>
           ) : null}
         </section>
@@ -2490,7 +2447,6 @@ function CheckoutTargetReview({ target }: { target: NonNullable<MallRuntimeValue
           <div><dt>省 / 市 / 区</dt><dd>{address.province} / {address.city} / {address.district}</dd></div>
           <div><dt>详细地址</dt><dd>{address.formattedAddress}</dd></div>
           <div><dt>行政区代码</dt><dd>{address.regionCode}</dd></div>
-          <details className="technical-disclosure technical-disclosure--compact"><summary>高级收货凭证</summary><div><dt>目标凭证</dt><dd><code title={target.fulfillmentTargetHash}>{shortHash(target.fulfillmentTargetHash)}</code></dd></div></details>
         </dl>
       </section>
     );
@@ -2505,7 +2461,6 @@ function CheckoutTargetReview({ target }: { target: NonNullable<MallRuntimeValue
         <div><dt>营业时间</dt><dd>{store.businessHours}</dd></div>
         <div><dt>联系电话</dt><dd>{store.phone}</dd></div>
         <div><dt>行政区代码</dt><dd>{store.regionCode}</dd></div>
-        <details className="technical-disclosure technical-disclosure--compact"><summary>高级自提凭证</summary><div><dt>目标凭证</dt><dd><code title={target.fulfillmentTargetHash}>{shortHash(target.fulfillmentTargetHash)}</code></dd></div></details>
       </dl>
       <p>请在营业时间内到店，并以订单状态和现场核销结果为准。</p>
     </section>
@@ -2542,7 +2497,7 @@ function quoteDisabledReason(runtime: MallRuntimeValue) {
   if (runtime.selectedSku.seckill && !runtime.selectedSeckillSessionId) return '该规格正在活动阶段，普通结算已停用';
   if (!runtime.session) return '请先连接钱包';
   if (!runtime.bootstrap) return '正在同步系统安全状态';
-  if (!runtime.bootstrap.writesEnabled) return '新支付当前被系统安全开关阻断';
+  if (!runtime.bootstrap.writesEnabled) return '当前暂时不能付款，请稍后再试';
   if (runtime.selectedSeckillSessionId && (
     runtime.seckillSession?.sessionId !== runtime.selectedSeckillSessionId
       || runtime.seckillSession.phase !== 'LIVE'
@@ -2563,7 +2518,7 @@ function CountdownMetric({ label, value }: { label: string; value: CountdownStat
   return (
     <div className={value.expired ? 'metric metric--expired' : 'metric'}>
       <span>{label}</span>
-      <strong className="metric__value" aria-label={value.value ? `${label}${value.value}` : `${label}暂不可用`}>
+      <strong className="metric__value" aria-label={value.value ? `${label}${value.value}` : `${label}未返回数据`}>
         {value.value ?? '--'}
       </strong>
     </div>
@@ -2683,7 +2638,7 @@ function seckillActionReason(
   if (BigInt(session.inventory.available) === 0n) return '本场库存已抢完';
   if (!productAvailable) return '当前商品还没准备好，暂时不能抢';
   if (!runtime.bootstrap?.writesEnabled) return '平台当前暂停新支付，暂时不能抢';
-  return '秒杀订单暂不可配置';
+  return '秒杀订单不需要配置';
 }
 
 function ledgerStateSummaries(runtime: MallRuntimeValue) {
@@ -2697,7 +2652,7 @@ function ledgerStateSummaries(runtime: MallRuntimeValue) {
       total: readable ? formatBnmAmount(sumAtomicStrings(points.map((point) => point.amount))) : '--',
       available: readable ? formatBnmAmount(sumAtomicStrings(points.filter((point) => point.state === 'AVAILABLE').map((point) => point.amount))) : '--',
       locked: readable ? formatBnmAmount(sumAtomicStrings(points.filter((point) => point.state === 'LOCKED').map((point) => point.amount))) : '--',
-      copy: 'BNM 是平台积分，履约完成后会从锁定变为可领取。',
+      copy: 'BNM 是平台积分，履约完成后会从锁定变为可用积分。',
     },
     {
       title: '创世节点 NPL',
@@ -3035,9 +2990,9 @@ function isBuyerEvidenceAction(action: AllowedActionName): action is BuyerEviden
 }
 
 function unsupportedBuyerActionReason(action: AllowedActionName) {
-  if (action === 'OPEN_TAKEOVER') return '当前订单暂不支持买家直接发起平台接管';
+  if (action === 'OPEN_TAKEOVER') return '当前订单不能由买家直接发起平台接管';
   if (action === 'VERIFY_PICKUP') return '自提核销证据仅授权门店或平台角色';
-  return '当前 Mall 买家证据流程不支持该操作';
+  return '当前商城买家流程不支持该操作';
 }
 
 function cityCodeFor(regionCode: string) {
@@ -3064,9 +3019,7 @@ function activityCountState(state: MallRuntimeValue['ordersState'], authenticate
 function orderCountText(metric: Readonly<{ status: string; count: string | null }> | null | undefined) {
   if (!metric) return null;
   if (metric.status === 'AVAILABLE') return metric.count ?? '0';
-  if (metric.status === 'DecisionBlocked') return '--';
-  if (metric.status === 'ExternalBlocked') return '外部暂停';
-  if (metric.status === 'ConfigurationRequired') return '配置中';
+  if (['DecisionBlocked', 'ExternalBlocked', 'ConfigurationRequired'].includes(metric.status)) return '--';
   return '--';
 }
 

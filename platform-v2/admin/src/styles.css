@@ -528,13 +528,13 @@ input::placeholder { color: #8b8b82; }
   .sidebar { width: min(88vw, 312px); transform: translateX(-105%); transition: transform 180ms ease-out; box-shadow: 10px 0 30px rgba(0, 0, 0, .28); }
   .sidebar:not(.is-open) { visibility: hidden; }
   .sidebar.is-open { transform: translateX(0); }
-  .mobile-route-picker { position: fixed; z-index: 80; top: var(--topbar-height); right: 0; left: 0; height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 8px 16px; background: var(--surface); border-bottom: 1px solid var(--line); }
-  .mobile-route-picker label { color: var(--ink-muted); font-size: 11px; }
-  .mobile-route-picker > span { position: relative; min-width: 180px; display: flex; align-items: center; }
+  .mobile-route-picker { position: fixed; z-index: 80; top: var(--topbar-height); right: 0; left: 0; height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 16px; background: var(--surface); border-bottom: 1px solid var(--line); }
+  .mobile-route-picker label { min-width: 0; color: var(--ink-muted); font-size: 11px; }
+  .mobile-route-picker > span { position: relative; min-width: 0; flex: 1 1 180px; display: flex; align-items: center; }
   .mobile-route-picker span > svg:first-child { position: absolute; z-index: 1; left: 10px; width: 17px; pointer-events: none; }
   .mobile-route-picker span > svg:last-child { position: absolute; right: 10px; width: 15px; pointer-events: none; }
-  .mobile-route-picker select { padding-left: 36px; padding-right: 32px; appearance: none; }
-  main { margin-left: 0; padding: calc(var(--topbar-height) + 78px) 16px calc(32px + env(safe-area-inset-bottom)); }
+  .mobile-route-picker select { width: 100%; min-height: 42px; padding-left: 36px; padding-right: 32px; appearance: none; }
+  main { margin-left: 0; padding: calc(var(--topbar-height) + 78px) 16px calc(96px + env(safe-area-inset-bottom)); }
   .page-header { grid-template-columns: 42px minmax(0, 1fr); }
   .page-icon { width: 42px; height: 42px; }
   .requirement-list { grid-column: 1 / -1; justify-content: flex-start; }

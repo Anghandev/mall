@@ -38,7 +38,7 @@ describe('platform admin simplified zero-guarantee experience', () => {
 
     renderAt('/');
     expect(screen.getByRole('img', { name: '24K商城' })).toBeTruthy();
-    expect(screen.getByText('高级版本信息')).toBeTruthy();
+    expect(screen.getByText('版本信息')).toBeTruthy();
     expect(screen.getByText(artifactVersion)).toBeTruthy();
     expect(document.body.textContent).not.toMatch(/阿步|Abu 24K|ABU 24K/);
     expect(document.body.textContent).not.toMatch(blockedGuaranteeCopy);
@@ -90,7 +90,7 @@ describe('platform admin simplified zero-guarantee experience', () => {
 
     expect(copy).toContain('商家还不能上架');
     expect(copy).toContain('商家已通过审核、门店已激活');
-    expect(copy).toContain('publish-denied');
+    expect(copy).not.toContain('publish-denied');
     expect(copy).not.toMatch(/保证金|1000|1,000|deposit/i);
   });
 

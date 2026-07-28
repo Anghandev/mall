@@ -8,9 +8,9 @@ const errorCodeLabels: Record<string, string> = {
   InvalidResponse: '系统返回异常',
   Forbidden: '当前钱包没有权限',
   Unauthorized: '请先连接正确钱包',
-  ExternalBlocked: '外部服务暂不可用',
+  ExternalBlocked: '系统服务暂时异常',
   ConfigurationRequired: '系统配置未完成',
-  DecisionBlocked: '缺少业务决策',
+  DecisionBlocked: '暂时不能操作',
   IdempotencyConflict: '操作状态已变化',
   InvalidSignature: '签名钱包不匹配',
 };
@@ -72,7 +72,7 @@ export function commonStateLabel(value: string | null | undefined) {
     AVAILABLE: '可用',
     CANCELLED: '已取消',
     CLOSED: '已关闭',
-    DECISION_BLOCKED: '缺少业务决策',
+    DECISION_BLOCKED: '暂不可操作',
     DRAFT: '草稿',
     EXECUTED: '已执行',
     FAILED: '失败',
@@ -109,8 +109,7 @@ export function humanizeError(error: unknown) {
   const specificLabel = specificErrorLabel(raw);
   const message = translateErrorMessage(raw);
   const label = specificLabel ?? (code ? errorCodeLabels[code] ?? '操作失败' : '操作失败');
-  const correlation = error instanceof CoreApiError && error.correlationId ? `（编号：${error.correlationId}）` : '';
-  return `${label}：${message}${correlation}`;
+  return `${label}：${message}`;
 }
 function specificErrorLabel(message: string) {
   if (/Merchant is not eligible for publication/i.test(message)) return '商家还不能上架';
@@ -124,16 +123,26 @@ export function translateErrorMessage(message: string) {
   if (/Current store state does not allow this operation|store state does not allow/i.test(cleaned)) return '当前门店状态已经不需要或不能执行这个操作，请刷新门店列表后再看可用按钮。';
   if (/Current product state does not allow this operation|product state does not allow/i.test(cleaned)) return '当前商品状态暂不允许这个操作，请刷新商品列表后按页面显示的按钮处理。';
   if (/Current merchant role cannot submit this guarantee deposit|Merchant guarantee is outside the wallet scope/i.test(cleaned)) return '当前钱包不是这个商家的结算钱包，不能提交这笔历史资金记录。';
-  if (/Core resource unavailable|Core .* unavailable/i.test(cleaned)) return '系统服务暂时不可用，请稍后重试。';
+  if (/Core resource unavailable|Core .* unavailable/i.test(cleaned)) return '系统服务暂时无法连接，请稍后重试。';
   if (/Published guarantee policy version was not found/i.test(cleaned)) return '资金规则版本不正确，请刷新页面或确认当前规则版本。';
   if (/Policy and runtime operations wallets do not match/i.test(cleaned)) return '运营钱包和平台规则不一致，请先核对系统配置。';
   if (/Core challenge missing governed approval fields|Governed settlement approval is invalid/i.test(cleaned)) return '系统返回的签名信息不完整，请刷新后重试。';
   if (/Product requires 1-5 verified main images/i.test(cleaned)) return '请先上传 1 到 5 张商品主图，保存草稿后再提交平台审核。';
   if (/Invalid idempotency key|idempotencyKey|idempotency key|Idempotency key/i.test(cleaned)) return '系统提交编号异常，请刷新页面后重试。';
   if (/must be a canonical atomic amount/i.test(cleaned)) return '金额格式不正确，请填写普通数字金额，例如 2 或 2.00。';
+  if (/TxHash must be bytes32|transaction hash|bytes32/i.test(cleaned)) return '交易编号格式不正确，请复制钱包里的 0x 开头交易编号。';
+  if (/Buyer UID must be a positive bigint/i.test(cleaned)) return '用户编号请输入正整数。';
+  if (/Buyer UID requires exact AND search/i.test(cleaned)) return '按用户编号查询时，请使用“同时满足”和“精确钱包”模式。';
+  if (/Wallet must be an exact EVM address/i.test(cleaned)) return '钱包地址格式不正确，请填写完整 0x 地址。';
+  if (/Fuzzy wallet must contain/i.test(cleaned)) return '模糊钱包查询请输入 6 到 40 位十六进制字符。';
+  if (/Search limit must be 1-100|limit must be an integer between 1 and 100/i.test(cleaned)) return '查询数量请填写 1 到 100。';
+  if (/Search start must be before end|must be an ISO date-time/i.test(cleaned)) return '时间范围不正确，请重新选择开始和结束时间。';
+  if (/must be a generated enum value|generated enum|cursor requires both fields/i.test(cleaned)) return '筛选条件不完整，请清空后重新选择。';
+  if (/does not match (the )?(coordinated|generated)|generated type|Core returned|Core response|Core API|non-JSON|unreachable|request failed|gateway is unavailable/i.test(cleaned)) return '系统服务暂时无法连接，请刷新或稍后重试。';
+  if (/must be an integer between 0 and 10000|bps/i.test(cleaned)) return '比例请填写 0 到 100 之间的数字。';
   if (/must contain 8-128 characters/i.test(cleaned)) return '系统提交编号异常，请刷新页面后重试。';
   if (/Secondary signer mismatch/i.test(cleaned)) return '签名钱包不匹配，请切换到页面要求的钱包后重试。';
-  if (/unavailable|unreachable|connection failed/i.test(cleaned)) return '系统服务暂时不可用，请稍后重试。';
+  if (/unavailable|unreachable|connection failed/i.test(cleaned)) return '系统服务暂时无法连接，请稍后重试。';
   if (/Forbidden/i.test(cleaned)) return '当前钱包没有权限执行这个操作。';
   return cleaned;
 }

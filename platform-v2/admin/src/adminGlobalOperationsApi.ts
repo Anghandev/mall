@@ -144,38 +144,38 @@ function globalSearchQuery(filters: AdminGlobalSearchFilters & Required<Pick<Adm
   }
   if (filters.txHash !== undefined) {
     const txHash = filters.txHash.trim().toLowerCase();
-    if (!bytes32Pattern.test(txHash)) throw invalidRequest('TxHash must be bytes32');
+    if (!bytes32Pattern.test(txHash)) throw invalidRequest('交易编号格式不正确，请复制钱包里的 0x 开头交易编号。');
     query.set('txHash', txHash);
   }
   if (filters.uid !== undefined) {
     const uid = filters.uid.trim();
     if (!/^[1-9][0-9]{0,18}$/.test(uid) || (uid.length === 19 && uid > '9223372036854775807')) {
-      throw invalidRequest('Buyer UID must be a positive bigint');
+      throw invalidRequest('用户编号请输入正整数。');
     }
     if (filters.relation !== 'AND' || filters.walletMatch !== 'EXACT') {
-      throw invalidRequest('Buyer UID requires exact AND search');
+      throw invalidRequest('按用户编号查询时，请使用“同时满足”和“精确钱包”模式。');
     }
     query.set('uid', uid);
   }
   if (filters.wallet !== undefined) {
     const wallet = filters.wallet.trim().toLowerCase();
     if (filters.walletMatch === 'EXACT' && !addressPattern.test(wallet)) {
-      throw invalidRequest('Wallet must be an exact EVM address');
+      throw invalidRequest('钱包地址格式不正确，请填写完整 0x 地址。');
     }
     if (filters.walletMatch === 'FUZZY' && !walletFragmentPattern.test(wallet)) {
-      throw invalidRequest('Fuzzy wallet must contain 6-40 hexadecimal characters');
+      throw invalidRequest('模糊钱包查询请输入 6 到 40 位十六进制字符。');
     }
     query.set('wallet', wallet);
   }
-  if (!['EXACT', 'FUZZY'].includes(filters.walletMatch)) throw invalidRequest('Wallet match mode is invalid');
+  if (!['EXACT', 'FUZZY'].includes(filters.walletMatch)) throw invalidRequest('钱包查询方式不正确。');
   query.set('walletMatch', filters.walletMatch);
   if (filters.from !== undefined) query.set('from', dateTime(filters.from, 'from'));
   if (filters.to !== undefined) query.set('to', dateTime(filters.to, 'to'));
   if (filters.from !== undefined && filters.to !== undefined
-    && Date.parse(filters.from) >= Date.parse(filters.to)) throw invalidRequest('Search start must be before end');
+    && Date.parse(filters.from) >= Date.parse(filters.to)) throw invalidRequest('开始时间必须早于结束时间。');
   if (filters.pendingReview !== undefined) query.set('pendingReview', String(filters.pendingReview));
   const limit = filters.limit ?? 50;
-  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw invalidRequest('Search limit must be 1-100');
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw invalidRequest('查询数量请填写 1 到 100。');
   query.set('limit', String(limit));
   return query.toString();
 }
@@ -314,7 +314,7 @@ function validateResourceIds(values: readonly string[], field: string, max: numb
 
 function requireIdempotencyKey(value: string) {
   if (typeof value !== 'string' || value.length < 8 || value.length > 128) {
-    throw invalidRequest('Idempotency key must contain 8-128 characters');
+    throw invalidRequest('系统提交编号异常，请刷新页面后重试。');
   }
 }
 

@@ -221,7 +221,7 @@ export interface CoreClient {
   createSeckillQuote(token: string, sessionId: string, selection: QuoteSelection): Promise<SeckillQuoteResponse>;
   submitPayment(token: string, request: PaymentSubmissionRequest): Promise<PaymentSubmissionResponse>;
   getPayment(token: string, orderId: string): Promise<PaymentProjection>;
-  getCurrentSeckillSession(): Promise<PublishedSeckillSessionProjection>;
+  getCurrentSeckillSession(): Promise<PublishedSeckillSessionProjection | null>;
   listSeckillSessionHistory(cursor?: string, limit?: number): Promise<PublishedSeckillSessionHistoryPage>;
   getSeckillSession(sessionId: string): Promise<PublishedSeckillSessionProjection>;
   listSeckillSessionEvents(sessionId: string, cursor?: string, limit?: number): Promise<RealtimeEventPage>;
@@ -390,7 +390,7 @@ export function createCoreClient(input: { baseUrl?: string; fetch?: FetchLike } 
           body: file,
         });
       } catch {
-        throw new CoreClientError('ExternalBlocked', '证据文件上传服务不可用');
+        throw new CoreClientError('ExternalBlocked', '证据文件上传服务暂时无法连接');
       }
       if (!response.ok) throw new CoreClientError('ExternalBlocked', '证据文件上传失败');
     },
@@ -600,7 +600,8 @@ export function createCoreClient(input: { baseUrl?: string; fetch?: FetchLike } 
     },
 
     async getCurrentSeckillSession() {
-      return parseSeckillSession(await requestJson<unknown>(fetcher, `${baseUrl}${operations.seckillCurrent}`));
+      const value = await requestJson<unknown>(fetcher, `${baseUrl}${operations.seckillCurrent}`);
+      return value === null ? null : parseSeckillSession(value);
     },
 
     async listSeckillSessionHistory(cursor, limit = 20) {
@@ -815,7 +816,7 @@ async function requestJson<T>(fetcher: FetchLike, url: string, init?: RequestIni
       failure?.correlationId ?? response.headers.get('x-correlation-id') ?? undefined,
     );
   }
-  if (!body) throw new CoreClientError('InvalidResponse', '商城安全服务返回了空响应');
+  if (body === undefined) throw new CoreClientError('InvalidResponse', '商城安全服务返回了空响应');
   return body as T;
 }
 

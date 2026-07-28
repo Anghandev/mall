@@ -46,7 +46,7 @@ export function ModuleWorkspace({ module }: ModuleWorkspaceProps) {
             {module.fields.map((field) => <li key={field}><CheckCircle2 aria-hidden="true" /> {field}</li>)}
           </ul>
           <hr />
-          <p className="section-kicker">高级凭证</p>
+          <p className="section-kicker">核验信息</p>
           <ul className="evidence-list">
             {module.evidence.map((item) => <li key={item}><ArrowUpRight aria-hidden="true" /> {item}</li>)}
           </ul>
@@ -59,12 +59,12 @@ export function ModuleWorkspace({ module }: ModuleWorkspaceProps) {
           <strong id={`${module.id}-blocked`}>这块还在等系统数据</strong>
           <p>没有真实数据时页面不会用假记录充数，相关写入按钮会保持关闭。</p>
           <details className="technical-details compact">
-            <summary>高级需求编号</summary>
+            <summary>需求编号</summary>
             <code>{module.requirements.join(' / ')}</code>
             <code>{module.gap}</code>
           </details>
         </div>
-        <span>暂不可操作</span>
+        <span>不能操作</span>
       </section>
 
       <BatchActionBar ordinarySoftDelete={module.ordinarySoftDelete === true} immutable={module.immutable === true} />

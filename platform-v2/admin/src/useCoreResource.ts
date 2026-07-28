@@ -27,7 +27,7 @@ export function useCoreResource<Value>(load: (signal: AbortSignal) => Promise<Va
         if (controller.signal.aborted) return;
         const error = cause instanceof CoreApiError
           ? cause
-          : new CoreApiError({ code: 'ExternalBlocked', message: 'Core resource unavailable', status: 503 });
+          : new CoreApiError({ code: 'ExternalBlocked', message: '系统服务暂时无法连接', status: 503 });
         setState({ data: null, error, loading: false });
       },
     );

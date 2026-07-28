@@ -62,7 +62,7 @@ export function Metric({
   return (
     <article className="metric">
       <p>{label}</p>
-      <strong aria-label={value === undefined ? `${label}不可用` : `${label}${value}`}>{value ?? '--'}</strong>
+      <strong aria-label={value === undefined ? `${label}未返回数据` : `${label}${value}`}>{value ?? '--'}</strong>
       <span>{hint}</span>
       {linkLabel ? (
         <span className="metric-link">

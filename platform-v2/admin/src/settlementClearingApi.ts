@@ -179,15 +179,15 @@ function isCoverage(value: unknown) {
     && isAmount(value.verifiedAssets) && isAmount(value.unsettledLiabilities) && typeof value.covered === 'boolean';
 }
 
-function baseQuery(limit = 25) { if (!isInteger(limit, 1, 100)) throw invalidInput('limit must be an integer between 1 and 100'); return new URLSearchParams({ limit: String(limit) }); }
+function baseQuery(limit = 25) { if (!isInteger(limit, 1, 100)) throw invalidInput('查询数量请填写 1 到 100。'); return new URLSearchParams({ limit: String(limit) }); }
 function appendDates(query: URLSearchParams, from?: string, to?: string) { appendDate(query, 'from', from); appendDate(query, 'to', to); }
 function appendHash(query: URLSearchParams, key: string, value?: string) { if (value) { requireHash(value, key); query.set(key, value); } }
-function appendAddress(query: URLSearchParams, key: string, value?: string) { if (value) { if (!isAddress(value)) throw invalidInput(`${key} must be an address`); query.set(key, value); } }
-function appendText(query: URLSearchParams, key: string, value?: string) { if (value !== undefined) { const trimmed = value.trim(); if (!trimmed) throw invalidInput(`${key} must not be blank`); query.set(key, trimmed); } }
-function appendDate(query: URLSearchParams, key: string, value?: string) { if (value) { if (!isDate(value)) throw invalidInput(`${key} must be an ISO date-time`); query.set(key, value); } }
-function appendEnum<T extends string>(query: URLSearchParams, key: string, value: T | undefined, allowed: readonly T[]) { if (value !== undefined) { if (!allowed.includes(value)) throw invalidInput(`${key} must be a generated enum value`); query.set(key, value); } }
-function requireCompleteCursor(first?: string, second?: string) { if (Boolean(first) !== Boolean(second)) throw invalidInput('cursor requires both fields'); }
-function requireHash(value: string, key: string) { if (!isHash(value)) throw invalidInput(`${key} must be bytes32`); }
+function appendAddress(query: URLSearchParams, key: string, value?: string) { if (value) { if (!isAddress(value)) throw invalidInput(`${key} 钱包地址格式不正确。`); query.set(key, value); } }
+function appendText(query: URLSearchParams, key: string, value?: string) { if (value !== undefined) { const trimmed = value.trim(); if (!trimmed) throw invalidInput(`${key} 不能为空。`); query.set(key, trimmed); } }
+function appendDate(query: URLSearchParams, key: string, value?: string) { if (value) { if (!isDate(value)) throw invalidInput(`${key} 时间格式不正确。`); query.set(key, value); } }
+function appendEnum<T extends string>(query: URLSearchParams, key: string, value: T | undefined, allowed: readonly T[]) { if (value !== undefined) { if (!allowed.includes(value)) throw invalidInput(`${key} 筛选项不正确。`); query.set(key, value); } }
+function requireCompleteCursor(first?: string, second?: string) { if (Boolean(first) !== Boolean(second)) throw invalidInput('分页条件不完整，请刷新后重试。'); }
+function requireHash(value: string, key: string) { if (!isHash(value)) throw invalidInput(`${key} 编号格式不正确。`); }
 function authenticatedGet(path: string, token: string, signal?: AbortSignal) { return requestCoreJson(path, { headers: { authorization: `Bearer ${token}` }, ...(signal ? { signal } : {}) }); }
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === 'object' && value !== null && !Array.isArray(value); }
 function exact(value: Record<string, unknown>, keys: readonly string[]) { const actual = Object.keys(value); return actual.length === keys.length && actual.every((key) => keys.includes(key)); }

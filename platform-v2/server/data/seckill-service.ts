@@ -97,7 +97,7 @@ export class SeckillService {
          LIMIT 1`,
         [now],
       );
-      if (!result.rows[0]) throw new CoreError('UnknownState', 'No seckill session is published', 404);
+      if (!result.rows[0]) return null;
       return sessionProjection(result.rows[0], now);
     });
   }

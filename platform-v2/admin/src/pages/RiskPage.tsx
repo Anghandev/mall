@@ -149,7 +149,7 @@ export function RiskPage() {
         <div>
           <p className="eyebrow">交易风控</p>
           <h1>风控处置中心</h1>
-          <p>调查高链上手续费、IP/设备关联和取消行为；限制只阻断新下单，履约、接管、仲裁、对账和最终确认保持可用。</p>
+          <p>调查高链上手续费、IP/设备关联和取消行为；限制只影响新下单，履约、接管、仲裁、对账和最终确认保持可用。</p>
         </div>
         <div className="requirement-list"><code>限制处置</code><code>申诉裁决</code></div>
       </header>
@@ -262,7 +262,7 @@ export function RiskPage() {
             <section className="panel dashboard-blockers">
               <div className="panel-heading"><div><p className="section-kicker">安全关闭</p><h2>暂未发布的能力</h2></div><AlertTriangle aria-hidden="true" /></div>
               <div className="dashboard-blocker-list">{overview.decisionBlocked.map((item) => (
-                <article key={item.capability}><AlertTriangle aria-hidden="true" /><div><strong>{capabilityLabel(item.capability)}</strong><p>系统明确返回不可用，当前界面不推断、不模拟。</p></div><span className="status-chip status-blocked">{reasonLabel(item.reasonCode)}</span></article>
+                <article key={item.capability}><AlertTriangle aria-hidden="true" /><div><strong>{capabilityLabel(item.capability)}</strong><p>系统没有返回该能力结果，当前界面不推断、不模拟。</p></div><span className="status-chip status-blocked">{reasonLabel(item.reasonCode)}</span></article>
               ))}</div>
             </section>
           ) : null}
@@ -290,7 +290,7 @@ function RestrictionTable({ restrictions, isAdmin, canAppeal, onAppeal, onOverri
       <td><strong>{subjectTypeLabel(item.subjectType)}</strong><code title={item.subjectValue}>{item.subjectType === 'WALLET' ? shortAddress(item.subjectValue) : shortId(item.subjectValue)}</code></td>
       <td><strong>{restrictionKindLabel(item.restrictionKind)}</strong><small>{triggerTypeLabel(item.triggerType)} · {reasonLabel(item.reasonCode)}</small></td>
       <td><StateChip state={item.state} /></td>
-      <td><strong>{item.sourceObservationId ? '来自异常观察' : '人工提交'}</strong><details className="technical-details compact"><summary>高级证据</summary><code title={item.evidenceHash}>{shortId(item.evidenceHash)}</code><small>{item.sourceObservationId ? shortId(item.sourceObservationId) : '人工证据'}</small></details></td>
+      <td><strong>{item.sourceObservationId ? '来自异常观察' : '人工提交'}</strong><details className="technical-details compact"><summary>核验证据</summary><code title={item.evidenceHash}>{shortId(item.evidenceHash)}</code><small>{item.sourceObservationId ? shortId(item.sourceObservationId) : '人工证据'}</small></details></td>
       <td><strong>{item.startsAt}</strong><small>{item.expiresAt ? `到期 ${item.expiresAt}` : '无自动过期时间'}</small></td>
       <td><div className="risk-row-actions">{canAppeal && item.state === 'ACTIVE' ? <button className="button button-quiet" type="button" onClick={() => onAppeal(item.restrictionId)}>选择申诉</button> : null}{isAdmin && item.state === 'ACTIVE' ? <button className="button button-danger" type="button" onClick={() => onOverride(item.restrictionId)}>选择解除</button> : null}{item.state !== 'ACTIVE' ? <span>只读终态</span> : null}</div></td>
     </tr>
@@ -304,8 +304,8 @@ function AppealTable({ appeals, isAdmin, onDecide }: { appeals: readonly RiskApp
       <td><code title={item.appealId}>{shortId(item.appealId)}</code><small title={item.submittedBy}>{shortAddress(item.submittedBy)}</small></td>
       <td><code title={item.restrictionId}>{shortId(item.restrictionId)}</code></td>
       <td><StateChip state={item.state} /></td>
-      <td><strong>已提交</strong><details className="technical-details compact"><summary>高级申诉证据</summary><code title={item.statementHash}>{shortId(item.statementHash)}</code><small title={item.evidenceHash}>{shortId(item.evidenceHash)}</small></details></td>
-      <td><strong>{item.decisionReasonCode ? reasonLabel(item.decisionReasonCode) : '待裁决'}</strong><details className="technical-details compact"><summary>高级裁决证据</summary><code title={item.decisionEvidenceHash ?? undefined}>{item.decisionEvidenceHash ? shortId(item.decisionEvidenceHash) : '—'}</code></details></td>
+      <td><strong>已提交</strong><details className="technical-details compact"><summary>申诉核验信息</summary><code title={item.statementHash}>{shortId(item.statementHash)}</code><small title={item.evidenceHash}>{shortId(item.evidenceHash)}</small></details></td>
+      <td><strong>{item.decisionReasonCode ? reasonLabel(item.decisionReasonCode) : '待裁决'}</strong><details className="technical-details compact"><summary>裁决核验信息</summary><code title={item.decisionEvidenceHash ?? undefined}>{item.decisionEvidenceHash ? shortId(item.decisionEvidenceHash) : '—'}</code></details></td>
       <td>{isAdmin && item.state === 'PENDING' ? <button className="button button-primary" type="button" onClick={() => onDecide(item.appealId)}>选择裁决</button> : <span>只读</span>}</td>
     </tr>
   ))}</tbody></table></div>;
@@ -318,7 +318,7 @@ function ObservationTable({ overview }: { overview: RiskOverview }) {
       <td><strong>{signalTypeLabel(item.signalType)}</strong><small>{sourceTypeLabel(item.sourceType)}</small></td>
       <td><code title={item.walletAddress}>{shortAddress(item.walletAddress)}</code><small>{item.resourceId ? shortId(item.resourceId) : '—'}</small></td>
       <td><code title={item.ipHash ?? undefined}>{item.ipHash ? shortId(item.ipHash) : '—'}</code><small title={item.deviceHash ?? undefined}>{item.deviceHash ? shortId(item.deviceHash) : '—'}</small></td>
-      <td><strong>{riskSuggestion(item.signalType)}</strong><details className="technical-details compact"><summary>高级证据</summary><code title={item.evidenceHash}>{shortId(item.evidenceHash)}</code><small>{item.txHash ? `交易 ${shortId(item.txHash)}` : '无交易凭证'} · 手续费价格 ${item.gasPriceWei ?? '—'}</small></details></td>
+      <td><strong>{riskSuggestion(item.signalType)}</strong><details className="technical-details compact"><summary>核验证据</summary><code title={item.evidenceHash}>{shortId(item.evidenceHash)}</code><small>{item.txHash ? `交易 ${shortId(item.txHash)}` : '无交易凭证'} · 手续费价格 ${item.gasPriceWei ?? '—'}</small></details></td>
       <td><strong>{item.observedAt}</strong><small>记录 {item.recordedAt}</small></td>
     </tr>
   ))}</tbody></table></div>;
@@ -448,7 +448,7 @@ function ErrorView({ error }: { error: CoreApiError }) {
 function asCoreError(cause: unknown) {
   if (cause instanceof CoreApiError) return cause;
   if (cause instanceof Error) return new CoreApiError({ code: 'InvalidRequest', message: cause.message, status: 400 });
-  return new CoreApiError({ code: 'ExternalBlocked', message: '风控服务暂时不可用', status: 503 });
+  return new CoreApiError({ code: 'ExternalBlocked', message: '风控服务暂时无法连接', status: 503 });
 }
 
 function subjectTypeLabel(value: string) {

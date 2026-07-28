@@ -168,13 +168,13 @@ export function DashboardPage() {
           <section className={hasBlockedEvidence ? 'dashboard-alert' : 'dashboard-alert dashboard-alert-ready'} role="status">
             <span>{hasBlockedEvidence ? <ShieldAlert aria-hidden="true" /> : <CheckCircle2 aria-hidden="true" />}</span>
             <div>
-              <strong>{hasBlockedEvidence ? '业务数据已载入，存在明确阻断' : '业务数据已载入'}</strong>
+              <strong>{hasBlockedEvidence ? '业务数据已载入，存在明确限制' : '业务数据已载入'}</strong>
               <p>这里不会把缺失数据当成 0，也不会把未确认状态显示成健康。</p>
             </div>
           </section>
 
           <section className="readiness-strip dashboard-window" aria-label="Asia Shanghai 业务窗口">
-            <div><span>系统状态</span><strong>已连接</strong><details className="technical-details compact"><summary>高级版本信息</summary><code>{dashboard.artifactVersion}</code></details></div>
+            <div><span>系统状态</span><strong>已连接</strong><details className="technical-details compact"><summary>版本信息</summary><code>{dashboard.artifactVersion}</code></details></div>
             <div><span>统计时区</span><strong>{dashboard.timezone}</strong></div>
             <div><span>开始时间</span><strong>{dashboard.window.start}</strong></div>
             <div><span>结束时间</span><strong>{dashboard.window.end}</strong></div>
@@ -209,11 +209,11 @@ export function DashboardPage() {
                       <strong>{item.covered ? '覆盖充足' : '低于 100%'}</strong>
                       <dl><div><dt>已验证资产</dt><dd>{formatCoverageAmount(item.verifiedAssets, item.asset)}</dd></div><div><dt>未结算负债</dt><dd>{formatCoverageAmount(item.unsettledLiabilities, item.asset)}</dd></div></dl>
                       <code title={item.walletAddress}>{shortAddress(item.walletAddress)}</code>
-                      <details className="technical-details compact"><summary>高级确认记录</summary><small>区块 {item.blockNumber} · {item.recordedAt}</small></details>
+                      <details className="technical-details compact"><summary>确认记录</summary><small>区块 {item.blockNumber} · {item.recordedAt}</small></details>
                     </article>
                   ))}
                 </div>
-              ) : <UnavailableEmpty label="覆盖检查暂不可用" />}
+              ) : <UnavailableEmpty label="覆盖检查未返回" />}
             </article>
 
             <article className="panel dashboard-evidence-panel">
@@ -230,7 +230,7 @@ export function DashboardPage() {
                 <form className="coverage-recovery-form" onSubmit={(event) => void submitCoverageResume(event)}>
                   <div><strong>恢复新支付</strong><p>{coverageRecoveryReason(newPaymentPaused, coverageHealthy)}</p></div>
                   <details className="technical-details compact">
-                    <summary>高级签名参数</summary>
+                    <summary>签名参数</summary>
                     <label>确认编号<input inputMode="numeric" pattern="0|[1-9][0-9]*" value={resumeNonce} onChange={(event) => setResumeNonce(event.target.value)} disabled={!canRequestResume || resumePending} required /></label>
                     <label>签名截止时间<input inputMode="numeric" pattern="0|[1-9][0-9]*" value={resumeDeadline} onChange={(event) => setResumeDeadline(event.target.value)} disabled={!canRequestResume || resumePending} required /></label>
                   </details>
@@ -252,18 +252,18 @@ export function DashboardPage() {
           </section>
 
           <section className="panel dashboard-blockers">
-            <div className="panel-heading"><div><p className="section-kicker">安全阻断证据</p><h2>安全阻断证据</h2></div><AlertTriangle aria-hidden="true" /></div>
+            <div className="panel-heading"><div><p className="section-kicker">安全限制说明</p><h2>安全限制说明</h2></div><AlertTriangle aria-hidden="true" /></div>
             {dashboard.unavailable.length > 0 ? (
               <div className="dashboard-blocker-list">
                 {dashboard.unavailable.map((item) => (
                   <article key={`${item.metric}:${item.reasonCode}`}>
                     <AlertTriangle aria-hidden="true" />
-                    <div><strong>{metricLabel(item.metric)}</strong><p>{item.detail}</p><details className="technical-details compact"><summary>高级阻断代码</summary><code>{item.metric}</code><code>{item.reasonCode}</code></details></div>
+                    <div><strong>{metricLabel(item.metric)}</strong><p>{item.detail}</p><details className="technical-details compact"><summary>限制代码</summary><code>{item.metric}</code><code>{item.reasonCode}</code></details></div>
                     <span className="status-chip status-blocked">{reasonCodeLabel(item.reasonCode)}</span>
                   </article>
                 ))}
               </div>
-            ) : <p className="healthy-copy"><CheckCircle2 aria-hidden="true" />系统当前没有阻断项。</p>}
+            ) : <p className="healthy-copy"><CheckCircle2 aria-hidden="true" />系统当前没有限制项。</p>}
           </section>
         </>
       ) : null}
@@ -276,7 +276,7 @@ function CoverageBreakerActionTable({ actions }: { actions: readonly CoverageBre
   return (
     <div className="table-scroll">
       <table className="data-table coverage-action-table">
-        <thead><tr><th>动作</th><th>状态</th><th>确认数</th><th>更新时间</th><th>高级记录</th></tr></thead>
+        <thead><tr><th>动作</th><th>状态</th><th>确认数</th><th>更新时间</th><th>核验记录</th></tr></thead>
         <tbody>{actions.map((action) => (
           <tr key={action.actionId}>
             <td><strong>{coverageActionLabel(action.action)}</strong><small>{action.targetPaused ? '目标：暂停' : '目标：恢复'}</small></td>
@@ -322,8 +322,8 @@ function reasonCodeLabel(value: string) {
     COVERAGE_BELOW_100: '资金覆盖不足',
     WALLET_COVERAGE_BREACHED: '钱包覆盖不足',
     CONFIGURATION_REQUIRED: '需要配置',
-    EXTERNAL_BLOCKED: '外部服务阻断',
-    DECISION_BLOCKED: '缺少业务决策',
+    EXTERNAL_BLOCKED: '外部服务暂时异常',
+    DECISION_BLOCKED: '需要处理',
   } as Record<string, string>)[value] ?? metricLabel(value);
 }
 
@@ -340,7 +340,7 @@ function dashboardMetricGroups(dashboard: AdminBusinessDashboard): readonly Metr
     const item = dashboard.unavailable.find((candidate) => candidate.metric === metric);
     return item
       ? { label: metricLabel(metric), value: item.reasonCode, detail: item.detail, blocked: true }
-      : { label: metricLabel(metric), value: '不可用', detail: '系统未返回该指标，不解读为 0', blocked: true };
+      : { label: metricLabel(metric), value: '--', detail: '系统未返回该指标，不解读为 0', blocked: true };
   };
   const shipmentRate = dashboard.orders.shipmentRate;
   return [
@@ -422,7 +422,7 @@ function UnavailableEmpty({ label }: { label: string }) {
 function asCoreError(cause: unknown) {
   return cause instanceof CoreApiError
     ? cause
-    : new CoreApiError({ code: 'ExternalBlocked', message: '平台工作台服务暂时不可用', status: 503 });
+    : new CoreApiError({ code: 'ExternalBlocked', message: '平台工作台服务暂时无法连接', status: 503 });
 }
 
 function asCoverageResumeError(cause: unknown) {

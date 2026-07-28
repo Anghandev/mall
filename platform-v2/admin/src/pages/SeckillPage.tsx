@@ -56,7 +56,7 @@ export function SeckillPage() {
         onEvent: (event) => {
           if (!active) return;
           setEvents((items) => items.some((item) => item.eventId === event.eventId) ? items : [...items, event].slice(-100));
-          void fetchCurrentSeckillSession().then((session) => { if (active && session.sessionId === sessionId) setCurrent(session); }).catch((cause) => { if (active) setStreamError(asCoreError(cause).message); });
+          void fetchCurrentSeckillSession().then((session) => { if (active && session?.sessionId === sessionId) setCurrent(session); }).catch((cause) => { if (active) setStreamError(asCoreError(cause).message); });
         },
         onError: (realtimeError) => { if (active) setStreamError(realtimeError.message); },
         onClose: (code, reason) => {
@@ -94,7 +94,7 @@ export function SeckillPage() {
       <section className="workspace-grid">
         <article className="panel admin-resource-panel">
           <div className="panel-heading"><div><p className="section-kicker">实时记录</p><h2>购买接力记录</h2></div><span className={streamState === 'LIVE' ? 'status-chip status-ready' : 'status-chip status-blocked'}><Radio aria-hidden="true" />{streamStateLabel(streamState)}</span></div>
-          {streamError ? <div className="resource-state resource-state-error" role="alert"><Ban aria-hidden="true" /><div><strong>实时记录暂不可用</strong><p>{streamError}</p></div></div> : null}
+          {streamError ? <div className="resource-state resource-state-error" role="alert"><Ban aria-hidden="true" /><div><strong>实时记录连接失败</strong><p>{streamError}</p></div></div> : null}
           {events.length ? <div className="table-scroll"><table className="data-table seckill-event-table"><thead><tr><th>记录编号</th><th>确认状态</th><th>场次</th><th>发生时间</th></tr></thead><tbody>{[...events].reverse().map((event) => <tr key={event.eventId}><td><strong>{shortHash(event.eventId)}</strong><small>序号 {event.cursor}</small></td><td><span className="status-chip status-ready"><CheckCircle2 aria-hidden="true" />{finalityLabel(event.finality)}</span></td><td>{shortHash(event.resourceId)}</td><td title={event.occurredAt}>{formatDateTime(event.occurredAt)}</td></tr>)}</tbody></table></div> : <p className="muted-copy">还没有购买接力确认记录。</p>}
         </article>
         <aside className="panel evidence-panel">
@@ -117,7 +117,7 @@ function SessionDetail({ session }: { session: SeckillSessionProjection }) {
   return <>
     <div className="status-overview compact-overview">
       <article><span>当前状态</span><strong>{sessionPhaseLabel(session.phase)}</strong><small>系统记录：{sessionPhaseLabel(session.storedPhase)}</small></article>
-      <article><span>商品</span><strong>{session.product.title}</strong><small>商品和规格编号在高级信息里</small></article>
+      <article><span>商品</span><strong>{session.product.title}</strong><small>商品和规格编号在核验信息里</small></article>
       <article><span>库存</span><strong>{session.inventory.sold} / {session.inventory.total}</strong><small>预留 {session.inventory.reserved} · 可售 {session.inventory.available}</small></article>
       <article><span>奖池</span><strong>{formatUsdt(session.prizePoolUsdt)}</strong><small>{session.prizeSettlement ? prizeStateLabel(session.prizeSettlement.state) : '等待结算'}</small></article>
     </div>
@@ -132,7 +132,7 @@ function SessionDetail({ session }: { session: SeckillSessionProjection }) {
       <div><dt>中奖钱包</dt><dd>{session.winnerWallet ? shortAddress(session.winnerWallet) : '尚未最终结算'}</dd></div>
     </dl>
     <details className="technical-details compact">
-      <summary>高级编号</summary>
+      <summary>核验编号</summary>
       <code>商品 {session.product.productId}</code>
       <code>规格 {session.product.skuId}</code>
       <code>规则 {session.policyVersion}</code>
@@ -147,7 +147,7 @@ function PrizeSettlementDetail({ settlement }: { settlement: NonNullable<Seckill
   const review = settlement.review;
   const payout = settlement.payout;
   const rollover = ['ROLLOVER_PENDING', 'ROLLED_OVER'].includes(settlement.state);
-  return <section className="seckill-prize-settlement" aria-label="秒杀大奖结算记录"><div className="panel-heading"><div><p className="section-kicker">大奖结算</p><h3>中奖候选与发奖进度</h3></div>{rollover ? <RotateCcw aria-hidden="true" /> : <Trophy aria-hidden="true" />}</div><div className="seckill-action-status"><span className={settlement.state === 'QUARANTINED' ? 'status-chip status-blocked' : settlement.state === 'APPROVED' || settlement.state === 'ROLLED_OVER' ? 'status-chip status-ready' : 'status-chip'}>{prizeStateLabel(settlement.state)}</span><span>奖池 {formatUsdt(settlement.poolAmountUsdt)}</span></div><dl className="definition-grid seckill-prize-facts"><div><dt>截止时间</dt><dd title={settlement.cutoffAt}>{formatDateTime(settlement.cutoffAt)}</dd></div><div><dt>候选订单</dt><dd>{candidate?.orderId ? shortHash(candidate.orderId) : '空场，无候选'}</dd></div><div><dt>候选钱包</dt><dd>{shortAddress(candidate?.buyerWallet)}</dd></div><div><dt>人工审核</dt><dd>{review?.decision ? reviewDecisionLabel(review.decision) : '待审核'}<small>{review ? `已记录原因 · ${formatDateTime(review.reviewedAt)}` : '人工不能更换候选人'}</small></dd></div><div><dt>发奖状态</dt><dd>{payout?.state ? payoutStateLabel(payout.state) : '未进入支付'}</dd></div><div><dt>顺延场次</dt><dd>{settlement.rolloverTargetSessionId ? shortHash(settlement.rolloverTargetSessionId) : '尚无目标场次'}</dd></div></dl><details className="technical-details"><summary>高级结算证据</summary><dl className="definition-grid seckill-prize-facts"><div><dt>奖池快照</dt><dd><code title={settlement.poolSnapshotHash}>{shortHash(settlement.poolSnapshotHash)}</code></dd></div><div><dt>购买事件 / 凭证</dt><dd><code title={candidate?.paymentEventKey ?? undefined}>{shortHash(candidate?.paymentEventKey)}</code><small>{shortHash(candidate?.evidenceHash)}</small></dd></div><div><dt>审核人 / 凭证</dt><dd><code title={review?.reviewedBy ?? undefined}>{shortAddress(review?.reviewedBy)}</code><small>{review?.reasonCode ?? '无原因'} · {shortHash(review?.evidenceHash)}</small></dd></div><div><dt>奖励账本</dt><dd><code title={settlement.awardJournalId ?? undefined}>{shortHash(settlement.awardJournalId) || '—'}</code></dd></div><div><dt>顺延账本</dt><dd>{shortHash(settlement.rolloverJournalId) || '尚无顺延分录'}</dd></div><div><dt>最终转账</dt><dd><code title={payout?.finalExecutionTxHashes[0] ?? undefined}>{shortHash(payout?.finalExecutionTxHashes[0]) || '—'}</code><small>{payout?.finalExecutionTxHashes.length ?? 0} 笔</small></dd></div></dl></details></section>;
+  return <section className="seckill-prize-settlement" aria-label="秒杀大奖结算记录"><div className="panel-heading"><div><p className="section-kicker">大奖结算</p><h3>中奖候选与发奖进度</h3></div>{rollover ? <RotateCcw aria-hidden="true" /> : <Trophy aria-hidden="true" />}</div><div className="seckill-action-status"><span className={settlement.state === 'QUARANTINED' ? 'status-chip status-blocked' : settlement.state === 'APPROVED' || settlement.state === 'ROLLED_OVER' ? 'status-chip status-ready' : 'status-chip'}>{prizeStateLabel(settlement.state)}</span><span>奖池 {formatUsdt(settlement.poolAmountUsdt)}</span></div><dl className="definition-grid seckill-prize-facts"><div><dt>截止时间</dt><dd title={settlement.cutoffAt}>{formatDateTime(settlement.cutoffAt)}</dd></div><div><dt>候选订单</dt><dd>{candidate?.orderId ? shortHash(candidate.orderId) : '空场，无候选'}</dd></div><div><dt>候选钱包</dt><dd>{shortAddress(candidate?.buyerWallet)}</dd></div><div><dt>人工审核</dt><dd>{review?.decision ? reviewDecisionLabel(review.decision) : '待审核'}<small>{review ? `已记录原因 · ${formatDateTime(review.reviewedAt)}` : '人工不能更换候选人'}</small></dd></div><div><dt>发奖状态</dt><dd>{payout?.state ? payoutStateLabel(payout.state) : '未进入支付'}</dd></div><div><dt>顺延场次</dt><dd>{settlement.rolloverTargetSessionId ? shortHash(settlement.rolloverTargetSessionId) : '尚无目标场次'}</dd></div></dl><details className="technical-details"><summary>结算核验信息</summary><dl className="definition-grid seckill-prize-facts"><div><dt>奖池快照</dt><dd><code title={settlement.poolSnapshotHash}>{shortHash(settlement.poolSnapshotHash)}</code></dd></div><div><dt>购买事件 / 凭证</dt><dd><code title={candidate?.paymentEventKey ?? undefined}>{shortHash(candidate?.paymentEventKey)}</code><small>{shortHash(candidate?.evidenceHash)}</small></dd></div><div><dt>审核人 / 凭证</dt><dd><code title={review?.reviewedBy ?? undefined}>{shortAddress(review?.reviewedBy)}</code><small>{review?.reasonCode ?? '无原因'} · {shortHash(review?.evidenceHash)}</small></dd></div><div><dt>奖励账本</dt><dd><code title={settlement.awardJournalId ?? undefined}>{shortHash(settlement.awardJournalId) || '—'}</code></dd></div><div><dt>顺延账本</dt><dd>{shortHash(settlement.rolloverJournalId) || '尚无顺延分录'}</dd></div><div><dt>最终转账</dt><dd><code title={payout?.finalExecutionTxHashes[0] ?? undefined}>{shortHash(payout?.finalExecutionTxHashes[0]) || '—'}</code><small>{payout?.finalExecutionTxHashes.length ?? 0} 笔</small></dd></div></dl></details></section>;
 }
 
 
@@ -240,7 +240,7 @@ function isNoCurrentSession(cause: unknown) {
 }
 
 function asCoreError(cause: unknown) {
-  return cause instanceof CoreApiError ? cause : new CoreApiError({ code: 'ExternalBlocked', message: '秒杀服务暂时不可用', status: 503 });
+  return cause instanceof CoreApiError ? cause : new CoreApiError({ code: 'ExternalBlocked', message: '秒杀服务暂时无法连接', status: 503 });
 }
 
 function ErrorView({ error }: { error: CoreApiError }) {

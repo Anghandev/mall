@@ -330,7 +330,7 @@ export function SettingsPage() {
             </button>
           </div>
           {profile.phase === 'loading' ? <LoadingRows count={3} /> : null}
-          {profile.phase === 'error' ? <EmptyState blocked description={profile.message} title="店铺资料不可用" /> : null}
+          {profile.phase === 'error' ? <EmptyState blocked description={profile.message} title="店铺资料加载失败" /> : null}
           {profile.phase === 'ready' ? (
             <>
               <div className="field">
@@ -364,7 +364,7 @@ export function SettingsPage() {
                   </div>
                 </div>
                 <FieldHelp>Logo 会经过系统上传、存储封存和钱包归属校验。</FieldHelp>
-                {logoAssetId ? <details className="technical-details compact"><summary>高级 Logo 凭证</summary><code className="profile-asset-id" title={logoAssetId}>{shortHash(logoAssetId)}</code></details> : null}
+                {logoAssetId ? <details className="technical-details compact"><summary>Logo 核验信息</summary><code className="profile-asset-id" title={logoAssetId}>{shortHash(logoAssetId)}</code></details> : null}
                 {logoError ? <p className="form-error" role="alert">Logo 读取失败：{logoError}</p> : null}
               </fieldset>
               {profileFeedback ? <p className={`command-notice ${profileFeedback.tone}`} role={profileFeedback.tone === 'error' ? 'alert' : 'status'}>{profileFeedback.message}</p> : null}
@@ -376,7 +376,7 @@ export function SettingsPage() {
         <section className="section-block wallet-panel" aria-labelledby="wallet-title">
           <div className="section-heading"><div><p className="eyebrow">结算身份</p><h2 id="wallet-title">绑定结算钱包</h2></div><WalletCards aria-hidden="true" size={19} /></div>
           {profile.phase === 'loading' ? <LoadingRows count={2} /> : null}
-          {profile.phase === 'error' ? <EmptyState blocked description={profile.message} title="结算身份不可用" /> : null}
+          {profile.phase === 'error' ? <EmptyState blocked description={profile.message} title="结算身份加载失败" /> : null}
           {profile.phase === 'ready' ? (
             <>
               <div className="wallet-address"><span>常驻结算钱包</span><strong title={profile.value.settlementWallet}>{shortAddress(profile.value.settlementWallet)}</strong><small title={profile.value.merchantId}>商家编号：{shortHash(profile.value.merchantId)}</small></div>
@@ -409,7 +409,7 @@ export function SettingsPage() {
           <ShieldCheck aria-hidden="true" size={17} />
           <div><strong>商家范围说明</strong><span>较早的历史日志可能不完整；当前数量只代表本商家页面已读取的记录。</span></div>
         </div>
-        <div className="external-block-note" role="status"><Printer aria-hidden="true" size={17} /><span>实体打印机与设备验收暂未开放，本页只下载 CSV，不会发送打印任务。</span></div>
+        <div className="external-block-note" role="status"><Printer aria-hidden="true" size={17} /><span>本页只下载 CSV，不会发送打印任务；实体打印机后续单独接入。</span></div>
         {auditFeedback ? <p className={`command-notice audit-feedback ${auditFeedback.tone}`} role={auditFeedback.tone === 'error' ? 'alert' : 'status'}>{auditFeedback.message}</p> : null}
 
         {audit.phase === 'loading' ? <LoadingRows count={5} /> : null}
@@ -431,7 +431,7 @@ export function SettingsPage() {
                       <td>{entry.module}</td>
                       <td className="audit-detail"><span>{entry.detail}</span><small title={entry.entryHash}>日志编号 {shortHash(entry.entryHash)}</small></td>
                       <td><HashValue value={entry.signatureHash} /></td>
-                      <td>{entry.chainTxHash ? <details className="technical-details compact"><summary>查看高级记录</summary><a className="hash-link" href={`https://bscscan.com/tx/${entry.chainTxHash}`} rel="noreferrer" target="_blank">{shortHash(entry.chainTxHash)}</a></details> : <span className="muted-value">无</span>}</td>
+                      <td>{entry.chainTxHash ? <details className="technical-details compact"><summary>客服核验编号</summary><a className="hash-link" href={`https://bscscan.com/tx/${entry.chainTxHash}`} rel="noreferrer" target="_blank">{shortHash(entry.chainTxHash)}</a></details> : <span className="muted-value">无</span>}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -68,7 +68,7 @@ export function UnavailableValue({ label }: { label: string }) {
   return (
     <div className="metric">
       <span>{label}</span>
-      <strong className="metric__value" aria-label={`${label}暂不可用`}>
+      <strong className="metric__value" aria-label={`${label}未返回数据`}>
         --
       </strong>
     </div>
@@ -206,7 +206,7 @@ export function RulesDialog({
           <li>每笔链上最终确认的秒杀购买增加 30 秒，接力最高 60 秒且不超过主场截止。</li>
           <li>系统按付款最终确认时间判断是否命中秒杀；截止后的付款会按普通价和已锁定库存处理。</li>
           <li>商品付款为 70% USDT + 30% 等值 NPL；秒杀与普通购买都使用系统生成的 5 分钟有效报价。</li>
-          <li>BNM 是按商品 USDT 标价 1:1 记录的后台积分，不是代币，履约最终确认前暂不可用。</li>
+          <li>BNM 是按商品 USDT 标价 1:1 记录的后台积分，不是代币，履约最终确认前不会提前显示可用余额。</li>
           <li>交易编号只代表钱包已提交，最终结果以链上确认和系统同步状态为准。</li>
         </ul>
         <div className="rules-dialog__actions">

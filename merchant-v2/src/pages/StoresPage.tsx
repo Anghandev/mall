@@ -390,7 +390,7 @@ export function StoresPage() {
         <section className="section-block store-list" aria-labelledby="store-list-title">
           <div className="section-heading"><div><p className="eyebrow">门店列表</p><h2 id="store-list-title">旗下门店</h2></div><span>{storesState.phase === 'ready' ? `${stores.length} 家` : '正在读取'}</span></div>
           {storesState.phase === 'loading' ? <LoadingRows count={3} /> : null}
-          {storesState.phase === 'idle' ? <EmptyState blocked description="连接授权商家钱包后读取门店。" title="商家会话不可用" /> : null}
+          {storesState.phase === 'idle' ? <EmptyState blocked description="连接授权商家钱包后读取门店。" title="请先连接商家钱包" /> : null}
           {storesState.phase === 'error' ? <><EmptyState blocked description={storesState.message} title={loadErrorTitle(storesState)} /><button className="button secondary wide" onClick={() => void loadStores()} type="button"><RefreshCw aria-hidden="true" size={16} /> 重试</button></> : null}
           {storesState.phase === 'ready' && stores.length === 0 ? <EmptyState description="当前商家尚未创建门店，可从右上角建立第一家门店草稿。" title="暂无可管理门店" /> : null}
           {stores.length > 0 ? <div className="store-options" role="list">{stores.map((store) => (
@@ -424,7 +424,7 @@ export function StoresPage() {
                   <div className="store-image-grid">{draft.imageAssetIds.map((assetId, index) => (
                     <figure key={assetId}>
                       <div className="store-image-frame">{imageAccess[assetId] ? <img alt={`门店实景图 ${index + 1}`} src={imageAccess[assetId].readUrl} /> : <Store aria-hidden="true" size={28} />}</div>
-                      <figcaption><span>实景图 {index + 1}</span><details className="technical-details compact"><summary>高级图片编号</summary><code>{shortHash(assetId)}</code></details><button aria-label={`移除门店实景图 ${index + 1}`} className="icon-button" disabled={!canUpdate || Boolean(storeBusy)} onClick={() => updateDraft((current) => ({ ...current, imageAssetIds: current.imageAssetIds.filter((id) => id !== assetId) }))} type="button"><Trash2 aria-hidden="true" size={15} /></button></figcaption>
+                      <figcaption><span>实景图 {index + 1}</span><details className="technical-details compact"><summary>图片编号</summary><code>{shortHash(assetId)}</code></details><button aria-label={`移除门店实景图 ${index + 1}`} className="icon-button" disabled={!canUpdate || Boolean(storeBusy)} onClick={() => updateDraft((current) => ({ ...current, imageAssetIds: current.imageAssetIds.filter((id) => id !== assetId) }))} type="button"><Trash2 aria-hidden="true" size={15} /></button></figcaption>
                     </figure>
                   ))}</div>
                 )}
@@ -435,7 +435,7 @@ export function StoresPage() {
                 <div className="field"><label htmlFor="store-address">详细地址</label><input disabled id="store-address" readOnly value={selectedStore.address} /></div>
                 <div className="two-column-fields">
                   <div className="field"><label htmlFor="region-code">地区代码</label><input disabled id="region-code" readOnly value={selectedStore.regionCode} /></div>
-                  <details className="technical-details compact"><summary>高级定位信息</summary><code>{selectedStore.longitude}, {selectedStore.latitude}</code></details>
+                  <details className="technical-details compact"><summary>定位信息</summary><code>{selectedStore.longitude}, {selectedStore.latitude}</code></details>
                 </div>
               </div>
 
@@ -506,7 +506,7 @@ function loadErrorTitle(state: { code?: string; status?: number }) {
   if (state.code === 'ConfigurationRequired') return '门店配置不完整';
   if (state.code === 'Forbidden' || state.status === 403) return '无权读取当前门店';
   if (state.status === 409 || state.code === 'IdempotencyConflict') return '门店状态冲突';
-  return '门店数据不可用';
+  return '门店数据加载失败';
 }
 
 function storeStatusLabel(status: MerchantManagedStore['status']) {

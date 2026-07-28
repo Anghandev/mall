@@ -18,7 +18,7 @@ export function CatalogMediaAccess({ assetId, label, token }: { assetId: string;
     } catch (cause) {
       setAccess(null);
       setError(cause instanceof CoreApiError ? cause : new CoreApiError({
-        code: 'ExternalBlocked', message: '媒体授权读取不可用', status: 503,
+        code: 'ExternalBlocked', message: '媒体授权读取失败', status: 503,
       }));
     } finally {
       setLoading(false);

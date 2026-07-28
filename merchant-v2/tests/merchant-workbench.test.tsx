@@ -679,7 +679,7 @@ describe('01 authoritative dashboard', () => {
 
     expect(await screen.findByText('运营聚合加载失败')).toBeTruthy();
     expect(screen.getAllByText(/dashboard offline/).length).toBeGreaterThan(0);
-    expect(screen.getByLabelText('快递待发货订单不可用').textContent).toBe('--');
+    expect(screen.getByLabelText('快递待发货订单未返回数据').textContent).toBe('--');
   });
 });
 
@@ -764,7 +764,7 @@ describe('02 one-product form', () => {
     expect(screen.getByText('节点奖励池 45%')).toBeTruthy();
     expect(screen.getByText('奖励预留池 10%')).toBeTruthy();
     expect(screen.getByRole('cell', { name: '517.50 USDT' })).toBeTruthy();
-    expect(screen.getByText('高级签名凭证')).toBeTruthy();
+    expect(screen.getByText('签名核验信息')).toBeTruthy();
     expect(createMerchantConcessionPreview).toHaveBeenCalledWith(
       managedProduct.productId,
       expect.objectContaining({ merchantConcessionBps: 2500 }),
@@ -778,7 +778,7 @@ describe('02 one-product form', () => {
       'test-session',
     ));
     expect(await screen.findByText('商品暂时不能修改')).toBeTruthy();
-    expect(screen.getByText('高级锁定信息')).toBeTruthy();
+    expect(screen.getByText('锁定原因')).toBeTruthy();
     expect((screen.getByRole('button', { name: '保存草稿' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
@@ -833,7 +833,7 @@ describe('02 one-product form', () => {
     await enterProduct(client);
 
     expect(await screen.findByText('商品暂时不能修改')).toBeTruthy();
-    expect(screen.getByText('高级锁定信息')).toBeTruthy();
+    expect(screen.getByText('锁定原因')).toBeTruthy();
     expect((screen.getByLabelText('商品标题') as HTMLInputElement).disabled).toBe(true);
     expect((screen.getByRole('button', { name: '保存草稿' }) as HTMLButtonElement).disabled).toBe(true);
   });
@@ -879,7 +879,7 @@ describe('03 fulfillment center', () => {
 
     expect(screen.getByRole('columnheader', { name: '运单号' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: /商家强制签收|直接完成订单/ })).toBeNull();
-    expect(screen.getAllByText('商家会话不可用').length).toBeGreaterThan(0);
+    expect(screen.getByText('请先连接商家钱包')).toBeTruthy();
 
     await user.click(screen.getByRole('button', { name: '到店自提' }));
     expect(screen.getByRole('columnheader', { name: '核销门店' })).toBeTruthy();
@@ -907,7 +907,7 @@ describe('03 fulfillment center', () => {
     expect(getOrderFulfillmentTarget).toHaveBeenCalledWith(deliveryOrderId, 'test-session');
     expect(screen.getAllByText('秒杀订单').length).toBeGreaterThan(0);
     expect(screen.getAllByText('2').length).toBeGreaterThan(0);
-    expect(document.querySelector(`[title="${deliveryOrder.paymentTxHash}"]`)).toBeTruthy();
+    expect(screen.getAllByText('已提交').length).toBeGreaterThan(0);
   });
 
   it('serializes Core order filters and advances with the complete stable cursor', async () => {
@@ -1167,7 +1167,7 @@ describe('03 fulfillment center', () => {
     await user.click(screen.getByRole('button', { name: '启动相机扫码' }));
     expect((await screen.findByRole('alert')).textContent).toContain('请手工输入六位核销码');
     await user.type(screen.getByLabelText('六位核销码'), '123456');
-    await user.type(screen.getByLabelText('核销凭证编号（高级）'), evidenceHash);
+    await user.type(screen.getByLabelText('核销凭证编号'), evidenceHash);
     await user.click(screen.getByRole('button', { name: '确认门店核销' }));
 
     expect(await screen.findByText(/2026-07-14T12:05:00.000Z/)).toBeTruthy();
@@ -1226,7 +1226,7 @@ describe('03 fulfillment center', () => {
 
     await waitFor(() => expect((screen.getByLabelText('六位核销码') as HTMLInputElement).value).toBe('654321'));
     expect(stop).toHaveBeenCalledTimes(1);
-    await user.type(screen.getByLabelText('核销凭证编号（高级）'), evidenceHash);
+    await user.type(screen.getByLabelText('核销凭证编号'), evidenceHash);
     await user.click(screen.getByRole('button', { name: '确认门店核销' }));
     await waitFor(() => expect(verifyPickup).toHaveBeenCalledWith(
       pickupOrderId,
@@ -1720,7 +1720,8 @@ describe('05 asset rails', () => {
         throw new CoreApiError('Unauthorized', '商家会话已失效。', 'corr-receivable-auth');
       },
     }));
-    expect(await screen.findByText(/请先连接正确钱包：商家会话已失效.*corr-receivable-auth/)).toBeTruthy();
+    expect(await screen.findByText(/请先连接正确钱包：商家会话已失效/)).toBeTruthy();
+    expect(document.body.textContent).not.toContain('corr-receivable-auth');
 
     cleanup();
     await enterAssets(createMockCoreApi({
@@ -1816,7 +1817,7 @@ describe('06 audit and 07 rules', () => {
     expect(await screen.findByText('SettlementRequestAuthorized')).toBeTruthy();
     expect(screen.getByText('商家范围说明')).toBeTruthy();
     expect(screen.getByText(/较早的历史日志可能不完整/)).toBeTruthy();
-    expect(screen.getByText(/实体打印机与设备验收暂未开放/)).toBeTruthy();
+    expect(screen.getByText(/实体打印机后续单独接入/)).toBeTruthy();
 
     await user.clear(name);
     await user.type(name, '阿步新金店');
@@ -1882,7 +1883,7 @@ describe('06 audit and 07 rules', () => {
       getMerchantProfile: async () => ({ ...merchantProfile, merchantId: 'merchant-other' }),
     }));
 
-    expect(await screen.findByText('店铺资料不可用')).toBeTruthy();
+    expect(await screen.findByText('店铺资料加载失败')).toBeTruthy();
     expect(screen.getAllByText(/店铺资料与当前商家会话不一致/)).toHaveLength(2);
     expect(screen.queryByRole('button', { name: '保存资料' })).toBeNull();
   });

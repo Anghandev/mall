@@ -2094,7 +2094,7 @@ test('seckill operations publish locked inventory, reconcile prize funding and g
          merchant_id, backing_wallet_address, balance_usdt, minimum_usdt,
          source_evidence_hash, updated_at
        ) VALUES ('merchant-1',$1,'0',$2,$3,$4)`,
-      [operationsSafe, (1_000n * 10n ** 18n).toString(), HASH_2, now],
+      [operationsSafe, '0', HASH_2, now],
     );
     await db.query(
       "UPDATE core.merchants SET guarantee_status = 'BELOW_MINIMUM' WHERE merchant_id = 'merchant-1'",
@@ -2667,7 +2667,7 @@ test('zero-guarantee approved merchant exposes product media, catalog and ordina
          merchant_id, backing_wallet_address, balance_usdt, minimum_usdt,
          source_evidence_hash, updated_at
        ) VALUES ('merchant-1',$1,'0',$2,$3,$4)`,
-      ['0x5555555555555555555555555555555555555555', (1_000n * 10n ** 18n).toString(), HASH_2,
+      ['0x5555555555555555555555555555555555555555', '0', HASH_2,
         new Date(now.getTime() - 60_000)],
     );
     await db.query(
@@ -2861,7 +2861,7 @@ test('mainnet micro-test entitlement remains valid after its seckill inventory i
          merchant_id, backing_wallet_address, balance_usdt, minimum_usdt,
          source_evidence_hash, updated_at
        ) VALUES ('merchant-1',$1,'1',$2,$3,$4)`,
-      ['0x5555555555555555555555555555555555555555', (1_000n * 10n ** 18n).toString(), HASH_2,
+      ['0x5555555555555555555555555555555555555555', '0', HASH_2,
         new Date(now.getTime() - 60_000)],
     );
     const entitlement = loadMainnetMicrotestEntitlement({
@@ -4585,6 +4585,7 @@ test('seckill quote locks both inventories and final classification releases the
       clock: () => new Date(now.getTime() + 84_000),
     });
     const currentSession = await seckill.current();
+    assert.ok(currentSession);
     assert.equal(currentSession.sessionId, sessionId);
     assert.equal(currentSession.phase, 'LIVE');
     assert.equal(currentSession.timers.mainDurationSeconds, 3_600);
@@ -4772,10 +4773,7 @@ test('public seckill projections hide mainnet micro-test sessions', async () => 
     );
     const seckill = new SeckillService({ transactions: transactionAdapter(db), clock: () => now });
 
-    await assert.rejects(
-      () => seckill.current(),
-      (error: unknown) => error instanceof CoreError && error.code === 'UnknownState',
-    );
+    assert.equal(await seckill.current(), null);
     await assert.rejects(
       () => seckill.get(microSessionId),
       (error: unknown) => error instanceof CoreError && error.code === 'UnknownState',
@@ -4788,7 +4786,9 @@ test('public seckill projections hide mainnet micro-test sessions', async () => 
 
     const formalSessionId = `0x${'b'.repeat(64)}`;
     await insertLiveSeckillSession(db, formalSessionId, new Date(now.getTime() + 60_000), 2);
-    assert.equal((await seckill.current()).sessionId, formalSessionId);
+    const currentSession = await seckill.current();
+    assert.ok(currentSession);
+    assert.equal(currentSession.sessionId, formalSessionId);
   } finally {
     await db.close();
   }
@@ -11139,7 +11139,7 @@ test('zero-guarantee merchant settlement creates a formal transfer without guara
          merchant_id, backing_wallet_address, balance_usdt, minimum_usdt,
          source_evidence_hash, updated_at
        ) VALUES ('merchant-1',$1,'0',$2,$3,$4)`,
-      [prepared.runtime.executorWallet, (1_000n * 10n ** 18n).toString(), HASH_2, prepared.now],
+      [prepared.runtime.executorWallet, '0', HASH_2, prepared.now],
     );
     const service = new SettlementService({
       transactions: transactionAdapter(db),
@@ -15884,7 +15884,7 @@ function paymentPolicyPayload() {
     relayIncrement: 30,
     relayCap: 60,
     requiredConfirmations: 15,
-    merchantGuaranteeMinimumUsdt: (1_000n * 10n ** 18n).toString(),
+    merchantGuaranteeMinimumUsdt: '0',
     platformServiceFeeWallet: '0x2222222222222222222222222222222222222223',
     usdtSettlementWallet: '0x3333333333333333333333333333333333333333',
     nplRewardWallet: '0x4444444444444444444444444444444444444444',

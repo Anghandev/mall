@@ -363,7 +363,7 @@ function TakeoverRow({ takeover, onSelect }: { takeover: TakeoverCase; onSelect(
 
 function FulfillmentTargetState({ state }: { state: DataState<FulfillmentTarget> | undefined }) {
   if (!state || state.phase === 'loading') return <LoadingRows count={3} />;
-  if (state.phase === 'error') return <EmptyState blocked title="履约目标不可用" description={state.error} />;
+  if (state.phase === 'error') return <EmptyState blocked title="履约目标加载失败" description={state.error} />;
   if (state.value.fulfillmentMode !== 'DELIVERY') return <EmptyState blocked title="履约模式不匹配" description="替代商家发货只接受系统发布的快递履约目标。" />;
   return (
     <dl className="takeover-target">
@@ -371,7 +371,7 @@ function FulfillmentTargetState({ state }: { state: DataState<FulfillmentTarget>
       <div><dt>联系电话</dt><dd>{state.value.payload.phone}</dd></div>
       <div><dt>完整地址</dt><dd>{state.value.payload.address}</dd></div>
       <div><dt>行政区</dt><dd>{state.value.payload.regionCode}</dd></div>
-      <details className="technical-details compact"><summary>高级地址校验</summary><div><dt>地址校验编号</dt><dd><code title={state.value.targetHash}>{shortId(state.value.targetHash)}</code></dd></div></details>
+      <details className="technical-details compact"><summary>地址核验信息</summary><div><dt>地址校验编号</dt><dd><code title={state.value.targetHash}>{shortId(state.value.targetHash)}</code></dd></div></details>
     </dl>
   );
 }

@@ -216,7 +216,7 @@ export function AssetsPage() {
       }
       settlementKey.current = undefined;
       setSettlementAmount('');
-      setSettlementCommand({ phase: 'success', message: `结算请求已提交，状态：${statusLabel(request.state)}，编号：${shortId(request.request_id)}` });
+      setSettlementCommand({ phase: 'success', message: `结算请求已提交，状态：${statusLabel(request.state)}，记录号：${shortId(request.request_id)}` });
       void loadData(true);
     } catch (error) {
       setSettlementCommand({ phase: 'error', message: readableError(error) });
@@ -258,7 +258,7 @@ export function AssetsPage() {
           <article className="metric finance-identity">
             <p>结算钱包</p>
             <strong>{finance ? shortAddress(finance.merchant.settlement_wallet) : '--'}</strong>
-            <span>{finance ? `${shortId(finance.merchant.merchant_id)} / ${merchantStatusLabel(finance.merchant.status)}` : '商家财务信息不可用'}</span>
+            <span>{finance ? `${shortId(finance.merchant.merchant_id)} / ${merchantStatusLabel(finance.merchant.status)}` : '请连接商家钱包'}</span>
           </article>
         </div>
         <ProjectionState state={settlementsState}>
@@ -361,7 +361,7 @@ export function AssetsPage() {
                     <td><strong>{railLabel(request.rail)}</strong><small>{assetLabel(request.asset)}</small></td>
                     <td className="mono-value">{formatAssetAmount(request.amount, request.asset)}</td>
                     <td><StatusText state={request.state} /></td>
-                    <td><strong>{shortAddress(request.executor_wallet)}</strong><details className="technical-details compact"><summary>查看高级编号</summary><small>{request.transfer_ids.map(shortId).join(', ') || '--'}</small></details></td>
+                    <td><strong>{request.transfer_ids.length ? '平台处理中' : '等待平台处理'}</strong><details className="technical-details compact"><summary>客服核验编号</summary><small>{request.transfer_ids.map(shortId).join(', ') || '--'}</small></details></td>
                     <td>{request.final_execution_tx_hashes.length
                       ? <details className="technical-details compact"><summary>{request.final_execution_tx_hashes.length} 笔已到账</summary>{request.final_execution_tx_hashes.map((txHash) => <ExplorerHash hash={txHash} key={txHash} />)}</details>
                       : '未到账'}</td>
@@ -449,7 +449,7 @@ function MerchantReceivableStatementRow({ statement }: { statement: MerchantRece
           <div><dt>创建时间</dt><dd><time dateTime={statement.createdAt}>{formatDateTime(statement.createdAt)}</time></dd></div>
           <div><dt>付款确认</dt><dd><time dateTime={statement.paymentFinalizedAt}>{formatDateTime(statement.paymentFinalizedAt)}</time></dd></div>
           <div><dt>履约确认</dt><dd>{statement.fulfilledAt ? <time dateTime={statement.fulfilledAt}>{formatDateTime(statement.fulfilledAt)}</time> : '--'}</dd></div>
-          <div><dt>付款记录</dt><dd><details className="technical-details compact"><summary>查看付款记录</summary><ExplorerHash hash={statement.paymentTxHash} /></details></dd></div>
+          <div><dt>钱包付款</dt><dd>已确认<details className="technical-details compact"><summary>客服核验编号</summary><ExplorerHash hash={statement.paymentTxHash} /></details></dd></div>
         </dl>
 
         <section aria-label={`订单 ${statement.orderId} 冻结应收`} className="receivable-evidence-block">
@@ -487,8 +487,8 @@ function MerchantReceivableStatementRow({ statement }: { statement: MerchantRece
           </div>
         </section>
 
-        <section aria-label={`订单 ${statement.orderId} 高级账本证据`} className="receivable-evidence-block">
-          <h3>高级账本证据</h3>
+        <section aria-label={`订单 ${statement.orderId} 账本核验信息`} className="receivable-evidence-block">
+          <h3>账本核验信息</h3>
           <div className="table-wrap">
             <table>
               <thead><tr><th scope="col">账本 / 时间</th><th scope="col">事件 / 状态</th><th scope="col">变动金额</th><th scope="col">来源 / 证据</th></tr></thead>
@@ -500,14 +500,14 @@ function MerchantReceivableStatementRow({ statement }: { statement: MerchantRece
                     <td className="mono-value">{formatSignedUsdt(evidence.delta)}</td>
                     <td><strong>{sourceKindLabel(evidence.sourceKind)}</strong><small className="mono-value">{shortId(evidence.sourceReferenceHash)}</small></td>
                   </tr>
-                )) : <tr><td colSpan={4}>该订单暂无高级账本证据。</td></tr>}
+                )) : <tr><td colSpan={4}>该订单暂无账本核验信息。</td></tr>}
               </tbody>
             </table>
           </div>
         </section>
 
         <section aria-label={`订单 ${statement.orderId} 结算关联记录`} className="receivable-evidence-block">
-          <h3>高级结算记录</h3>
+          <h3>结算核验信息</h3>
           <div className="table-wrap">
             <table>
               <thead><tr><th scope="col">申请 / 金额</th><th scope="col">状态 / 转账</th><th scope="col">账本关联</th><th scope="col">到账记录</th><th scope="col">时间</th></tr></thead>
@@ -521,7 +521,7 @@ function MerchantReceivableStatementRow({ statement }: { statement: MerchantRece
                       <small>{shortId(reference.journals.submitted) || '--'} / {shortId(reference.journals.settled) || '--'}</small>
                     </td>
                     <td>
-                      {reference.finalExecutionTxHash ? <details className="technical-details compact"><summary>查看到账记录</summary><ExplorerHash hash={reference.finalExecutionTxHash} /></details> : '--'}
+                      {reference.finalExecutionTxHash ? <details className="technical-details compact"><summary>客服核验编号</summary><ExplorerHash hash={reference.finalExecutionTxHash} /></details> : '--'}
                     </td>
                     <td>
                       <time dateTime={reference.requestedAt}>{formatDateTime(reference.requestedAt)}</time>

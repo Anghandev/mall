@@ -445,7 +445,7 @@ export function ProductPage() {
           </button>
         </div>
         {workspace.phase === 'loading' ? <LoadingRows count={2} /> : null}
-        {workspace.phase === 'error' ? <EmptyState blocked description={workspace.message} title="商家上下文不可用" /> : null}
+        {workspace.phase === 'error' ? <EmptyState blocked description={workspace.message} title="商家信息加载失败" /> : null}
         {workspace.phase === 'ready' && workspace.stores.length === 0 ? (
           <EmptyState blocked description="当前商家还没有可用门店。请先到“门店管理”创建并激活门店，再回来上传商品。" title="没有可管理的门店" />
         ) : null}
@@ -458,7 +458,7 @@ export function ProductPage() {
               </select>
             </div>
             <details className="technical-details">
-              <summary>高级信息</summary>
+              <summary>系统核验信息</summary>
               <div className="slot-identifiers">
                 <span>商家编号<strong>{shortHash(workspace.merchantId)}</strong></span>
                 <span>门店区划<strong>{selectedStore?.regionCode ?? '--'}</strong></span>
@@ -498,7 +498,7 @@ export function ProductPage() {
               <div className="field">
                 <label htmlFor="product-detail">商品详情</label>
                 <textarea disabled={!canEdit} id="product-detail" onChange={(event) => edit((current) => ({ ...current, richDetail: event.target.value }))} spellCheck={false} value={draft.richDetail} />
-                <FieldHelp>直接写商品介绍即可；高级结构化内容由系统保存，不需要商家理解格式。</FieldHelp>
+                <FieldHelp>直接写商品介绍即可；结构化内容由系统保存，不需要商家理解格式。</FieldHelp>
               </div>
               <div className="two-column-fields">
                 <div className="field">
@@ -632,7 +632,7 @@ export function ProductPage() {
             </div>
             {can('DELIST') && product ? (
               <details className="technical-details delist-row">
-                <summary>高级下架操作</summary>
+                <summary>下架操作</summary>
                 <div className="field"><label htmlFor="delist-reason">下架原因（可不填）</label><input id="delist-reason" onChange={(event) => setDelistReason(event.target.value.toUpperCase())} placeholder="不填则自动生成" value={delistReason} /></div>
                 <button className="button danger-quiet" disabled={Boolean(busy)} onClick={() => void delistProduct()} type="button"><Trash2 aria-hidden="true" size={16} /> {busy === 'delist' ? '下架中…' : '下架商品'}</button>
               </details>
@@ -677,7 +677,7 @@ function ProductStateBand({
 function BlockingResource({ value }: { value: CatalogWriteLock }) {
   return (
     <details className="technical-details compact">
-      <summary>高级锁定信息</summary>
+      <summary>锁定原因</summary>
       <code className="blocking-resource">锁定资源：{lockTypeLabel(value.type)} / {shortHash(value.id)} / {lockStateLabel(value.state)}</code>
     </details>
   );
@@ -769,7 +769,7 @@ function MediaGrid({
           <div className="media-frame">
             {access[assetId]
               ? <img alt={`商品主图 ${index + 1}`} height="160" src={access[assetId].readUrl} width="240" />
-              : <span>图片暂不可预览</span>}
+              : <span>图片暂时无法预览</span>}
           </div>
           <figcaption><span>主图 {index + 1}</span><details className="technical-details compact"><summary>图片编号</summary><code title={assetId}>{shortHash(assetId)}</code></details><button aria-label={`移除商品主图 ${index + 1}`} className="icon-button" disabled={!editable} onClick={() => edit((current) => ({ ...current, mainImageAssetIds: current.mainImageAssetIds.filter((value) => value !== assetId) }))} type="button"><Trash2 aria-hidden="true" size={15} /></button></figcaption>
         </figure>
@@ -779,7 +779,7 @@ function MediaGrid({
           <div className="media-frame">
             {videoAccess
               ? <video aria-label="商品视频" controls preload="metadata" src={videoAccess.readUrl} />
-              : <span>视频暂不可预览</span>}
+              : <span>视频暂时无法预览</span>}
           </div>
           <figcaption><span>商品视频</span><details className="technical-details compact"><summary>视频编号</summary><code title={draft.videoAssetId}>{shortHash(draft.videoAssetId)}</code></details><button aria-label="移除商品视频" className="icon-button" disabled={!editable} onClick={() => edit((current) => ({ ...current, videoAssetId: '' }))} type="button"><Trash2 aria-hidden="true" size={15} /></button></figcaption>
         </figure>
@@ -825,13 +825,13 @@ function ConcessionPreview({ value }: { value: MerchantConcessionPreview }) {
       </div>
       <div className="table-wrap">
         <table>
-          <thead><tr><th scope="col">规格</th><th scope="col">基础应收</th><th scope="col">让利</th><th scope="col">净应收</th><th scope="col">让利去向</th></tr></thead>
+          <thead><tr><th scope="col">规格</th><th scope="col">基础应收</th><th scope="col">让利比例</th><th scope="col">净应收</th><th scope="col">让利去向</th></tr></thead>
           <tbody>
             {value.payload.items.map((item) => (
               <tr key={item.skuId}>
                 <td><strong>{shortHash(item.skuId)}</strong><small className="table-secondary">让利比例 {formatBpsAsPercent(item.merchantConcessionBps)}</small></td>
                 <td className="numeric-cell">{formatUsdt(item.merchantBaseReceivableUsdt)}</td>
-                <td className="numeric-cell">{formatUsdt(item.merchantConcessionAmount)}</td>
+                <td className="numeric-cell"><strong>{formatBpsAsPercent(item.merchantConcessionBps)}</strong><small className="table-secondary">折算金额 {formatUsdt(item.merchantConcessionAmount)}</small></td>
                 <td className="numeric-cell">{formatUsdt(item.merchantNetReceivableUsdt)}</td>
                 <td>{item.allocations.length > 0 ? item.allocations.map((allocation) => <span className="allocation-line" key={allocation.pool}><code>{concessionPoolLabels[allocation.pool]}</code><strong>{formatUsdt(allocation.amount)}</strong></span>) : <span>无让利分配</span>}</td>
               </tr>
@@ -840,10 +840,10 @@ function ConcessionPreview({ value }: { value: MerchantConcessionPreview }) {
         </table>
       </div>
       <details className="technical-details">
-        <summary>高级签名凭证</summary>
+        <summary>签名核验信息</summary>
         <div className="preview-proof">
           <span>预览编号<strong>{shortHash(value.previewId)}</strong></span>
-          <span>高级资金规则<strong>{value.policyVersion}</strong></span>
+          <span>资金规则<strong>{value.policyVersion}</strong></span>
           <span>签名钱包<strong>{shortAddress(value.authorization.signer)}</strong></span>
           <span>到期时间<strong>{formatDate(value.expiresAt)}</strong></span>
           <span>目的地集合<strong>{shortHash(value.destinationSetHash)}</strong></span>

@@ -105,7 +105,7 @@ export function LogisticsPage() {
       fetchAdminWaybills(session.token, merchantFilter || undefined, 50, controller.signal),
       fetchAdminPrintJobs(session.token, merchantFilter || undefined, 50, controller.signal),
     ]).then(([carriers, providers, warehouses, waybills, printJobs]) => setData({ carriers, providers, warehouses, waybills, printJobs }))
-      .catch((cause) => { if (!controller.signal.aborted) setLoadError(asCoreError(cause, '物流数据暂时不可用')); })
+      .catch((cause) => { if (!controller.signal.aborted) setLoadError(asCoreError(cause, '物流数据暂时无法连接')); })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
   }, [canRead, merchantFilter, reloadKey, session]);
@@ -292,10 +292,10 @@ function readOperationsPreset(searchParams: URLSearchParams) {
   };
 }
 function shortId(value: string) { return `${value.slice(0, 8)}…${value.slice(-6)}`; }
-function readinessLabel(value: string) { return ({ READY: '已就绪', CONFIGURATION_REQUIRED: '待配置', EXTERNAL_BLOCKED: '外部不可用', UNAVAILABLE: '暂不可用' } as Record<string, string>)[value] ?? value; }
+function readinessLabel(value: string) { return ({ READY: '已就绪', CONFIGURATION_REQUIRED: '待配置', EXTERNAL_BLOCKED: '外部服务异常', UNAVAILABLE: '未返回数据' } as Record<string, string>)[value] ?? value; }
 function providerFieldLabel(value: string) { return ({ partnerIdSecretRef: '合作方账号', credentialSecretRef: '接口密钥', monthlyAccountSecretRef: '月结账号', callbackSecretRef: '回调密钥' } as Record<string, string>)[value] ?? value; }
 function warehouseKindLabel(value: string) { return ({ PLATFORM: '平台仓库', PARTNER: '合作仓库' } as Record<string, string>)[value] ?? value; }
-function accessLabel(value: string) { return ({ FULL: '完整可看', REDACTED: '脱敏可看', UNAVAILABLE: '暂不可看' } as Record<string, string>)[value] ?? value; }
+function accessLabel(value: string) { return ({ FULL: '完整可看', REDACTED: '脱敏可看', UNAVAILABLE: '需授权后查看' } as Record<string, string>)[value] ?? value; }
 function jobKindLabel(value: string) { return ({ WAYBILL: '面单', PICKUP_SLIP: '自提单' } as Record<string, string>)[value] ?? value; }
 function jobStateLabel(value: string) { return ({ CREATED: '已创建', QUEUED: '排队中', PRINTED: '已打印', RETRYABLE: '可重试', FAILED: '失败', CONFIGURATION_REQUIRED: '待配置', CANCELLED: '已取消' } as Record<string, string>)[value] ?? value; }
 function asCoreError(cause: unknown, message: string) { if (cause instanceof CoreApiError) return cause; if (cause instanceof Error) return new CoreApiError({ code: 'InvalidRequest', message: cause.message, status: 400 }); return new CoreApiError({ code: 'ExternalBlocked', message, status: 503 }); }

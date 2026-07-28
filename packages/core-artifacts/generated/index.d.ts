@@ -607,6 +607,8 @@ export interface SeckillSessionProjection {
   allowedActions: readonly string[];
 }
 
+export type SeckillCurrentSessionProjection = SeckillSessionProjection | null;
+
 export interface SeckillSessionHistoryPage {
   items: readonly SeckillSessionProjection[];
   nextCursor: string | null;

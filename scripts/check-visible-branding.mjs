@@ -52,7 +52,7 @@ for (const path of visibleFiles) {
 
 const required = new Map([
   ['mall-v2/src/App.tsx', '24K商城首页'],
-  ['merchant-v2/src/pages/LoginPage.tsx', '24K商城 · Merchant'],
+  ['merchant-v2/src/pages/LoginPage.tsx', '24K商城 · 商家工作台'],
   ['platform-v2/admin/src/components/AppShell.tsx', '<strong>24K商城</strong>'],
   ['platform-v2/server/api/app.ts', 'Sign in to 24K商城 V2'],
   ['packages/core-artifacts/openapi/openapi.json', '24K商城 V2 Core API'],

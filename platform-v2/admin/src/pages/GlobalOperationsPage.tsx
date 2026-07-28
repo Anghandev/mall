@@ -132,7 +132,7 @@ export function GlobalOperationsPage() {
     void fetchAdminCatalogTags(session.token, controller.signal)
       .then(setTags)
       .catch((cause) => {
-        if (!controller.signal.aborted) setTagsError(asCoreError(cause, '商品标签库不可用'));
+        if (!controller.signal.aborted) setTagsError(asCoreError(cause, '商品标签库暂时无法连接'));
       })
       .finally(() => {
         if (!controller.signal.aborted) setTagsLoading(false);
@@ -173,7 +173,7 @@ export function GlobalOperationsPage() {
       setActiveFilters(filters);
     } catch (cause) {
       setResponse(null);
-      setSearchError(asCoreError(cause, '全局资源检索不可用'));
+      setSearchError(asCoreError(cause, '全局资源检索暂时无法连接'));
     } finally {
       setSearching(false);
     }
@@ -194,7 +194,7 @@ export function GlobalOperationsPage() {
       setOperationNotice(`${exported.filename} 已下载，共 ${exported.rowCount} 行，内容哈希 ${exported.contentHash}。`);
       setExportIdempotencyKey(operationKey('global-export'));
     } catch (cause) {
-      setOperationError(asCoreError(cause, '资源导出不可用'));
+      setOperationError(asCoreError(cause, '资源导出暂时失败'));
     } finally {
       setPendingOperation(null);
     }
@@ -217,7 +217,7 @@ export function GlobalOperationsPage() {
       if (activeFilters) await runSearch(activeFilters);
       setOperationNotice(`批量标签操作已完成，${result.changedCount} 个商品写入新版本。`);
     } catch (cause) {
-      setOperationError(asCoreError(cause, '商品批量标签写入不可用'));
+      setOperationError(asCoreError(cause, '商品批量标签写入暂时失败'));
     } finally {
       setPendingOperation(null);
     }
@@ -245,7 +245,7 @@ export function GlobalOperationsPage() {
       if (activeFilters) await runSearch(activeFilters);
       setOperationNotice(`${lifecycleActionLabel(result.action)}完成，${result.changedCount} 个商品已整体更新。`);
     } catch (cause) {
-      setOperationError(asCoreError(cause, '商品生命周期批处理不可用'));
+      setOperationError(asCoreError(cause, '商品生命周期批处理暂时失败'));
     } finally {
       setPendingOperation(null);
     }
@@ -327,7 +327,7 @@ export function GlobalOperationsPage() {
 
       <section className="global-unavailable" aria-labelledby="global-unavailable-title">
         <Ban aria-hidden="true" />
-        <div><strong id="global-unavailable-title">暂不开放的能力</strong><p>手机号和特殊队列暂不开放，页面不会自己猜数据。</p></div>
+        <div><strong id="global-unavailable-title">本期不用的筛选</strong><p>手机号和特殊队列本期不用，页面不会自己猜数据。</p></div>
         <span>已保护</span>
       </section>
     </>
@@ -379,14 +379,14 @@ function GlobalResourceSearch({ enabled, loading, onSearch, onReset }: {
           <label>订单号<input value={form.orderId} onChange={(event) => set('orderId', event.target.value)} disabled={!enabled} maxLength={256} autoComplete="off" placeholder="精确匹配" /></label>
           <label>商品编号<input value={form.productId} onChange={(event) => set('productId', event.target.value)} disabled={!enabled} maxLength={256} autoComplete="off" placeholder="精确匹配" /></label>
           <label>商家编号<input value={form.merchantId} onChange={(event) => set('merchantId', event.target.value)} disabled={!enabled} maxLength={256} autoComplete="off" placeholder="精确匹配" /></label>
-          <label>付款记录编号（高级）<input value={form.txHash} onChange={(event) => set('txHash', event.target.value)} disabled={!enabled} pattern="0x[0-9a-fA-F]{64}" autoComplete="off" placeholder="从订单付款记录复制" /><small>不知道这个编号就留空。</small></label>
+          <label>付款记录编号<input value={form.txHash} onChange={(event) => set('txHash', event.target.value)} disabled={!enabled} pattern="0x[0-9a-fA-F]{64}" autoComplete="off" placeholder="从订单付款记录复制" /><small>不知道这个编号就留空。</small></label>
           <label>钱包地址<input aria-label="钱包地址" value={form.wallet} onChange={(event) => set('wallet', event.target.value)} disabled={!enabled} pattern={form.walletMatch === 'EXACT' ? '0x[0-9a-fA-F]{40}' : '(0x)?[0-9a-fA-F]{6,40}'} autoComplete="off" placeholder={form.walletMatch === 'EXACT' ? '完整钱包地址' : '钱包地址片段'} aria-describedby="global-wallet-help" /><small id="global-wallet-help">{form.walletMatch === 'EXACT' ? '完整钱包地址' : '仅按地址片段匹配'}</small></label>
           <label>审核投影<select value={form.pendingReview} onChange={(event) => set('pendingReview', event.target.value as PendingReviewFilter)} disabled={!enabled}><option value="">全部</option><option value="true">待审核</option><option value="false">非待审核</option></select></label>
           <label>开始时间<input value={form.from} onChange={(event) => { setQuickRange(null); set('from', event.target.value); }} disabled={!enabled} type="datetime-local" /></label>
           <label>结束时间<input value={form.to} onChange={(event) => { setQuickRange(null); set('to', event.target.value); }} disabled={!enabled} type="datetime-local" /></label>
           <label>用户 UID<input value={form.uid} onChange={(event) => setForm((current) => ({ ...current, uid: event.target.value, relation: 'AND', walletMatch: 'EXACT' }))} disabled={!enabled} inputMode="numeric" pattern="[1-9][0-9]{0,18}" autoComplete="off" placeholder="精确 UID" /></label>
-          <label>绑定手机号<input disabled placeholder="暂不开放" /></label>
-          <label>特殊队列<input disabled placeholder="暂不开放" /></label>
+          <label>绑定手机号<input disabled placeholder="不用填" /></label>
+          <label>特殊队列<input disabled placeholder="不用填" /></label>
           <fieldset className="global-wallet-match"><legend>钱包匹配</legend><div className="segmented">{(['EXACT', 'FUZZY'] as const).map((mode) => <button key={mode} className={form.walletMatch === mode ? 'is-active' : undefined} type="button" aria-pressed={form.walletMatch === mode} disabled={!enabled || (mode === 'FUZZY' && Boolean(form.uid.trim()))} onClick={() => set('walletMatch', mode)}>{mode === 'EXACT' ? '精确' : '模糊'}</button>)}</div></fieldset>
         </div>
         <div className="search-footer">
@@ -615,8 +615,8 @@ function defaultLifecycleReason(action: CatalogReviewDecision) {
 function reasonLabel(value: string | null | undefined) {
   if (!value) return null;
   return ({
-    LOCKED: '被锁定，暂不可改',
-    SCHEDULED: '已有排期，暂不可改',
+    LOCKED: '被锁定，当前不能改',
+    SCHEDULED: '已有排期，当前不能改',
     STATE_NOT_ALLOWED: '当前状态不允许',
     ROLE_NOT_ALLOWED: '当前角色不允许',
     MISSING_PERMISSION: '缺少操作权限',

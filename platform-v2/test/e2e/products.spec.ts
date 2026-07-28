@@ -16,10 +16,12 @@ for (const surface of surfaces) {
     const unavailableControls = await page.locator('button:disabled').count();
     const blockedStatuses = await page
       .getByRole('status')
-      .filter({ hasText: /ExternalBlocked|ConfigurationRequired|不可用/ })
+      .filter({ hasText: /连接.*钱包|未连接|不会显示假数据|暂时不能|需要钱包|请先|加载失败|没有权限|自动拦住/ })
       .count();
     expect(unavailableControls + blockedStatuses).toBeGreaterThan(0);
-    expect((await page.locator('body').innerText()).trim().length).toBeGreaterThan(50);
+    const bodyText = (await page.locator('body').innerText()).trim();
+    expect(bodyText.length).toBeGreaterThan(50);
+    expect(bodyText).not.toMatch(/ExternalBlocked|ConfigurationRequired|Forbidden|InvalidRequest|DecisionBlocked|Correlation ID/);
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
       `${surface.name} horizontal overflow`,

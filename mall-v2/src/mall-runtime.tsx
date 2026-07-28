@@ -961,7 +961,7 @@ export function MallRuntimeProvider({
             throw new CoreClientError('InvalidRequest', '请先确认秒杀与日常备用报价及链上分类规则');
           }
           if (!bootstrap?.writesEnabled) {
-            throw new CoreClientError('ExternalBlocked', '当前系统未开放新支付');
+            throw new CoreClientError('ExternalBlocked', '当前系统暂不支持新支付');
           }
           if (!services.walletWritesAuthorized) {
             throw new CoreClientError('ExternalBlocked', '当前支付上线开关未打开，不会发起钱包交易');
@@ -1196,7 +1196,7 @@ export function MallRuntimeProvider({
         services.core.getBuyerTakeoverTimeline(activeSession.token, order.orderId),
       ]);
       if (targetResult.status === 'fulfilled') targets[order.orderId] = targetResult.value;
-      else capabilityErrors[order.orderId] = '履约目标暂不可用';
+      else capabilityErrors[order.orderId] = '履约目标暂无数据';
       if (timelineResult.status === 'fulfilled') timelines[order.orderId] = timelineResult.value;
       else timelineErrors[order.orderId] = errorMessage(timelineResult.reason);
     }));
@@ -1364,8 +1364,14 @@ export function MallRuntimeProvider({
     if (!isActive()) return;
     if (history.status === 'fulfilled') setSeckillHistory(history.value.items);
     if (current.status === 'fulfilled') {
-      setSeckillSession(current.value);
-      setSeckillSessionState('ready');
+      if (current.value === null) {
+        setSeckillSession(null);
+        setSeckillEvents([]);
+        setSeckillSessionState('empty');
+      } else {
+        setSeckillSession(current.value);
+        setSeckillSessionState('ready');
+      }
       setSeckillRealtimeError(null);
       return;
     }
@@ -1613,12 +1619,12 @@ export function validateSupportUrl(value: string | null | undefined) {
 function readinessError(bootstrap: CorePaymentAvailability | null) {
   if (!bootstrap) return new CoreClientError('ConfigurationRequired', '商城安全状态尚未同步');
   if (bootstrap.blockCode === 'DecisionBlocked') {
-    return new CoreClientError('DecisionBlocked', '支付政策尚有未决项');
+    return new CoreClientError('DecisionBlocked', '当前暂时不能付款，请稍后再试。');
   }
   if (bootstrap.blockCode === 'ExternalBlocked') {
-    return new CoreClientError('ExternalBlocked', '支付基础设施尚未就绪');
+    return new CoreClientError('ExternalBlocked', '当前暂时不能付款，请稍后再试。');
   }
-  return new CoreClientError('ConfigurationRequired', '新支付当前已安全停用');
+  return new CoreClientError('ConfigurationRequired', '当前暂时不能付款，请稍后再试。');
 }
 
 function mergeOrders(
@@ -1649,8 +1655,27 @@ function deduplicateNotifications(items: readonly NotificationInboxItem[]) {
 }
 
 function errorMessage(reason: unknown) {
-  if (reason instanceof Error) return reason.message;
+  if (reason instanceof CoreClientError) return translateMallError(reason.message, reason.code);
+  if (reason instanceof Error) return translateMallError(reason.message);
   return '操作失败，请稍后重试';
+}
+
+function translateMallError(message: string, code?: string) {
+  const cleaned = message
+    .replace(/^\s*(InvalidRequest|InvalidResponse|Forbidden|ExternalBlocked|ConfigurationRequired|DecisionBlocked)\s*[:：]?\s*/i, '')
+    .replace(/\s*[（(][0-9a-f]{8}-[0-9a-f-]{27,}[）)]$/i, '')
+    .trim();
+  if (code === 'Forbidden' || /Forbidden/i.test(cleaned)) return '当前钱包没有权限，请切换正确钱包后重试。';
+  if (/地址目标|收货地址|address target/i.test(cleaned)) return '收货地址暂时无法确认，请刷新后重试。';
+  if (code === 'DecisionBlocked' || code === 'ExternalBlocked' || code === 'ConfigurationRequired') return '当前暂时不能付款，请稍后再试。';
+  if (/Register this wallet in the existing BNM system before checkout|registrationRequired/i.test(cleaned)) return '当前钱包还没有完成积分系统登记，请先完成登记后再下单。';
+  if (/Invalid idempotency key|idempotencyKey|idempotency key|Idempotency key/i.test(cleaned)) return '系统提交编号异常，请刷新页面后重试。';
+  if (/must be a canonical atomic amount|canonical atomic amount/i.test(cleaned)) return '金额格式不正确，请填写普通数字金额，例如 2 或 2.00。';
+  if (/Product requires 1-5 verified main images/i.test(cleaned)) return '商品还缺少主图，请商家补齐后再购买。';
+  if (/does not match (the )?(coordinated|generated)|generated type|Core returned|Core response|Core API|non-JSON|unreachable|request failed|gateway is unavailable/i.test(cleaned)) return '系统服务暂时无法连接，请刷新或稍后重试。';
+  if (/Network|fetch|Failed to fetch|Load failed/i.test(cleaned)) return '网络连接失败，请检查网络后重试。';
+  if (/IdempotencyConflict/i.test(code ?? '') || /current payment/i.test(cleaned)) return '当前付款状态已更新，请刷新订单后重试。';
+  return cleaned || '操作失败，请稍后重试。';
 }
 
 export function createBrowserSubmissionStore(): SubmissionStore {

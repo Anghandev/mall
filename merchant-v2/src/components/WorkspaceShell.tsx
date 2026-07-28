@@ -78,7 +78,7 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
           <p>系统状态</p>
           <strong>已连接</strong>
           <details className="technical-details compact">
-            <summary>高级版本信息</summary>
+            <summary>版本信息</summary>
             <code>{coreBoundary.artifactVersion}</code>
           </details>
         </div>

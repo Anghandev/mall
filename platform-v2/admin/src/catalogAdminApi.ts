@@ -458,19 +458,19 @@ function requireSortOrder(value: number) {
 }
 
 function requireIdempotencyKey(value: string) {
-  if (typeof value !== 'string' || value.length < 8 || value.length > 128) throw invalid('idempotencyKey must contain 8 to 128 characters', 400);
+  if (typeof value !== 'string' || value.length < 8 || value.length > 128) throw invalid('系统提交编号异常，请刷新页面后重试。', 400);
 }
 
 function requireBytes32(value: string, label: string) {
-  if (!bytes32Pattern.test(value)) throw invalid(`${label} must be bytes32`, 400);
+  if (!bytes32Pattern.test(value)) throw invalid(`${label} 格式不正确，请使用 0x 开头的 64 位编号。`, 400);
 }
 
 function requireAmount(value: string, label: string) {
-  if (!amountPattern.test(value)) throw invalid(`${label} must be a canonical atomic amount`, 400);
+  if (!amountPattern.test(value)) throw invalid(`${label} 金额格式不正确，请填写普通数字金额。`, 400);
 }
 
 function requireBps(value: number, label: string) {
-  if (!isBps(value)) throw invalid(`${label} must be an integer between 0 and 10000`, 400);
+  if (!isBps(value)) throw invalid(`${label} 请填写 0 到 100 之间的比例。`, 400);
 }
 
 function isBps(value: unknown): value is number {
@@ -486,7 +486,7 @@ function validDate(value: unknown) {
 }
 
 function record(value: unknown): Record<string, unknown> {
-  if (!isRecord(value)) throw invalid('Core response must be an object');
+  if (!isRecord(value)) throw invalid('系统返回异常，请刷新后重试。');
   return value;
 }
 

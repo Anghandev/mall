@@ -116,7 +116,7 @@ export function TakeoverCaseWorkspace({ connecting, session }: TakeoverCaseWorks
       if (!signal?.aborted) {
         setCasePage(null);
         setSelectedCaseId('');
-        setListError(asCoreError(cause, '接管案件列表不可用'));
+        setListError(asCoreError(cause, '接管案件列表暂时无法连接'));
       }
     } finally {
       if (!signal?.aborted) setListLoading(false);
@@ -133,9 +133,9 @@ export function TakeoverCaseWorkspace({ connecting, session }: TakeoverCaseWorks
     ]);
     if (signal?.aborted) return;
     if (detailResult.status === 'fulfilled') setDetail(detailResult.value);
-    else setDetailError(asCoreError(detailResult.reason, '接管案件详情不可用'));
+    else setDetailError(asCoreError(detailResult.reason, '接管案件详情读取失败'));
     if (candidateResult.status === 'fulfilled') setCandidates(candidateResult.value);
-    else setCandidateError(asCoreError(candidateResult.reason, '替代商家候选列表不可用'));
+    else setCandidateError(asCoreError(candidateResult.reason, '替代商家候选列表读取失败'));
     setDetailLoading(false);
     setCandidateLoading(false);
   }
@@ -265,7 +265,7 @@ export function TakeoverCaseWorkspace({ connecting, session }: TakeoverCaseWorks
                         </label>;
                       })}</div>}
 
-                {auditorOnly ? <div className="takeover-readonly"><ShieldCheck aria-hidden="true" /><div><strong>审计角色只读</strong><p>可查看案件、候选资格和不可变分配历史；分配与改派写入不可用。</p></div></div>
+                {auditorOnly ? <div className="takeover-readonly"><ShieldCheck aria-hidden="true" /><div><strong>审计角色只读</strong><p>可查看案件、候选资格和不可变分配历史；分配与改派不可执行。</p></div></div>
                   : canAssignByRole && assignmentStateAllowsWrite ? (
                     <form className="takeover-assignment-form" onSubmit={handleAssignment}>
                       <div className="takeover-subheading"><div><p className="section-kicker">分配操作</p><h3>{detail.case.currentAssignment ? '发货前改派' : '分配替代商家'}</h3></div><UserRoundCheck aria-hidden="true" /></div>
@@ -274,7 +274,7 @@ export function TakeoverCaseWorkspace({ connecting, session }: TakeoverCaseWorks
                         {alternativeCandidates.map((candidate) => <option key={candidate.merchantId} value={candidate.merchantId}>{candidate.shopName} · {candidate.merchantId}</option>)}
                       </select></label>
                       <label>分配原因（可写中文）<input value={reasonCode} onChange={(event) => setReasonCode(event.target.value)} placeholder="例如：离买家近，方便发货" minLength={2} maxLength={128} required disabled={assignmentPending} /><small>页面会自动转成系统能保存的原因码。</small></label>
-                      <label>系统凭证编号（高级）<input value={evidenceHash} onChange={(event) => setEvidenceHash(event.target.value)} placeholder="从系统证据复制 0x 编号" pattern="0x[0-9a-fA-F]{64}" required disabled={assignmentPending} /><small>没有系统生成的编号不要手填。</small></label>
+                      <label>系统凭证编号<input value={evidenceHash} onChange={(event) => setEvidenceHash(event.target.value)} placeholder="从系统证据复制 0x 编号" pattern="0x[0-9a-fA-F]{64}" required disabled={assignmentPending} /><small>没有系统生成的编号不要手填。</small></label>
                                             <button className="button button-primary" type="submit" disabled={assignmentPending || alternativeCandidates.length === 0 || !replacementMerchantId}>
                         {assignmentPending ? <LoaderCircle className="spin" aria-hidden="true" /> : <UserRoundCheck aria-hidden="true" />}{assignmentPending ? '提交中' : detail.case.currentAssignment ? '确认改派' : '确认分配'}
                       </button>
@@ -297,7 +297,7 @@ function TakeoverCaseDetailView({ detail }: { detail: TakeoverCaseDetail }) {
     <div className="panel-heading"><div><p className="section-kicker">案件详情</p><h2>{takeoverStateLabel(item.state)} · {shortId(item.caseId)}</h2></div><span className="status-chip">{fulfillmentModeLabel(item.order.fulfillmentMode)}</span></div>
     <dl className="takeover-case-facts">
       <div><dt>订单</dt><dd><code title={item.orderId}>{shortId(item.orderId)}</code><small title={`${item.order.productId} · ${item.order.skuId}`}>{shortId(item.order.productId)} · {shortId(item.order.skuId)} · 数量 {item.order.quantity}</small></dd></div>
-      <div><dt>原商家</dt><dd title={item.originalMerchantId}>{shortId(item.originalMerchantId)}<details className="technical-details compact"><summary>高级规则编号</summary><code>{item.policyVersion}</code></details></dd></div>
+      <div><dt>原商家</dt><dd title={item.originalMerchantId}>{shortId(item.originalMerchantId)}<details className="technical-details compact"><summary>规则编号</summary><code>{item.policyVersion}</code></details></dd></div>
       <div><dt>当前替代商家</dt><dd title={item.currentAssignment?.replacementMerchantId}>{item.currentAssignment?.replacementMerchantId ? shortId(item.currentAssignment.replacementMerchantId) : '未分配'}<small>{item.currentAssignment ? `分配版本 ${item.currentAssignment.version}` : '等待管理员或运营处理'}</small></dd></div>
       <div><dt>现在能做</dt><dd>{item.allowedActions.filter((action) => action.enabled).map((action) => actionLabel(action.action)).join(' · ') || '无可用操作'}<small>系统已授权</small></dd></div>
     </dl>

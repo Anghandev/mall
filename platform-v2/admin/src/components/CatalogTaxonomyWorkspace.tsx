@@ -243,7 +243,7 @@ function ReadOnlyNotice() {
 }
 
 function asCoreError(cause: unknown) {
-  return cause instanceof CoreApiError ? cause : new CoreApiError({ code: 'ExternalBlocked', message: '类目和标签服务暂时不可用', status: 503 });
+  return cause instanceof CoreApiError ? cause : new CoreApiError({ code: 'ExternalBlocked', message: '类目和标签服务暂时无法连接', status: 503 });
 }
 
 function catalogCommandKey(scope: string) {

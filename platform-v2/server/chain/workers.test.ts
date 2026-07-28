@@ -1924,7 +1924,7 @@ function paymentPolicySnapshot(): PaymentPolicySnapshot {
     relayIncrement: 30,
     relayCap: 60,
     requiredConfirmations: 15,
-    merchantGuaranteeMinimumUsdt: 1_000n * 10n ** 18n,
+    merchantGuaranteeMinimumUsdt: 0n,
     platformServiceFeeWallet: '0x2222222222222222222222222222222222222223',
     usdtSettlementWallet: '0x3333333333333333333333333333333333333333',
     nplRewardWallet: '0x4444444444444444444444444444444444444444',

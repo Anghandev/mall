@@ -564,7 +564,7 @@ function logisticsListQuery(merchantId: string | undefined, limit: number) {
 export async function createWalletSession(provider: WalletProvider): Promise<CoreSession> {
   const accounts = await provider.request({ method: 'eth_requestAccounts' });
   const walletAddress = Array.isArray(accounts) && typeof accounts[0] === 'string' ? accounts[0] : '';
-  if (!addressPattern.test(walletAddress)) throw invalidResponse('Wallet did not return a valid BSC address');
+  if (!addressPattern.test(walletAddress)) throw invalidResponse('钱包没有返回有效的 BSC 地址。');
 
   const challengeBody = await requestJson('/v2/auth/nonce', {
     body: JSON.stringify({ walletAddress }),
@@ -577,7 +577,7 @@ export async function createWalletSession(provider: WalletProvider): Promise<Cor
     params: [challenge.message, walletAddress],
   });
   if (typeof signature !== 'string' || signature.length === 0) {
-    throw invalidResponse('Wallet did not return a signature');
+    throw invalidResponse('钱包没有返回签名，请重新连接后再试。');
   }
 
   const session = parseSession(await requestJson('/v2/auth/verify', {
@@ -586,7 +586,7 @@ export async function createWalletSession(provider: WalletProvider): Promise<Cor
     method: 'POST',
   }));
   if (session.walletAddress.toLowerCase() !== walletAddress.toLowerCase()) {
-    throw invalidResponse('Core session wallet does not match the signing wallet');
+    throw invalidResponse('登录会话与签名钱包不一致，请切换到同一个钱包。');
   }
   return session;
 }
@@ -598,7 +598,7 @@ async function requestJson(path: string, init: RequestInit) {
   } catch {
     throw new CoreApiError({
       code: 'ExternalBlocked',
-      message: 'Core API is unreachable',
+      message: '后台服务暂时无法连接',
       status: 503,
     });
   }
@@ -610,18 +610,18 @@ async function requestJson(path: string, init: RequestInit) {
     if (!response.ok && response.status >= 500) {
       throw new CoreApiError({
         code: 'ExternalBlocked',
-        message: `Core API gateway is unavailable (${response.status})`,
+        message: `后台服务网关暂时无法连接（${response.status}）`,
         status: response.status,
       });
     }
-    throw invalidResponse(`Core returned a non-JSON response (${response.status})`, response.status);
+    throw invalidResponse(`后台服务返回了无法识别的响应（${response.status}）`, response.status);
   }
   if (response.ok) return body;
 
   const error = readCoreError(body);
   throw new CoreApiError({
     code: error?.code ?? 'InvalidResponse',
-    message: error?.message ?? `Core request failed (${response.status})`,
+    message: error?.message ?? `后台请求失败（${response.status}）`,
     status: response.status,
     ...(error?.correlationId ? { correlationId: error.correlationId } : {}),
     ...(error?.details ? { details: error.details } : {}),
@@ -648,7 +648,7 @@ function parseBootstrap(value: unknown) {
       || assets.usdt !== chainIdentity.usdtAddress
       || assets.npl !== chainIdentity.nplAddress
       || typeof readiness.writesEnabled !== 'boolean'
-  ) throw invalidResponse('Core bootstrap is incompatible with this settlement/admin checkpoint');
+  ) throw invalidResponse('后台服务版本与当前管理后台不一致，请刷新页面。');
 
   return Object.freeze({
     artifactVersion,
@@ -694,7 +694,7 @@ function parseSession(value: unknown) {
       || !addressPattern.test(String(body.walletAddress))
       || !Array.isArray(body.roles)
       || !body.roles.every((role) => userRoles.includes(role as UserRole))
-  ) throw invalidResponse('Core session response is invalid');
+  ) throw invalidResponse('登录会话返回异常，请重新连接钱包。');
   return Object.freeze({
     token: body.token,
     walletAddress: String(body.walletAddress),
@@ -850,28 +850,28 @@ function adminOrderSearchQuery(filters: AdminOrderSearchFilters) {
     ['productId', filters.productId],
   ] as const) {
     if (value !== undefined) {
-      if (value.length < 1 || value.length > 256) throw invalidResponse(`${name} is invalid`, 400);
+      if (value.length < 1 || value.length > 256) throw invalidResponse(`${name} 筛选内容不正确。`, 400);
       query.set(name, value);
     }
   }
   if (filters.state !== undefined) {
-    if (!orderProjectionStates.includes(filters.state)) throw invalidResponse('Order state filter is invalid', 400);
+    if (!orderProjectionStates.includes(filters.state)) throw invalidResponse('订单状态筛选不正确。', 400);
     query.set('state', filters.state);
   }
   if (filters.fulfillmentMode !== undefined) {
-    if (!fulfillmentModes.includes(filters.fulfillmentMode)) throw invalidResponse('Fulfillment mode filter is invalid', 400);
+    if (!fulfillmentModes.includes(filters.fulfillmentMode)) throw invalidResponse('履约方式筛选不正确。', 400);
     query.set('fulfillmentMode', filters.fulfillmentMode);
   }
   if (filters.orderKind !== undefined) {
-    if (!['ORDINARY', 'SECKILL', 'FALLBACK_RETAIL'].includes(filters.orderKind)) throw invalidResponse('Order kind filter is invalid', 400);
+    if (!['ORDINARY', 'SECKILL', 'FALLBACK_RETAIL'].includes(filters.orderKind)) throw invalidResponse('订单类型筛选不正确。', 400);
     query.set('orderKind', filters.orderKind);
   }
   if (filters.txHash !== undefined) {
-    if (!bytes32Pattern.test(filters.txHash)) throw invalidResponse('TxHash filter must be bytes32', 400);
+    if (!bytes32Pattern.test(filters.txHash)) throw invalidResponse('付款记录编号格式不正确，请复制 0x 开头的完整编号。', 400);
     query.set('txHash', filters.txHash);
   }
   if (filters.wallet !== undefined) {
-    if (!addressPattern.test(filters.wallet)) throw invalidResponse('Wallet filter must be an exact address', 400);
+    if (!addressPattern.test(filters.wallet)) throw invalidResponse('钱包地址格式不正确，请填写完整 0x 地址。', 400);
     query.set('wallet', filters.wallet);
   }
   if (filters.pendingReview !== undefined) query.set('pendingReview', String(filters.pendingReview));
@@ -1223,13 +1223,13 @@ function readCoreError(value: unknown) {
 
 function stringArray(value: unknown, field: string) {
   if (!Array.isArray(value) || !value.every((entry) => typeof entry === 'string')) {
-    throw invalidResponse(`Core bootstrap field ${field} is invalid`);
+    throw invalidResponse(`后台服务状态字段 ${field} 异常`);
   }
   return Object.freeze([...value]);
 }
 
 function record(value: unknown): Record<string, unknown> {
-  if (!isRecord(value)) throw invalidResponse('Core response must be an object');
+  if (!isRecord(value)) throw invalidResponse('后台服务返回异常，请刷新后重试。');
   return value;
 }
 

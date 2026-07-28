@@ -101,7 +101,7 @@ function PaymentWorkspace({ token }: { token: string }) {
     event.preventDefault();
     setLoading(true); setProjection(null); setError(null);
     try { setProjection(await fetchGlobalPaymentTrace(orderId.trim(), token)); }
-    catch (cause) { setError(asCoreError(cause, '全局支付投影不可用')); }
+    catch (cause) { setError(asCoreError(cause, '支付记录暂时无法连接')); }
     finally { setLoading(false); }
   };
 
@@ -137,7 +137,7 @@ function RequestWorkspace({ token }: { token: string }) {
       const next = await fetchAdminSettlementRequests(filters, token);
       setResult((current) => append && current ? { ...next, requests: [...current.requests, ...next.requests] } : next);
       setApplied(filters);
-    } catch (cause) { setError(asCoreError(cause, '结算申请列表不可用')); }
+    } catch (cause) { setError(asCoreError(cause, '结算申请列表暂时无法连接')); }
     finally { setLoading(false); }
   };
 
@@ -146,7 +146,7 @@ function RequestWorkspace({ token }: { token: string }) {
   const select = async (requestId: string) => {
     setDetailLoading(true); setError(null); setDetail(null);
     try { setDetail(await fetchAdminSettlementRequest(requestId, token)); }
-    catch (cause) { setError(asCoreError(cause, '结算申请详情不可用')); }
+    catch (cause) { setError(asCoreError(cause, '结算申请详情暂时无法连接')); }
     finally { setDetailLoading(false); }
   };
 
@@ -183,7 +183,7 @@ function RequestWorkspace({ token }: { token: string }) {
         {result?.nextCursor ? <button className="button button-quiet button-full" type="button" onClick={more} disabled={loading}>加载下一页</button> : null}
       </article>
       <article className="panel clearing-detail-panel" aria-live="polite" aria-busy={detailLoading}>
-        {detailLoading ? <LoadingState label="正在读取申请明细" /> : detail ? <RequestDetail detail={detail} /> : <EmptyState title="选择一笔申请" detail="查看申请金额、状态、到账记录和高级凭证。" />}
+        {detailLoading ? <LoadingState label="正在读取申请明细" /> : detail ? <RequestDetail detail={detail} /> : <EmptyState title="选择一笔申请" detail="查看申请金额、状态、到账记录和核验信息。" />}
       </article>
     </div>
   </section>;
@@ -206,7 +206,7 @@ function TransferWorkspace({ token }: { token: string }) {
       const next = await fetchAdminSettlementTransfers(filters, token);
       setResult((current) => append && current ? { ...next, transfers: [...current.transfers, ...next.transfers] } : next);
       setApplied(filters);
-    } catch (cause) { setError(asCoreError(cause, '结算转账列表不可用')); }
+    } catch (cause) { setError(asCoreError(cause, '结算转账列表暂时无法连接')); }
     finally { setLoading(false); }
   };
 
@@ -215,7 +215,7 @@ function TransferWorkspace({ token }: { token: string }) {
   const select = async (transferId: string) => {
     setDetailLoading(true); setError(null); setDetail(null);
     try { setDetail(await fetchAdminSettlementTransfer(transferId, token)); }
-    catch (cause) { setError(asCoreError(cause, '结算转账详情不可用')); }
+    catch (cause) { setError(asCoreError(cause, '结算转账详情暂时无法连接')); }
     finally { setDetailLoading(false); }
   };
 
@@ -250,7 +250,7 @@ function TransferWorkspace({ token }: { token: string }) {
         {result?.nextCursor ? <button className="button button-quiet button-full" type="button" onClick={more} disabled={loading}>加载下一页</button> : null}
       </article>
       <article className="panel clearing-detail-panel" aria-live="polite" aria-busy={detailLoading}>
-        {detailLoading ? <LoadingState label="正在读取转账详情" /> : detail ? <TransferDetail detail={detail} /> : <EmptyState title="选择一笔转账" detail="查看到账状态、金额、收款地址和高级凭证。" />}
+        {detailLoading ? <LoadingState label="正在读取转账详情" /> : detail ? <TransferDetail detail={detail} /> : <EmptyState title="选择一笔转账" detail="查看到账状态、金额、收款地址和核验信息。" />}
       </article>
     </div>
   </section>;
@@ -265,11 +265,15 @@ function RequestDetail({ detail }: { detail: AdminSettlementRequestDetail }) {
       <Fact label="申请钱包 / 收款钱包" value={shortAddress(request.walletAddress)} note={shortAddress(request.recipientAddress)} />
       <Fact label="资产 / 金额" value={`${request.asset} · ${formatSettlementAmount(request.amount, request.asset)}`} />
       <Fact label="平台打款记录" value={shortAddress(request.executorWallet)} note={`${request.transferIds.length} 笔转账`} />
-      <Fact label="到账记录" value={request.finalExecutionTxHashes[0] ?? '未到账'} note={`${request.finalExecutionTxHashes.length} 笔已确认交易`} code />
+      <Fact
+        label="到账记录"
+        value={request.finalExecutionTxHashes.length ? '已到账' : '未到账'}
+        note={`${request.finalExecutionTxHashes.length} 笔已确认交易`}
+      />
       <Fact label="申请 / 到账时间" value={formatDateTime(request.requestedAt)} note={formatDateTime(request.settledAt) || '未结算'} />
     </dl>
     <details className="technical-details">
-      <summary>高级申请凭证</summary>
+      <summary>申请核验信息</summary>
       <dl className="definition-grid clearing-facts">
         <Fact label="申请摘要" value={request.intentDigest} code />
         <Fact label="签名摘要" value={request.signatureHash} code />
@@ -292,18 +296,18 @@ function TransferDetail({ detail }: { detail: AdminSettlementTransferDetail }) {
       <Fact label="转账编号" value={transfer.transferId} code />
       <Fact label="收款地址 / 金额" value={shortAddress(transfer.recipientAddress)} note={formatSettlementAmount(transfer.amount, transfer.asset)} />
       <Fact label="平台打款账户" value={shortAddress(transfer.executorWallet)} note={`平台处理号 ${transfer.executorNonce}`} />
-      <Fact label="到账记录" value={transfer.executionTxHash ?? '未提交'} code />
+      <Fact label="到账记录" value={transfer.executionTxHash ? '已提交' : '未提交'} />
     </dl>
     <FinalityEvidence detail={detail} />
     <details className="technical-details">
-      <summary>高级转账凭证</summary>
+      <summary>转账核验信息</summary>
       <dl className="definition-grid clearing-facts">
         <Fact label="转账内容摘要" value={transfer.contentHash} note={`申请 ${shortHash(transfer.requestId)}`} code />
         <Fact label="运行凭证" value={transfer.runtimeEvidenceHash} note={transfer.runtimeCheckedAt} code />
         <Fact label="代币校验" value={transfer.tokenCodeHash} note={shortHash(transfer.tokenTransferConformanceEvidenceHash)} code />
       </dl>
       <section className="clearing-evidence-grid" aria-label="覆盖率、熔断与对账">
-        <article className={detail.coverage?.covered ? 'clearing-evidence is-ok' : 'clearing-evidence is-alert'}><span>覆盖检查</span><strong>{detail.coverage ? detail.coverage.covered ? '已覆盖' : '低于 100%' : '暂不可用'}</strong>{detail.coverage ? <><small>{formatSettlementAmount(detail.coverage.verifiedAssets, transfer.asset)} / {formatSettlementAmount(detail.coverage.unsettledLiabilities, transfer.asset)}</small><code>{shortHash(detail.coverage.evidenceHash)}</code></> : <small>系统未返回覆盖快照</small>}</article>
+        <article className={detail.coverage?.covered ? 'clearing-evidence is-ok' : 'clearing-evidence is-alert'}><span>覆盖检查</span><strong>{detail.coverage ? detail.coverage.covered ? '已覆盖' : '低于 100%' : '未返回数据'}</strong>{detail.coverage ? <><small>{formatSettlementAmount(detail.coverage.verifiedAssets, transfer.asset)} / {formatSettlementAmount(detail.coverage.unsettledLiabilities, transfer.asset)}</small><code>{shortHash(detail.coverage.evidenceHash)}</code></> : <small>系统未返回覆盖快照</small>}</article>
         <article className={detail.breakers.some((item) => item.paused) ? 'clearing-evidence is-alert' : 'clearing-evidence is-ok'}><span>暂停开关</span><strong>{detail.breakers.some((item) => item.paused) ? '部分暂停' : '全部打开'}</strong>{detail.breakers.map((item) => <small key={item.scope}>{breakerScopeLabel(item.scope)}：{item.paused ? '暂停' : '打开'}</small>)}</article>
         <article className={detail.reconciliation.conserved ? 'clearing-evidence is-ok' : 'clearing-evidence is-alert'}><span>系统对账</span><strong>{detail.reconciliation.conserved ? '金额守恒' : '金额不一致'}</strong><small>{detail.reconciliation.actualItemCount}/{detail.reconciliation.expectedItemCount} 项</small><small>{formatSettlementAmount(detail.reconciliation.actualTotalAmount, transfer.asset)} / {formatSettlementAmount(detail.reconciliation.expectedTotalAmount, transfer.asset)}</small></article>
       </section>
@@ -326,8 +330,11 @@ function FinalityEvidence({ detail }: { detail: AdminSettlementTransferDetail })
   return <section className={failed ? 'clearing-finality is-failed' : final ? 'clearing-finality is-final' : 'clearing-finality is-pending'} aria-label="到账最终确认">
     {failed ? <AlertTriangle aria-hidden="true" /> : final ? <CheckCircle2 aria-hidden="true" /> : <LoaderCircle aria-hidden="true" />}
     <div><span>到账最终确认</span><strong>{label}</strong><small>到账记录 {receiptStatusLabel(finality.receiptStatus)}</small></div>
-    <code>{shortHash(finality.executionTxHash)}</code>
-    <details className="technical-details compact"><summary>高级最终确认凭证</summary><small>高级区块 {finality.blockNumber ?? '未打包'} · 预期事件 {shortHash(finality.expectedEventHash)}{finality.replacementForTxHash ? ` · 替换 ${shortHash(finality.replacementForTxHash)}` : ''}</small></details>
+    <details className="technical-details compact">
+      <summary>最终确认核验信息</summary>
+      <code title={finality.executionTxHash}>{shortHash(finality.executionTxHash)}</code>
+      <small>区块 {finality.blockNumber ?? '未打包'} · 预期事件 {shortHash(finality.expectedEventHash)}{finality.replacementForTxHash ? ` · 替换 ${shortHash(finality.replacementForTxHash)}` : ''}</small>
+    </details>
   </section>;
 }
 
@@ -336,14 +343,14 @@ function PaymentProjectionView({ projection }: { projection: PaymentProjection }
     ? [{ label: '普通订单', intent: projection.intent }]
     : [{ label: '秒杀订单', intent: projection.dual.seckill }, { label: '普通价成交', intent: projection.dual.fallback }];
   return <section className="trace-results" aria-live="polite">
-    <article className="panel trace-summary"><div className="panel-heading"><div><p className="section-kicker">支付记录</p><h2>{stateLabel(projection.state)}</h2></div><span className="status-chip status-ready"><RefreshCw aria-hidden="true" />系统返回</span></div><dl className="definition-grid"><Fact label="订单编号" value={projection.orderId} code /><Fact label="付款提交" value={projection.submittedTxHash ? '钱包付款已提交' : '尚未提交'} /></dl><details className="technical-details compact"><summary>高级支付凭证</summary><dl className="definition-grid"><Fact label="钱包付款编号" value={projection.submittedTxHash ?? '尚未提交'} code /><Fact label="支付路由" value={projection.paymentRouterAddress} code /><Fact label="系统版本" value={projection.artifactVersion} /><Fact label="调用方法" value={projection.routerCall.functionName} /></dl></details></article>
+    <article className="panel trace-summary"><div className="panel-heading"><div><p className="section-kicker">支付记录</p><h2>{stateLabel(projection.state)}</h2></div><span className="status-chip status-ready"><RefreshCw aria-hidden="true" />系统返回</span></div><dl className="definition-grid"><Fact label="订单编号" value={projection.orderId} code /><Fact label="付款提交" value={projection.submittedTxHash ? '钱包付款已提交' : '尚未提交'} /></dl><details className="technical-details compact"><summary>支付核验信息</summary><dl className="definition-grid"><Fact label="钱包付款编号" value={projection.submittedTxHash ?? '尚未提交'} code /><Fact label="支付路由" value={projection.paymentRouterAddress} code /><Fact label="系统版本" value={projection.artifactVersion} /><Fact label="调用方法" value={projection.routerCall.functionName} /></dl></details></article>
     {intents.map(({ label, intent }) => <PaymentIntentPanel key={label} label={label} intent={intent} />)}
-    <article className="panel finality-panel"><p className="section-kicker">最终确认</p><h2>{projection.finality ? stateLabel(projection.finality.state) : '尚未提交'}</h2>{projection.finality ? <><dl className="definition-grid"><Fact label="成交分类" value={classificationLabel(projection.finality.classification)} /><Fact label="确认进度" value={`${projection.finality.confirmations} / ${projection.finality.requiredConfirmations}`} /><Fact label="是否已确认" value={projection.finality.canonicalBlock ? '是' : '否'} /></dl><details className="technical-details compact"><summary>高级确认凭证</summary><dl className="definition-grid"><Fact label="高级区块" value={String(projection.finality.blockNumber)} /><Fact label="交易记录" value={projection.finality.transactionHash} code /><Fact label="区块凭证" value={projection.finality.blockHash} code /></dl></details></> : <p className="muted-copy">系统还没有返回最终确认凭证。</p>}</article>
+    <article className="panel finality-panel"><p className="section-kicker">最终确认</p><h2>{projection.finality ? stateLabel(projection.finality.state) : '尚未提交'}</h2>{projection.finality ? <><dl className="definition-grid"><Fact label="成交分类" value={classificationLabel(projection.finality.classification)} /><Fact label="确认进度" value={`${projection.finality.confirmations} / ${projection.finality.requiredConfirmations}`} /><Fact label="是否已确认" value={projection.finality.canonicalBlock ? '是' : '否'} /></dl><details className="technical-details compact"><summary>确认核验信息</summary><dl className="definition-grid"><Fact label="区块" value={String(projection.finality.blockNumber)} /><Fact label="交易记录" value={projection.finality.transactionHash} code /><Fact label="区块凭证" value={projection.finality.blockHash} code /></dl></details></> : <p className="muted-copy">系统还没有返回最终确认凭证。</p>}</article>
   </section>;
 }
 
 function PaymentIntentPanel({ label, intent }: { label: string; intent: CanonicalPaymentIntent }) {
-  return <article className="panel intent-panel"><p className="section-kicker">{label}支付快照</p><h2>金额快照</h2><dl className="definition-grid"><Fact label="数量" value={String(intent.quantity)} /><Fact label="商品标价" value={formatUsdt(intent.listPriceUsdt)} /><Fact label="商品 USDT" value={formatUsdt(intent.productUsdtPaymentAmount)} /><Fact label="运费 USDT" value={formatUsdt(intent.freightUsdt)} /><Fact label="买家 USDT" value={formatUsdt(intent.usdtPaymentAmount)} /><Fact label="买家 NPL" value={formatNpl(intent.nplPaymentAmount)} /><Fact label="NPL 销毁" value={formatNpl(intent.nplBurnAmount)} /><Fact label="NPL 奖励" value={formatNpl(intent.nplRewardAmount)} /><Fact label="商家净应收" value={formatUsdt(intent.merchantNetReceivableUsdt)} /></dl><details className="technical-details compact"><summary>高级规则与预留凭证</summary><dl className="definition-grid"><Fact label="高级规则编号" value={String(intent.policyVersion)} /><Fact label="预留编号" value={intent.reservationId} code /><Fact label="预留截止" value={String(intent.reservationDeadline)} /></dl></details></article>;
+  return <article className="panel intent-panel"><p className="section-kicker">{label}支付快照</p><h2>金额快照</h2><dl className="definition-grid"><Fact label="数量" value={String(intent.quantity)} /><Fact label="商品标价" value={formatUsdt(intent.listPriceUsdt)} /><Fact label="商品 USDT" value={formatUsdt(intent.productUsdtPaymentAmount)} /><Fact label="运费 USDT" value={formatUsdt(intent.freightUsdt)} /><Fact label="买家 USDT" value={formatUsdt(intent.usdtPaymentAmount)} /><Fact label="买家 NPL" value={formatNpl(intent.nplPaymentAmount)} /><Fact label="NPL 销毁" value={formatNpl(intent.nplBurnAmount)} /><Fact label="NPL 奖励" value={formatNpl(intent.nplRewardAmount)} /><Fact label="商家净应收" value={formatUsdt(intent.merchantNetReceivableUsdt)} /></dl><details className="technical-details compact"><summary>规则与预留核验信息</summary><dl className="definition-grid"><Fact label="规则编号" value={String(intent.policyVersion)} /><Fact label="预留编号" value={intent.reservationId} code /><Fact label="预留截止" value={String(intent.reservationDeadline)} /></dl></details></article>;
 }
 
 function ViewTab({ active, children, onClick }: { active: boolean; children: ReactNode; onClick(): void }) {
@@ -397,7 +404,7 @@ function EmptyState({ detail, title }: { detail: string; title: string }) {
 }
 
 function ErrorView({ error }: { error: CoreApiError }) {
-  return <div className="resource-state resource-state-error clearing-error" role="alert"><Ban aria-hidden="true" /><div><strong>操作失败</strong><p>{humanizeError(error)}</p>{error.correlationId ? <small>编号：{error.correlationId}</small> : null}</div></div>;
+  return <div className="resource-state resource-state-error clearing-error" role="alert"><Ban aria-hidden="true" /><div><strong>操作失败</strong><p>{humanizeError(error)}</p>{error.correlationId ? <details className="technical-details compact"><summary>错误编号</summary><code>{error.correlationId}</code></details> : null}</div></div>;
 }
 
 function asCoreError(cause: unknown, message: string) {

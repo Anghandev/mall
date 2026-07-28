@@ -625,7 +625,7 @@ export function createCoreApi(baseUrl = import.meta.env.VITE_CORE_API_BASE_URL ?
 
     async listMerchantPrintJobs(token, limit = 50) {
       if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
-        throw new CoreApiError('InvalidResponse', 'Print job limit must be an integer from 1 to 100.');
+        throw new CoreApiError('InvalidResponse', '打印记录数量请填写 1 到 100。');
       }
       const body = await request(normalizedBaseUrl, `/v2/merchant/print-jobs?limit=${limit}`, { token });
       return array(body, 'print jobs response').map(parsePrintJob);
@@ -997,7 +997,7 @@ function merchantReceivableStatementsPath(options: MerchantReceivableStatementLi
   }
   if (options.limit !== undefined) {
     if (!Number.isSafeInteger(options.limit) || options.limit < 1 || options.limit > 100) {
-      throw new CoreApiError('InvalidResponse', 'Receivable statement limit must be an integer from 1 to 100.');
+      throw new CoreApiError('InvalidResponse', '逐单应收数量请填写 1 到 100。');
     }
     query.set('limit', String(options.limit));
   }
@@ -1025,8 +1025,8 @@ async function request(baseUrl: string, path: string, options: { method?: string
     throw new CoreApiError(
       'NetworkUnavailable',
       controller.signal.aborted
-        ? 'Core API 请求超时，请检查网络后重试。'
-        : '无法连接 Core API，请检查网络或服务配置。',
+        ? '系统请求超时，请检查网络后重试。'
+        : '无法连接后台服务，请检查网络或稍后重试。',
     );
   } finally {
     window.clearTimeout(timeout);
@@ -1037,7 +1037,7 @@ async function request(baseUrl: string, path: string, options: { method?: string
   try {
     body = await response.json();
   } catch {
-    throw new CoreApiError('InvalidResponse', 'Core 返回了无法识别的响应。', correlationId);
+    throw new CoreApiError('InvalidResponse', '后台服务返回了无法识别的响应。', correlationId);
   }
   if (response.ok) return body;
 
@@ -1047,7 +1047,7 @@ async function request(baseUrl: string, path: string, options: { method?: string
   const code = coreErrorCodeSet.has(rawCode) ? rawCode as CoreErrorCode : 'UnknownState';
   const message = typeof error?.message === 'string' && error.message.length > 0
     ? error.message
-    : 'Core 请求失败。';
+    : '系统请求失败。';
   const details = recordOrUndefined(error?.details);
   const blockingResource = details?.blockingResource === undefined
     ? undefined

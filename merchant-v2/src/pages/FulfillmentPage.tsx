@@ -403,7 +403,7 @@ export function FulfillmentPage() {
             <tbody>
               {ordersState.phase === 'loading' ? <tr><td colSpan={columns.length}><LoadingRows count={4} /></td></tr> : null}
               {ordersState.phase === 'error' ? <tr><td colSpan={columns.length}><EmptyState blocked description={ordersState.message} title="订单读取失败" /></td></tr> : null}
-              {ordersState.phase === 'idle' ? <tr><td colSpan={columns.length}><EmptyState blocked description="连接授权商家钱包后读取订单。" title="商家会话不可用" /></td></tr> : null}
+              {ordersState.phase === 'idle' ? <tr><td colSpan={columns.length}><EmptyState blocked description="连接授权商家钱包后读取订单。" title="请先连接商家钱包" /></td></tr> : null}
               {ordersState.phase === 'ready' && visibleOrders.length === 0 ? <tr><td colSpan={columns.length}><EmptyState description="当前履约方式和筛选条件下没有订单。" title="暂无匹配订单" /></td></tr> : null}
               {visibleOrders.map((order) => (
                 <OrderRow
@@ -466,11 +466,11 @@ export function FulfillmentPage() {
         <div className="two-panel-grid">
           <form className="section-block compact-section" onSubmit={(event) => { event.preventDefault(); submitPickup(); }}>
             <div className="section-heading"><div><p className="eyebrow">到店自提</p><h2>门店核销自提</h2></div><ScanLine aria-hidden="true" size={19} /></div>
-            <div className="field"><label htmlFor="pickup-store-id">订单绑定门店</label><input id="pickup-store-id" readOnly value={selectedTarget?.fulfillmentMode === 'PICKUP' ? selectedTarget.payload.name : '读取中'} />{selectedTarget?.fulfillmentMode === 'PICKUP' ? <span className="field-help">门店编号在高级信息里，核销时不用手填。</span> : null}</div>
-            {selectedTarget?.fulfillmentMode === 'PICKUP' ? <details className="technical-details compact"><summary>高级门店编号</summary><code>{selectedTarget.storeId}</code></details> : null}
+            <div className="field"><label htmlFor="pickup-store-id">订单绑定门店</label><input id="pickup-store-id" readOnly value={selectedTarget?.fulfillmentMode === 'PICKUP' ? selectedTarget.payload.name : '读取中'} />{selectedTarget?.fulfillmentMode === 'PICKUP' ? <span className="field-help">门店编号在核验信息里，核销时不用手填。</span> : null}</div>
+            {selectedTarget?.fulfillmentMode === 'PICKUP' ? <details className="technical-details compact"><summary>门店编号</summary><code>{selectedTarget.storeId}</code></details> : null}
             <PickupCodeScanner key={selectedOrder.orderId} disabled={!pickupAllowed || submitting} onCode={(code) => updateCommandInput('pickup', () => setPickupCode(code))} />
-            <div className="field"><label htmlFor="pickup-code">六位核销码</label><input autoComplete="one-time-code" disabled={!pickupAllowed || submitting} id="pickup-code" inputMode="numeric" maxLength={6} onChange={(event) => updateCommandInput('pickup', () => setPickupCode(event.target.value.replace(/[^0-9]/g, '')))} pattern="[0-9]{6}" placeholder="000000" value={pickupCode} /><span className="field-help">相机不可用或权限被拒绝时，可直接手工输入。</span></div>
-            <div className="field"><label htmlFor="pickup-evidence-hash">核销凭证编号（高级）</label><input autoComplete="off" disabled={!pickupAllowed || submitting} id="pickup-evidence-hash" onChange={(event) => updateCommandInput('pickup', () => setPickupEvidenceHash(event.target.value))} pattern="0x[0-9a-fA-F]{64}" placeholder="系统生成的 0x 凭证编号" value={pickupEvidenceHash} /><span className="field-help">从系统核销凭证复制；没有编号不要手填。</span></div>
+            <div className="field"><label htmlFor="pickup-code">六位核销码</label><input autoComplete="one-time-code" disabled={!pickupAllowed || submitting} id="pickup-code" inputMode="numeric" maxLength={6} onChange={(event) => updateCommandInput('pickup', () => setPickupCode(event.target.value.replace(/[^0-9]/g, '')))} pattern="[0-9]{6}" placeholder="000000" value={pickupCode} /><span className="field-help">相机打不开或权限被拒绝时，可直接手工输入。</span></div>
+            <div className="field"><label htmlFor="pickup-evidence-hash">核销凭证编号</label><input autoComplete="off" disabled={!pickupAllowed || submitting} id="pickup-evidence-hash" onChange={(event) => updateCommandInput('pickup', () => setPickupEvidenceHash(event.target.value))} pattern="0x[0-9a-fA-F]{64}" placeholder="系统生成的 0x 凭证编号" value={pickupEvidenceHash} /><span className="field-help">从系统核销凭证复制；没有编号不要手填。</span></div>
             <button className="button primary wide" disabled={!pickupAllowed || !pickupValid || submitting} type="submit">确认门店核销</button>
             <ActionBlockReason action="VERIFY_PICKUP" actions={allowedActions} enabled={pickupAllowed} />
             <p className="panel-note">订单绑定的门店不能在这里更换，也不能离线提交。</p>
@@ -538,10 +538,10 @@ function OrderSummary({ order }: { order: FulfillmentOrder }) {
         </table>
       </div>
       <details className="technical-details compact">
-        <summary>付款记录</summary>
+        <summary>客服核验编号</summary>
         <dl className="balance-list">
           <div><dt>订单编号</dt><dd>{order.orderId}</dd></div>
-          <div><dt>付款记录</dt><dd><code title={order.paymentTxHash ?? undefined}>{shortId(order.paymentTxHash) || '—'}</code></dd></div>
+          <div><dt>钱包付款</dt><dd>{order.paymentTxHash ? '已提交' : '—'}</dd></div>
         </dl>
       </details>
     </>
@@ -694,15 +694,15 @@ function AllowedActionsTable({ actions }: { actions: readonly AllowedAction[] })
         当前可做：{enabledActions.length ? enabledActions.map((action) => actionLabel(action.action)).join('、') : '暂无可操作按钮，请按订单状态等待或刷新。'}
       </p>
       <details className="technical-details compact">
-        <summary>查看系统判断明细</summary>
+        <summary>查看处理说明</summary>
         <div className="table-wrap compact-table">
           <table>
-            <thead><tr><th scope="col">操作</th><th scope="col">系统判断</th><th scope="col">原因</th><th scope="col">截止时间</th></tr></thead>
+            <thead><tr><th scope="col">操作</th><th scope="col">是否可点</th><th scope="col">原因</th><th scope="col">最晚处理时间</th></tr></thead>
             <tbody>
               {actions.map((action) => (
                 <tr key={action.action}>
                   <td>{actionLabel(action.action)}</td>
-                  <td><span className={action.enabled ? 'state-text success' : 'state-text blocked'}>{action.enabled ? '允许' : '阻断'}</span></td>
+                  <td><span className={action.enabled ? 'state-text success' : 'state-text blocked'}>{action.enabled ? '可以' : '不能操作'}</span></td>
                   <td>{reasonLabel(action.reasonCode)}</td>
                   <td>{timestamp(action.deadline)}</td>
                 </tr>

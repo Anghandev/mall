@@ -21,12 +21,12 @@ export function CoreStatusPage() {
       </header>
 
       <section className="status-overview" aria-label="系统发布状态">
-        <article><span>系统状态</span><strong>已连接</strong><small>{publicationLabel(publicationStatus)}</small><details className="technical-details compact"><summary>高级版本信息</summary><code>{artifactVersion}</code></details></article>
-        <article><span>运行网络</span><strong>BSC 主网</strong><small>平台正式运行网络</small><details className="technical-details compact"><summary>高级网络编号</summary><code>{chainIdentity.chainId}</code></details></article>
-        <article><span>部署状态</span><strong>{deploymentAuthorized ? '已授权' : '外部阻断'}</strong><small>没有地址时不推断</small></article>
+        <article><span>系统状态</span><strong>已连接</strong><small>{publicationLabel(publicationStatus)}</small><details className="technical-details compact"><summary>版本信息</summary><code>{artifactVersion}</code></details></article>
+        <article><span>运行网络</span><strong>BSC 主网</strong><small>平台正式运行网络</small><details className="technical-details compact"><summary>网络编号</summary><code>{chainIdentity.chainId}</code></details></article>
+        <article><span>部署状态</span><strong>{deploymentAuthorized ? '已授权' : '暂未就绪'}</strong><small>没有地址时不推断</small></article>
         <article>
           <span>新付款</span>
-          <strong>{bootstrap.loading ? '检查中' : bootstrap.error ? '不可用' : readiness?.writesEnabled ? '已开启' : '安全关闭'}</strong>
+          <strong>{bootstrap.loading ? '检查中' : bootstrap.error ? '未返回数据' : readiness?.writesEnabled ? '已开启' : '安全关闭'}</strong>
           <small>{bootstrap.error ? errorLabel(bootstrap.error.code) : readiness ? '系统确认' : '无运行证据'}</small>
         </article>
       </section>
@@ -45,13 +45,13 @@ export function CoreStatusPage() {
           {readiness ? (
             <dl className="definition-grid">
               <div><dt>系统状态</dt><dd>{statusLabel(bootstrap.data?.status)}</dd></div>
-              <div><dt>运行网络</dt><dd>BSC 主网<details className="technical-details compact"><summary>高级编号</summary><code>{readiness.chainId}</code></details></dd></div>
+              <div><dt>运行网络</dt><dd>BSC 主网<details className="technical-details compact"><summary>核验编号</summary><code>{readiness.chainId}</code></details></dd></div>
               <div><dt>新支付写入</dt><dd>{readiness.writesEnabled ? '已开启' : '安全关闭'}</dd></div>
             </dl>
           ) : null}
           {readiness ? (
             <details className="technical-details">
-              <summary>高级配置</summary>
+              <summary>配置明细</summary>
               <dl className="definition-grid">
                 <div><dt>USDT 合约</dt><dd><code>{readiness.assets.usdt}</code></dd></div>
                 <div><dt>NPL 合约</dt><dd><code>{readiness.assets.npl}</code></dd></div>
@@ -75,9 +75,9 @@ export function CoreStatusPage() {
       </section>
 
       <section className="status-columns">
-        <BlockedList title="运行阻断" values={readiness?.runtimeBlockers} loading={bootstrap.loading} />
-        <BlockedList title="付款决策阻断" values={readiness?.paymentDecisionBlocked} loading={bootstrap.loading} />
-        <BlockedList title="付款外部阻断" values={readiness?.paymentExternalBlocked} loading={bootstrap.loading} />
+        <BlockedList title="运行限制" values={readiness?.runtimeBlockers} loading={bootstrap.loading} />
+        <BlockedList title="付款规则限制" values={readiness?.paymentDecisionBlocked} loading={bootstrap.loading} />
+        <BlockedList title="付款服务未就绪" values={readiness?.paymentExternalBlocked} loading={bootstrap.loading} />
       </section>
 
       <section className="snapshot-rule">
@@ -139,18 +139,18 @@ function statusLabel(value: string | undefined) {
 }
 
 function humanStatusError(message: string) {
-  if (/Core API is unreachable|gateway is unavailable|unavailable|unreachable/i.test(message)) return '后台服务暂时不可用，请稍后重试。';
+  if (/Core API is unreachable|gateway is unavailable|unavailable|unreachable/i.test(message)) return '后台服务暂时无法连接，请稍后重试。';
   if (/non-JSON|incompatible|artifact|version/i.test(message)) return '当前页面版本和后台版本不一致，请刷新页面或重新部署前端。';
   return message;
 }
 
 function errorLabel(value: string | undefined) {
   return ({
-    ExternalBlocked: '外部服务暂不可用',
+    ExternalBlocked: '系统服务暂时异常',
     DecisionBlocked: '需要人工确认',
     ConfigurationRequired: '配置未完成',
     Forbidden: '没有权限',
-    Unavailable: '暂不可用',
+    Unavailable: '未返回数据',
   } as Record<string, string>)[String(value ?? '')] ?? (value || '操作失败');
 }
 
@@ -159,7 +159,7 @@ function BlockedList({ title, values, loading }: { title: string; values: readon
     <article className="panel blocker-panel">
       <p className="section-kicker">安全检查</p><h2>{title}</h2>
       {loading ? <p className="muted-copy">正在读取系统状态...</p> : null}
-      {!loading && values?.length === 0 ? <p className="healthy-copy"><CheckCircle2 aria-hidden="true" /> 系统当前没有阻断项</p> : null}
+      {!loading && values?.length === 0 ? <p className="healthy-copy"><CheckCircle2 aria-hidden="true" /> 系统当前没有限制项</p> : null}
       {values && values.length > 0 ? <ul>{values.map((value) => <li key={value}><Ban aria-hidden="true" /> {errorLabel(value)}</li>)}</ul> : null}
     </article>
   );

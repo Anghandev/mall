@@ -124,7 +124,7 @@ export function DashboardPage() {
         <EmptyState blocked description={state.message} title="运营聚合加载失败" />
       ) : null}
       {state.phase === 'idle' ? (
-        <EmptyState blocked description="需要已验证的商家钱包会话。" title="商家会话不可用" />
+        <EmptyState blocked description="需要已验证的商家钱包会话。" title="请先连接商家钱包" />
       ) : null}
 
       {dashboard ? (

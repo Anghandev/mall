@@ -3495,7 +3495,8 @@ td > small {
 .wallet-list button {
   display: grid;
   min-height: 64px;
-  grid-template-columns: 36px 1fr auto;
+  min-width: 0;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
   align-items: center;
   gap: 11px;
   padding: 8px 12px;
@@ -3518,6 +3519,7 @@ td > small {
 
 .wallet-list button > span:nth-child(2) {
   display: grid;
+  min-width: 0;
   gap: 2px;
 }
 
@@ -3528,8 +3530,11 @@ td > small {
 
 .wallet-list small,
 .wallet-list button > span:last-child {
+  overflow: hidden;
   color: var(--muted);
   font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .wallet-mark {
@@ -4592,6 +4597,15 @@ td > small {
 }
 
 @media (max-width: 520px) {
+  .wallet-list button {
+    grid-template-columns: 34px minmax(0, 1fr);
+  }
+
+  .wallet-list button > span:last-child {
+    grid-column: 2;
+    justify-self: start;
+  }
+
   .takeover-heading,
   .takeover-pagination {
     align-items: stretch;

@@ -209,7 +209,7 @@ export function FulfillmentCommandPanel({
       <div className="panel-heading">
         <div><p className="section-kicker">履约操作</p><h3>履约操作台</h3></div>
         <span className={coreAction?.enabled ? 'status-chip status-ready' : 'status-chip status-blocked'}>
-          {actionsLoading ? '检查中' : coreAction?.enabled ? '可执行' : coreAction?.reasonCode ?? '暂不可执行'}
+          {actionsLoading ? '检查中' : coreAction?.enabled ? '可执行' : coreAction?.reasonCode ?? '不能执行'}
         </span>
       </div>
 
@@ -223,7 +223,7 @@ export function FulfillmentCommandPanel({
 
       {definition.action !== 'RECORD_SHIPMENT' && definition.action !== 'OPEN_ARBITRATION' ? (
         <>
-          <label htmlFor="fulfillment-evidence">系统凭证编号（高级）</label>
+          <label htmlFor="fulfillment-evidence">系统凭证编号</label>
           <input id="fulfillment-evidence" value={evidenceHash} onChange={(event) => setEvidenceHash(event.target.value)} autoComplete="off" placeholder="从系统证据里复制 0x 编号" />
           <small>没有系统生成的编号不要手填；发货和发起仲裁会自动生成凭证。</small>
         </>
@@ -318,7 +318,7 @@ function commandDisabledReason(input: {
     return `当前订单状态不允许执行“${input.definition.label}”。`;
   }
   if (input.actionsLoading) return '正在读取当前订单能做什么。';
-  if (!input.action) return `系统暂未开放“${input.definition.label}”。`;
+  if (!input.action) return `请先选择要执行的操作。`;
   if (!input.action.enabled) return `系统暂不允许“${input.definition.label}”：${reasonLabel(input.action.reasonCode)}${input.action.deadline ? ` · 截止 ${input.action.deadline}` : ''}`;
   if (!['RECORD_SHIPMENT', 'OPEN_ARBITRATION'].includes(input.definition.action)
     && !bytes32Pattern.test(input.evidenceHash.trim())) return '请从系统证据里复制 0x 凭证编号；没有编号不要手填。';

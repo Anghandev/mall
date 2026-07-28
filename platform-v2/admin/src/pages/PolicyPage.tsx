@@ -163,7 +163,7 @@ export function PolicyPage() {
         {selected ? <>
           {selected.validationErrors.length ? <ul className="validation-list">{selected.validationErrors.map((item) => <li key={`${item.code}:${item.field}`}><AlertTriangle aria-hidden="true" />{policyFieldLabel(item.field)}：{validationLabel(item.code)}</li>)}</ul> : <p className="healthy-copy"><Check aria-hidden="true" />草稿校验通过，可以继续二次确认。</p>}
           <details className="technical-details">
-            <summary>高级发布凭证</summary>
+            <summary>发布核验信息</summary>
             <dl className="definition-grid"><div><dt>草稿凭证</dt><dd><code>{selected.policyHash ?? '待校验'}</code></dd></div><div><dt>执行记录</dt><dd><code>{selected.executionTxHash ?? '待执行'}</code></dd></div></dl>
             <div className="value-comparison"><div><span>系统保存的草稿值</span><code>{canonicalJson(selected.payload)}</code></div><div><span>当前编辑值</span><code>{canonicalJson(editedPayload)}</code></div></div>
           </details>
@@ -253,4 +253,4 @@ function randomNonce() { const values = crypto.getRandomValues(new Uint32Array(2
 function newKey(prefix: string) { return `${prefix}-${crypto.randomUUID()}`; }
 function invalid(message: string) { return new CoreApiError({ code: 'InvalidResponse', message, status: 400 }); }
 function ErrorView({ error }: { error: CoreApiError }) { return <div className="resource-state resource-state-error" role="alert"><Ban aria-hidden="true" /><div><strong>操作失败</strong><p>{humanizeError(error)}</p></div></div>; }
-function asCoreError(cause: unknown) { return cause instanceof CoreApiError ? cause : new CoreApiError({ code: 'ExternalBlocked', message: '政策治理服务暂时不可用', status: 503 }); }
+function asCoreError(cause: unknown) { return cause instanceof CoreApiError ? cause : new CoreApiError({ code: 'ExternalBlocked', message: '政策治理服务暂时无法连接', status: 503 }); }

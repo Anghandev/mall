@@ -33,7 +33,7 @@ test('primary mobile shell is usable and does not overflow', async ({ page }, te
 
     if (route.path === '/mall/seckill') {
       await expect(page.getByRole('heading', { name: product.title })).toBeVisible();
-      await expect(page.getByText(/链上最终购买，Core 已发布接力延长 30 秒/)).toBeVisible();
+      await expect(page.getByText(/成功抢购，接力时间 \+30 秒/)).toBeVisible();
       await expect(page.getByText(/00:5[89]:[0-5][0-9]/)).toBeVisible();
       await expect(page.getByText(/00:00:[0-5][0-9]/)).toBeVisible();
     }
@@ -102,9 +102,9 @@ test('product detail and saved-address checkout are keyboard operable and fail c
   const defaultAddress = page.getByRole('button', { name: '使用默认地址' });
   await defaultAddress.focus();
   await page.keyboard.press('Enter');
-  await expect(page.getByText('Core 目标已验证')).toBeVisible();
+  await expect(page.getByRole('heading', { name: '收货信息已验证' })).toBeVisible();
   await expect(page.getByText(buyerSavedAddress.formattedAddress, { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: '创建签名报价' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: '生成付款报价' })).toBeEnabled();
   await expect(page.getByLabel('详细地址')).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
   await expectHealthyDocument(page);
@@ -127,7 +127,7 @@ test('buyer evidence form is keyboard-addressable and fits the mobile frame', as
   const exchange = page.getByRole('button', { name: '申请换货' });
   await exchange.focus();
   await page.keyboard.press('Enter');
-  const reasonCode = page.getByLabel('原因代码');
+  const reasonCode = page.getByLabel('处理原因');
   await expect(reasonCode).toBeVisible();
   for (let index = 0; index < 12 && !await reasonCode.evaluate((element) => element === document.activeElement); index += 1) {
     await page.keyboard.press('Tab');
@@ -136,7 +136,7 @@ test('buyer evidence form is keyboard-addressable and fits the mobile frame', as
   await reasonCode.fill('PACKAGE_DAMAGED');
   await expect(page.getByLabel(/证据文件（可选）/)).toHaveAttribute('accept', 'image/jpeg,image/png,image/webp,application/pdf');
   await page.getByRole('button', { name: /封装证据并提交/ }).click();
-  await expect(page.getByRole('status')).toContainText('操作已由 Core 接收');
+  await expect(page.getByRole('status')).toContainText('操作已由系统接收');
   expect(await page.evaluate(() => document.activeElement?.classList.contains('skip-link'))).toBe(false);
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
   await expectHealthyDocument(page);
@@ -150,7 +150,7 @@ test('buyer account and manual address form fit the mobile frame and remain keyb
   await page.goto('/mall/assets');
   await page.getByRole('button', { name: '连接钱包' }).click();
   await expect(page.getByRole('heading', { name: buyerProfile.nickname! })).toBeVisible();
-  await expect(page.getByText('买家 UID：10001')).toBeVisible();
+  await expect(page.getByText('账号编号：10001')).toBeVisible();
   await page.getByRole('link', { name: '打开我的收货地址' }).click();
   const form = page.getByRole('form', { name: '新增收货地址' });
   await form.getByLabel('收货人').fill('张三');

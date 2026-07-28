@@ -72,7 +72,7 @@ export function GlobalSearch({ enabled = false, loading = false, onSearch }: Pro
   return (
     <details className="search-panel">
       <summary>
-        <span className="summary-title"><SlidersHorizontal aria-hidden="true" /> 高级组合检索</span>
+        <span className="summary-title"><SlidersHorizontal aria-hidden="true" /> 更多筛选</span>
         <span className="summary-meta">多条件精确检索 · UID / 手机号仍受限</span>
       </summary>
       <form className="search-form" onSubmit={submit} aria-describedby="search-capability">
@@ -80,7 +80,7 @@ export function GlobalSearch({ enabled = false, loading = false, onSearch }: Pro
           <legend>条件关系</legend>
           <div className="segmented" aria-label="条件关系">
 	            <button className="is-active" type="button" aria-pressed="true" disabled={!enabled}>全部满足</button>
-	            <button type="button" aria-pressed="false" disabled title="任一条件查询暂未开放">任一满足</button>
+	            <button type="button" aria-pressed="false" disabled title="当前只支持全部满足">任一满足</button>
           </div>
         </fieldset>
 
@@ -88,7 +88,7 @@ export function GlobalSearch({ enabled = false, loading = false, onSearch }: Pro
           <label>订单号<input value={form.orderId} onChange={(event) => set('orderId', event.target.value)} disabled={!enabled} autoComplete="off" placeholder="精确匹配" /></label>
 	          <label>商品编号<input value={form.productId} onChange={(event) => set('productId', event.target.value)} disabled={!enabled} autoComplete="off" placeholder="精确匹配" /></label>
 	          <label>规格编号<input value={form.skuId} onChange={(event) => set('skuId', event.target.value)} disabled={!enabled} autoComplete="off" placeholder="精确匹配" /></label>
-	          <label>付款记录编号（高级）<input value={form.txHash} onChange={(event) => set('txHash', event.target.value)} disabled={!enabled} autoComplete="off" placeholder="从订单付款记录复制" /><small>不知道这个编号就留空。</small></label>
+	          <label>付款记录编号<input value={form.txHash} onChange={(event) => set('txHash', event.target.value)} disabled={!enabled} autoComplete="off" placeholder="从订单付款记录复制" /><small>不知道这个编号就留空。</small></label>
           <label>
             钱包地址
             <span className="inline-control">
@@ -97,7 +97,7 @@ export function GlobalSearch({ enabled = false, loading = false, onSearch }: Pro
             </span>
           </label>
           <label>用户 UID<input disabled autoComplete="off" placeholder="请在全局操作中精确查询" /></label>
-	          <label>绑定手机号<input disabled type="tel" autoComplete="off" placeholder="手机号查询暂未开放" /></label>
+	          <label>绑定手机号<input disabled type="tel" autoComplete="off" placeholder="当前请用钱包或订单号查询" /></label>
           <label>开始时间<input value={form.start} onChange={(event) => { setQuickRange(null); set('start', event.target.value); }} disabled={!enabled} type="datetime-local" /></label>
           <label>结束时间<input value={form.end} onChange={(event) => { setQuickRange(null); set('end', event.target.value); }} disabled={!enabled} type="datetime-local" /></label>
 	          <label>订单状态<select value={form.state} onChange={(event) => set('state', event.target.value as SearchForm['state'])} disabled={!enabled}><option value="">全部</option>{orderProjectionStates.map((state) => <option key={state} value={state}>{stateLabel(state)}</option>)}</select></label>

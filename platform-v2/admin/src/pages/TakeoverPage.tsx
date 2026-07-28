@@ -75,7 +75,7 @@ export function TakeoverPage() {
         setSelectedOrderId(nextPage.orders[0]?.orderId ?? '');
       })
       .catch((cause) => {
-        if (!controller.signal.aborted) setResourceError(asCoreError(cause, '履约订单不可用'));
+        if (!controller.signal.aborted) setResourceError(asCoreError(cause, '履约订单暂时无法连接'));
       })
       .finally(() => {
         if (!controller.signal.aborted) setOrdersLoading(false);
@@ -97,7 +97,7 @@ export function TakeoverPage() {
       setPage(nextPage);
       setSelectedOrderId(nextPage.orders[0]?.orderId ?? '');
     } catch (cause) {
-      setResourceError(asCoreError(cause, 'Admin 订单查询不可用'));
+      setResourceError(asCoreError(cause, '订单查询暂时无法连接'));
     } finally {
       setOrdersLoading(false);
     }
@@ -133,7 +133,7 @@ export function TakeoverPage() {
     try {
       setBatchPreview(await previewAdminOrderBatchActions(selectedBatchOrderIds, session.token));
     } catch (cause) {
-      const error = asCoreError(cause, '批次操作预览暂时不可用');
+      const error = asCoreError(cause, '批次操作预览暂时无法连接');
       setBatchPreviewError(humanizeError(error));
     } finally {
       setBatchPreviewLoading(false);
@@ -230,7 +230,7 @@ export function TakeoverPage() {
                       <EvidenceGroup title="发货凭证" empty="无发货证据">
                         {selectedOrder.shipments.map((shipment) => (
                           <li key={shipment.shipmentId}>
-                            <strong>{shipment.carrierCode} · {shipment.trackingNumber ?? '运单号不可用'}</strong>
+                            <strong>{shipment.carrierCode} · {shipment.trackingNumber ?? '暂无运单号'}</strong>
                             {shipment.note ? <span>{shipment.note}</span> : null}
                             <code title={shipment.evidenceHash}>{shortId(shipment.evidenceHash)}</code>
                             <small>{shipment.mediaAssetIds.length} 个凭证 · {formatDate(shipment.createdAt)}</small>

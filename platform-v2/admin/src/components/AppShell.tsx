@@ -58,7 +58,7 @@ export function AppShell({ children }: AppShellProps) {
           >
             <WalletCards aria-hidden="true" /> {session ? compactAddress(session.walletAddress) : status === 'CONNECTING' ? '等待签名' : '连接管理钱包'}
           </button>
-          <button className="icon-button" type="button" aria-label="查看阻断说明" onClick={() => navigate('/core-status')}><CircleHelp aria-hidden="true" /></button>
+          <button className="icon-button" type="button" aria-label="查看限制说明" onClick={() => navigate('/core-status')}><CircleHelp aria-hidden="true" /></button>
         </div>
       </header>
 
@@ -76,7 +76,7 @@ export function AppShell({ children }: AppShellProps) {
           <strong>已连接</strong>
           <span>所有操作以当前钱包权限和系统状态为准</span>
           <details className="technical-details compact">
-            <summary>高级版本信息</summary>
+            <summary>版本信息</summary>
             <code>{coreState.artifactVersion}</code>
           </details>
         </div>

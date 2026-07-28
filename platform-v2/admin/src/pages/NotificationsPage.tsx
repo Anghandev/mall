@@ -240,10 +240,10 @@ export function NotificationsPage() {
           <label>选择活动<select value={selectedCampaignId} onChange={(event) => setSelectedCampaignId(event.target.value)}>{campaigns.map((campaign) => <option key={campaign.campaignId} value={campaign.campaignId}>{topicLabel(campaign.topic)} · {campaignStateLabel(campaign.state)} · {shortId(campaign.campaignId)}</option>)}</select></label>
           <dl className="notification-action-facts">
             <div><dt>状态</dt><dd>{campaignStateLabel(selectedCampaign.state)}</dd></div>
-            <div><dt>内容</dt><dd>{topicLabel(selectedCampaign.topic)}<details className="technical-details compact"><summary>高级内容编号</summary><code>{shortId(selectedCampaign.contentHash)}</code></details></dd></div>
+            <div><dt>内容</dt><dd>{topicLabel(selectedCampaign.topic)}<details className="technical-details compact"><summary>内容编号</summary><code>{shortId(selectedCampaign.contentHash)}</code></details></dd></div>
             <div><dt>现在能做</dt><dd>{selectedCampaign.allowedActions.length ? selectedCampaign.allowedActions.map(actionLabel).join(' / ') : '无'}</dd></div>
           </dl>
-          <label>系统发布凭证编号（高级）<input value={evidenceHash} onChange={(event) => setEvidenceHash(event.target.value)} disabled={!canPublish || busy} aria-describedby="notification-evidence-help" placeholder="从系统证据复制 0x 编号" /></label>
+          <label>系统发布凭证编号<input value={evidenceHash} onChange={(event) => setEvidenceHash(event.target.value)} disabled={!canPublish || busy} aria-describedby="notification-evidence-help" placeholder="从系统证据复制 0x 编号" /></label>
           <button className="button button-primary button-full" type="button" onClick={() => void publish()} disabled={!canPublish || !bytes32Pattern.test(evidenceHash) || busy || loadingData}><Send aria-hidden="true" />发布活动</button>
           <button className="button button-quiet button-full" type="button" onClick={() => void retry()} disabled={!canRetry || busy || loadingData}><RotateCcw aria-hidden="true" />重试失败投递</button>
           <p className="button-explanation" id="notification-evidence-help">没有系统生成的编号不要手填。按钮同时依赖当前角色与系统授权。</p>
@@ -410,5 +410,5 @@ function invalid(message: string) {
 function asCoreError(cause: unknown) {
   if (cause instanceof CoreApiError) return cause;
   if (cause instanceof Error) return new CoreApiError({ code: 'InvalidRequest', message: cause.message, status: 400 });
-  return new CoreApiError({ code: 'ExternalBlocked', message: '通知服务暂时不可用', status: 503 });
+  return new CoreApiError({ code: 'ExternalBlocked', message: '通知服务暂时无法连接', status: 503 });
 }

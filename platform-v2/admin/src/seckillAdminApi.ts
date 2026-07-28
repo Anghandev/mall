@@ -35,8 +35,9 @@ const governanceAllowedActions = ['APPROVE_SECONDARY', 'EXECUTE', 'CANCEL'] as c
 
 export type SeckillPageQuery = Readonly<{ cursor?: string; limit?: number }>;
 
-export async function fetchCurrentSeckillSession(signal?: AbortSignal): Promise<SeckillSessionProjection> {
+export async function fetchCurrentSeckillSession(signal?: AbortSignal): Promise<SeckillSessionProjection | null> {
   const body = await requestCoreJson('/v2/seckill/sessions/current', signal ? { signal } : {});
+  if (body === null) return null;
   if (!isSeckillSession(body)) throw invalid('Current seckill session does not match the coordinated generated type');
   return body;
 }

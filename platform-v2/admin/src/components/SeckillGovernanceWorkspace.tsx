@@ -289,7 +289,7 @@ export function SeckillGovernanceWorkspace({ current, onRefresh }: {
               {currentAction?.allowedActions.includes('APPROVE_SECONDARY') ? (
                 <>
                   <details className="technical-details compact">
-                    <summary>高级二次确认参数（已自动填写）</summary>
+                    <summary>二次确认参数（已自动填写）</summary>
                     <label>确认流水号<input inputMode="numeric" pattern="0|[1-9][0-9]*" value={nonce} onChange={(event) => setNonce(event.target.value)} disabled={!isAdmin || Boolean(pendingAction)} /></label>
                     <label>有效期<input inputMode="numeric" pattern="[1-9][0-9]*" value={deadline} onChange={(event) => setDeadline(event.target.value)} disabled={!isAdmin || Boolean(pendingAction)} placeholder="自动生成或平台提供" /></label>
                   </details>
@@ -321,7 +321,7 @@ function WinnerReviewForm({ session, decision, setDecision, reasonCode, setReaso
   onSubmit(event: FormEvent): void;
 }) {
   const candidate = session.prizeSettlement!.candidate!;
-  return <form className="panel seckill-winner-review" onSubmit={onSubmit}><div className="panel-heading"><div><p className="section-kicker">中奖审核</p><h2>中奖候选审核</h2></div><Scale aria-hidden="true" /></div><dl className="definition-grid seckill-winner-review-candidate"><div><dt>候选订单</dt><dd>{shortHash(candidate.orderId)}</dd></div><div><dt>候选钱包</dt><dd>{shortAddress(candidate.buyerWallet)}</dd></div></dl><div className="seckill-winner-review-fields"><label>审核决定<select value={decision} onChange={(event) => setDecision(event.target.value as 'APPROVE' | 'REJECT')} disabled={pending}><option value="APPROVE">通过，有效</option><option value="REJECT">拒绝，无效</option></select></label><label>原因<input minLength={2} maxLength={128} value={reasonCode} onChange={(event) => setReasonCode(event.target.value.toUpperCase())} disabled={pending} required /><small>可写简单原因；系统会保存为审核记录。</small></label><label>审核证据编号（高级）<input pattern="0x[0-9a-fA-F]{64}" value={evidenceHash} onChange={(event) => setEvidenceHash(event.target.value)} disabled={pending} required /><small>从系统证据里复制 0x 编号，没有编号不要手填。</small></label><IdempotencyInput value={idempotencyKey} setValue={setIdempotencyKey} pending={pending} /></div><button className={decision === 'REJECT' ? 'button button-danger' : 'button button-primary'} type="submit" disabled={pending}>{pending ? '提交中' : '提交审核结果'}</button><p className="button-explanation">只能批准或拒绝系统冻结的候选；不能手动换中奖人。</p></form>;
+  return <form className="panel seckill-winner-review" onSubmit={onSubmit}><div className="panel-heading"><div><p className="section-kicker">中奖审核</p><h2>中奖候选审核</h2></div><Scale aria-hidden="true" /></div><dl className="definition-grid seckill-winner-review-candidate"><div><dt>候选订单</dt><dd>{shortHash(candidate.orderId)}</dd></div><div><dt>候选钱包</dt><dd>{shortAddress(candidate.buyerWallet)}</dd></div></dl><div className="seckill-winner-review-fields"><label>审核决定<select value={decision} onChange={(event) => setDecision(event.target.value as 'APPROVE' | 'REJECT')} disabled={pending}><option value="APPROVE">通过，有效</option><option value="REJECT">拒绝，无效</option></select></label><label>原因<input minLength={2} maxLength={128} value={reasonCode} onChange={(event) => setReasonCode(event.target.value.toUpperCase())} disabled={pending} required /><small>可写简单原因；系统会保存为审核记录。</small></label><label>审核证据编号<input pattern="0x[0-9a-fA-F]{64}" value={evidenceHash} onChange={(event) => setEvidenceHash(event.target.value)} disabled={pending} required /><small>从系统证据里复制 0x 编号，没有编号不要手填。</small></label><IdempotencyInput value={idempotencyKey} setValue={setIdempotencyKey} pending={pending} /></div><button className={decision === 'REJECT' ? 'button button-danger' : 'button button-primary'} type="submit" disabled={pending}>{pending ? '提交中' : '提交审核结果'}</button><p className="button-explanation">只能批准或拒绝系统冻结的候选；不能手动换中奖人。</p></form>;
 }
 
 function RoleBoundary({ isAdmin, canCreate }: { isAdmin: boolean; canCreate: boolean }) {
@@ -338,7 +338,7 @@ function SessionDraftForm({ input, setInput, rulesVersionId, setRulesVersionId, 
     <label>活动库存<input type="number" min="1" step="1" value={input.inventory} onChange={(event) => setInput({ ...input, inventory: Number(event.target.value) })} disabled={pending} required /></label>
     <label>秒杀价（USDT）<input inputMode="decimal" value={input.seckillListPriceUsdt} onChange={(event) => setInput({ ...input, seckillListPriceUsdt: event.target.value })} disabled={pending} required /></label>
     <label>开始时间<input type="datetime-local" value={isoToDateTimeLocal(input.startsAt)} onChange={(event) => setInput({ ...input, startsAt: dateTimeLocalToIso(event.target.value) })} disabled={pending} required /><small>按本机时间选择，提交时自动转成系统时间。</small></label>
-  </div>{rulesBinding ? <p className="healthy-copy" role="status"><ShieldCheck aria-hidden="true" />已读取秒杀规则，可以创建场次。</p> : <p className="muted-copy">先填“秒杀规则编号”，点读取规则；系统会自动带出规则和内容校验。</p>}<details className="technical-details"><summary>高级校验信息</summary><dl className="definition-grid"><div><dt>高级规则编号</dt><dd>{input.policyVersion || '未读取'}</dd></div><div><dt>规则校验编号</dt><dd>{shortHash(input.rulesContentHash) || '未读取'}</dd></div></dl></details><button className="button button-primary" type="submit" disabled={pending || !rulesBinding}><TimerReset aria-hidden="true" />{pending ? '提交中' : '创建并锁定活动库存'}</button></form>;
+  </div>{rulesBinding ? <p className="healthy-copy" role="status"><ShieldCheck aria-hidden="true" />已读取秒杀规则，可以创建场次。</p> : <p className="muted-copy">先填“秒杀规则编号”，点读取规则；系统会自动带出规则和内容校验。</p>}<details className="technical-details"><summary>校验信息</summary><dl className="definition-grid"><div><dt>规则编号</dt><dd>{input.policyVersion || '未读取'}</dd></div><div><dt>规则校验编号</dt><dd>{shortHash(input.rulesContentHash) || '未读取'}</dd></div></dl></details><button className="button button-primary" type="submit" disabled={pending || !rulesBinding}><TimerReset aria-hidden="true" />{pending ? '提交中' : '创建并锁定活动库存'}</button></form>;
 }
 
 function ControlForms(props: {
@@ -375,7 +375,7 @@ function ActionDetail({ action }: { action: SeckillGovernanceActionProjection })
     {action.sessionPlan ? <PlanEvidence action={action} /> : null}
     {action.prizeInjection ? <PrizeEvidence action={action} /> : null}
     <details className="technical-details">
-      <summary>高级证据</summary>
+      <summary>核验证据</summary>
       <dl className="definition-grid seckill-governance-facts">
         <div><dt>动作编号</dt><dd><code>{action.actionId}</code><small>{action.sessionId}</small></dd></div>
         <div><dt>处理账户</dt><dd>{shortAddress(action.executorWallet)}<small>{action.executorNonce ? `处理号 ${action.executorNonce}` : '等待分配'}</small></dd></div>
@@ -383,23 +383,23 @@ function ActionDetail({ action }: { action: SeckillGovernanceActionProjection })
         <div><dt>执行请求校验</dt><dd>{action.executionArtifactVersion ?? '未绑定'}<small>{shortHash(action.executionRequestDigest)}</small></dd></div>
         <div><dt>执行编号释放</dt><dd>{action.nonceReleasedAt ?? '未释放'}<small>{shortHash(action.nonceReleaseEvidenceHash)}</small></dd></div>
         <div><dt>已提交交易 / 凭证</dt><dd><code title={action.submittedTxHash ?? undefined}>{shortHash(action.submittedTxHash) || '未提交'}</code><small>{shortHash(action.executionEvidenceHash)}</small></dd></div>
-        <div><dt>执行记录 / 高级区块</dt><dd><code title={action.executionTxHash ?? undefined}>{shortHash(action.executionTxHash) || '未执行'}</code><small>{action.blockNumber ?? '—'} / {shortHash(action.blockHash)}</small></dd></div>
+        <div><dt>执行记录 / 区块</dt><dd><code title={action.executionTxHash ?? undefined}>{shortHash(action.executionTxHash) || '未执行'}</code><small>{action.blockNumber ?? '—'} / {shortHash(action.blockHash)}</small></dd></div>
         <div><dt>凭证 / 调用内容校验</dt><dd><code title={action.evidenceHash}>{shortHash(action.evidenceHash)}</code><small>{shortHash(action.calldataHash)}</small></dd></div>
         <div><dt>二次确认钱包</dt><dd><code title={action.secondarySigner ?? undefined}>{shortAddress(action.secondarySigner)}</code><small>编号 {action.approvalNonce ?? '—'} / {action.approvalDeadline ?? '—'}</small></dd></div>
       </dl>
     </details>
-    {['REORGED', 'FAILED', 'RECONCILE_REQUIRED'].includes(action.state) ? <div className="resource-state resource-state-error"><AlertTriangle aria-hidden="true" /><div><strong>{stateText(action.state)} · 动作未生效</strong><p>{action.state === 'REORGED' ? '最终确认记录已回滚；等待系统修复或新动作。' : action.state === 'RECONCILE_REQUIRED' ? '处理号已占用且交易状态不明；后续资金动作保持阻断，系统只重放已冻结请求并持续对账。' : '执行失败；不改写场次或账本终态。'}</p></div></div> : null}
+    {['REORGED', 'FAILED', 'RECONCILE_REQUIRED'].includes(action.state) ? <div className="resource-state resource-state-error"><AlertTriangle aria-hidden="true" /><div><strong>{stateText(action.state)} · 动作未生效</strong><p>{action.state === 'REORGED' ? '最终确认记录已回滚；等待系统修复或新动作。' : action.state === 'RECONCILE_REQUIRED' ? '处理号已占用且交易状态不明；后续资金动作会暂停，系统只重放已冻结请求并持续对账。' : '执行失败；不改写场次或账本终态。'}</p></div></div> : null}
   </>;
 }
 
 function PlanEvidence({ action }: { action: SeckillGovernanceActionProjection }) {
   const plan = action.sessionPlan!;
-  return <div className="seckill-plan-evidence"><h3>场次计划</h3><dl><div><dt>商品 / 规格</dt><dd>{shortHash(plan.productId)} / {shortHash(plan.skuId)}</dd></div><div><dt>库存</dt><dd>{plan.inventory}<small>{inventoryLockLabel(plan.inventoryLockState)}</small></dd></div><div><dt>秒杀价</dt><dd>{formatUsdt(plan.seckillListPriceUsdt)}</dd></div><div><dt>计时</dt><dd>主场 {Math.round(plan.timers.mainDurationSeconds / 60)} 分钟，接力 {plan.timers.relayInitialSeconds} 秒，成功购买 +{plan.timers.relayIncrementSeconds} 秒</dd></div></dl><details className="technical-details"><summary>高级规则证据</summary><dl className="definition-grid"><div><dt>规则校验编号</dt><dd><code title={plan.rulesContentHash}>{shortHash(plan.rulesContentHash)}</code><small>高级规则编号 {action.policyVersion}</small></dd></div><div><dt>库存释放</dt><dd>{plan.releasedAt ?? '未释放'}</dd></div></dl></details></div>;
+  return <div className="seckill-plan-evidence"><h3>场次计划</h3><dl><div><dt>商品 / 规格</dt><dd>{shortHash(plan.productId)} / {shortHash(plan.skuId)}</dd></div><div><dt>库存</dt><dd>{plan.inventory}<small>{inventoryLockLabel(plan.inventoryLockState)}</small></dd></div><div><dt>秒杀价</dt><dd>{formatUsdt(plan.seckillListPriceUsdt)}</dd></div><div><dt>计时</dt><dd>主场 {Math.round(plan.timers.mainDurationSeconds / 60)} 分钟，接力 {plan.timers.relayInitialSeconds} 秒，成功购买 +{plan.timers.relayIncrementSeconds} 秒</dd></div></dl><details className="technical-details"><summary>规则核验信息</summary><dl className="definition-grid"><div><dt>规则校验编号</dt><dd><code title={plan.rulesContentHash}>{shortHash(plan.rulesContentHash)}</code><small>规则编号 {action.policyVersion}</small></dd></div><div><dt>库存释放</dt><dd>{plan.releasedAt ?? '未释放'}</dd></div></dl></details></div>;
 }
 
 function PrizeEvidence({ action }: { action: SeckillGovernanceActionProjection }) {
   const item = action.prizeInjection!;
-  return <div className="seckill-plan-evidence"><h3>奖池注入</h3><dl><div><dt>金额</dt><dd>{formatUsdt(item.amountUsdt)}</dd></div><div><dt>运营钱包</dt><dd>{shortAddress(item.operationsWalletAddress)}</dd></div><div><dt>结算钱包</dt><dd>{shortAddress(item.settlementWalletAddress)}</dd></div><div><dt>入账状态</dt><dd>{item.finalJournalId ? '已入账' : '等待最终确认'}</dd></div></dl><details className="technical-details"><summary>高级账本证据</summary><dl className="definition-grid"><div><dt>账本记录</dt><dd>{shortHash(item.finalJournalId) || '等待最终确认'}</dd></div><div><dt>回滚记录</dt><dd>{shortHash(item.reversalJournalId) || '无回滚分录'}</dd></div></dl></details></div>;
+  return <div className="seckill-plan-evidence"><h3>奖池注入</h3><dl><div><dt>金额</dt><dd>{formatUsdt(item.amountUsdt)}</dd></div><div><dt>运营钱包</dt><dd>{shortAddress(item.operationsWalletAddress)}</dd></div><div><dt>结算钱包</dt><dd>{shortAddress(item.settlementWalletAddress)}</dd></div><div><dt>入账状态</dt><dd>{item.finalJournalId ? '已入账' : '等待最终确认'}</dd></div></dl><details className="technical-details"><summary>账本核验信息</summary><dl className="definition-grid"><div><dt>账本记录</dt><dd>{shortHash(item.finalJournalId) || '等待最终确认'}</dd></div><div><dt>回滚记录</dt><dd>{shortHash(item.reversalJournalId) || '无回滚分录'}</dd></div></dl></details></div>;
 }
 
 function ActionState({ state, confirmations }: Pick<SeckillGovernanceActionProjection, 'state' | 'confirmations'>) {
@@ -480,7 +480,7 @@ function ErrorView({ error }: { error: CoreApiError }) {
 function asCoreError(cause: unknown) {
   if (cause instanceof CoreApiError) return cause;
   if (cause instanceof Error) return new CoreApiError({ code: 'InvalidRequest', message: cause.message, status: 400 });
-  return new CoreApiError({ code: 'ExternalBlocked', message: '秒杀后台服务暂时不可用', status: 503 });
+  return new CoreApiError({ code: 'ExternalBlocked', message: '秒杀后台服务暂时无法连接', status: 503 });
 }
 
 function seckillCommandKey(scope: string) {

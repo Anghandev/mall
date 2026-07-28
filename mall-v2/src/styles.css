@@ -145,7 +145,9 @@ a {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  min-width: 0;
   min-height: 64px;
+  gap: 10px;
   padding: calc(8px + env(safe-area-inset-top)) 16px 8px;
   border-bottom: 1px solid var(--line);
   background: var(--surface);
@@ -182,17 +184,27 @@ a {
 }
 
 .wallet-button {
+  flex: 0 1 auto;
   display: inline-flex;
   align-items: center;
+  min-width: 0;
+  max-width: 156px;
   min-height: 44px;
   gap: 6px;
   padding: 0 11px;
+  overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 7px;
   background: var(--surface-soft);
   color: var(--muted);
   font-size: 13px;
   font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wallet-button svg {
+  flex: 0 0 auto;
 }
 
 .app-content {
@@ -4439,6 +4451,11 @@ input[aria-invalid="true"] {
 }
 
 @media (max-width: 520px) {
+  .wallet-button {
+    max-width: 136px;
+    padding-inline: 9px;
+  }
+
   .ledger-state-grid {
     grid-template-columns: 1fr;
   }

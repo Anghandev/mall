@@ -20,4 +20,4 @@ export function canExecuteOrderAction(action: AllowedActionName, allowedActions?
     && allowedActions?.some((item) => item.action === action && item.enabled) === true;
 }
 
-export const unavailableValue = '不可用';
+export const unavailableValue = '暂无数据';

@@ -88,7 +88,7 @@ export function MerchantFinancePage() {
           ? current
           : next.merchants[0]?.merchantId ?? null);
       })
-      .catch((cause) => { if (!controller.signal.aborted) setListError(asCoreError(cause, '商家列表不可用')); })
+      .catch((cause) => { if (!controller.signal.aborted) setListError(asCoreError(cause, '商家列表暂时无法连接')); })
       .finally(() => { if (!controller.signal.aborted) setListLoading(false); });
     return () => controller.abort();
   }, [canRead, reloadKey, search, session, statusFilter]);
@@ -99,7 +99,7 @@ export function MerchantFinancePage() {
     setDetailLoading(true); setDetailError(null);
     getMerchantLifecycle(selectedId, session.token, controller.signal)
       .then(setDetail)
-      .catch((cause) => { if (!controller.signal.aborted) setDetailError(asCoreError(cause, '商家详情不可用')); })
+      .catch((cause) => { if (!controller.signal.aborted) setDetailError(asCoreError(cause, '商家详情暂时无法连接')); })
       .finally(() => { if (!controller.signal.aborted) setDetailLoading(false); });
     return () => controller.abort();
   }, [canRead, reloadKey, selectedId, session]);
@@ -227,10 +227,10 @@ function MerchantDetail(props: {
         {q.access === 'UNAVAILABLE' ? <DecisionNotice label="PARTIAL_LEGACY" reason="历史商家没有完整的版本化资质。" /> : (
           <>
             <dl className="merchant-qualification">
-              <Fact label="主体名称" value={q.legalName ?? '不可用'} />
-              <Fact label="证件编号" value={q.legalId ?? '不可用'} />
-              <Fact label="联系电话" value={q.contactPhone ?? '不可用'} />
-              <Fact label="资料版本" value={q.retentionPolicyVersion ?? '不可用'} note={`资料凭证 ${shortHash(q.payloadHash)}`} />
+              <Fact label="主体名称" value={q.legalName ?? '未填写'} />
+              <Fact label="证件编号" value={q.legalId ?? '未填写'} />
+              <Fact label="联系电话" value={q.contactPhone ?? '未填写'} />
+              <Fact label="资料版本" value={q.retentionPolicyVersion ?? '未返回'} note={`资料凭证 ${shortHash(q.payloadHash)}`} />
             </dl>
             {q.licenseAssetId && props.canWrite ? <LicenseAccess merchantId={detail.merchant.merchantId} assetId={q.licenseAssetId} token={props.token} /> : null}
             {q.access === 'REDACTED' ? <div className="merchant-readonly"><ShieldCheck aria-hidden="true" /><span>审计只显示系统脱敏字段，不提供证照读取或资质写入。</span></div> : null}
@@ -338,7 +338,7 @@ function ReviewWorkspace(props: { detail: MerchantLifecycleDetail; token: string
       if (typeof signature !== 'string') throw new CoreApiError({ code: 'InvalidResponse', message: '钱包没有返回签名', status: 502 });
       const next = await publishMerchantReview(challenge, signature, props.token);
       const review = next.reviews.find((item) => item.actionId.toLowerCase() === challenge.actionId.toLowerCase());
-      props.onChanged(next, `${actionLabel(action)}已发布，签名凭证 ${review?.approvalSignatureHash ? shortHash(review.approvalSignatureHash) : '不可用'}`);
+      props.onChanged(next, `${actionLabel(action)}已发布，签名凭证 ${review?.approvalSignatureHash ? shortHash(review.approvalSignatureHash) : '已记录'}`);
     } catch (cause) { props.onError(asCoreError(cause, '商家审核发布失败')); }
     finally { setBusy(false); }
   };
@@ -360,7 +360,7 @@ function ReviewWorkspace(props: { detail: MerchantLifecycleDetail; token: string
 }
 
 function DecisionBlocks() {
-  return <section className="merchant-decision-grid" aria-label="不可用经营指标">
+  return <section className="merchant-decision-grid" aria-label="经营指标">
     <DecisionNotice label="异常订单率" reason="异常订单分类与分母尚未冻结，暂不展示该指标。" />
   </section>;
 }
@@ -373,7 +373,7 @@ function Analytics({ detail }: { detail: MerchantLifecycleDetail }) {
       <Fact label="终局订单" value={analytics.orders.totalFinalized} note={`普通 ${analytics.orders.ordinaryFinalized} / 秒杀 ${analytics.orders.seckillFinalized}`} />
       <Fact label="待发货" value={analytics.fulfillment.pendingShipment} note={`运输中 ${analytics.fulfillment.inTransit}`} />
       <Fact label="已履约" value={analytics.fulfillment.completed} note={`自提 ${analytics.fulfillment.pickupCompleted}`} />
-      <Fact label="48H 发货率" value={analytics.fulfillment.fastShip48h.status === 'AVAILABLE' ? formatBpsAsPercent(Number(analytics.fulfillment.fastShip48h.bps)) : '不可用'} note={fastShipNote(analytics.fulfillment.fastShip48h)} />
+      <Fact label="48H 发货率" value={analytics.fulfillment.fastShip48h.status === 'AVAILABLE' ? formatBpsAsPercent(Number(analytics.fulfillment.fastShip48h.bps)) : '--'} note={fastShipNote(analytics.fulfillment.fastShip48h)} />
       <Fact label="接管案件" value={analytics.risk.takeoverCases} note={`未偿债务 ${formatUsdt(analytics.risk.outstandingDebtUsdt)}`} />
     </div>
     <div className="table-scroll"><table className="data-table merchant-amount-table"><thead><tr><th>命名金额</th><th>累计</th><th>今日</th></tr></thead><tbody>
@@ -410,15 +410,15 @@ function LicenseAccess({ merchantId, assetId, token }: { merchantId: string; ass
   return <div className="merchant-license-access"><span><FileCheck2 aria-hidden="true" /><strong>已验证证照</strong><code>{assetId}</code></span>{access ? <a className="button button-quiet" href={access.readUrl} target="_blank" rel="noreferrer">受控查看<ExternalLink aria-hidden="true" /></a> : <button className="button button-quiet" type="button" onClick={() => void load()} disabled={loading}>{loading ? <LoaderCircle className="spin" aria-hidden="true" /> : <FileCheck2 aria-hidden="true" />}{loading ? '授权中' : '获取受控地址'}</button>}{error ? <CoreErrorState error={error} /> : null}</div>;
 }
 
-function DecisionNotice({ label, reason }: { label: string; reason: string }) { return <article className="merchant-decision"><AlertTriangle aria-hidden="true" /><div><strong>{label}</strong><p>{reason}</p></div><span>暂不可用</span></article>; }
-function CoreErrorState({ error }: { error: CoreApiError }) { return <div className="resource-state resource-state-error merchant-error" role="alert"><Ban aria-hidden="true" /><div><strong>操作失败</strong><p>{humanizeError(error)}</p>{error.correlationId ? <code>{error.correlationId}</code> : null}</div></div>; }
+function DecisionNotice({ label, reason }: { label: string; reason: string }) { return <article className="merchant-decision"><AlertTriangle aria-hidden="true" /><div><strong>{label}</strong><p>{reason}</p></div><span>未返回数据</span></article>; }
+function CoreErrorState({ error }: { error: CoreApiError }) { return <div className="resource-state resource-state-error merchant-error" role="alert"><Ban aria-hidden="true" /><div><strong>操作失败</strong><p>{humanizeError(error)}</p>{error.correlationId ? <details className="technical-details compact"><summary>错误编号</summary><code>{error.correlationId}</code></details> : null}</div></div>; }
 function LoadingRows() { return <div className="table-skeleton merchant-loading" aria-label="正在加载" role="status"><span /><span /><span /></div>; }
 function StatusBadge({ status }: { status: MerchantLifecycleStatus }) { return <span className={`merchant-status merchant-status-${status.toLowerCase()}`}>{statusLabel(status)}</span>; }
 function Fact({ label, value, note, code = false }: { label: string; value: string; note?: string; code?: boolean }) { return <div><dt>{label}</dt><dd>{code ? <code>{value}</code> : value}{note ? <small>{note}</small> : null}</dd></div>; }
 
 
 function qualificationAccessLabel(value: MerchantLifecycleDetail['qualification']['access']) {
-  return value === 'FULL' ? '完整可看' : value === 'REDACTED' ? '脱敏可看' : '暂不可看';
+  return value === 'FULL' ? '完整可看' : value === 'REDACTED' ? '脱敏可看' : '需授权后查看';
 }
 function allowedReviewActions(status: MerchantLifecycleStatus): readonly MerchantReviewAction[] { if (status === 'PENDING') return ['APPROVE', 'REJECT']; if (status === 'APPROVED') return ['BLACKLIST']; return []; }
 function statusLabel(status: StatusFilter) { return status === 'ALL' ? '全部' : status === 'PENDING' ? '待审核' : status === 'APPROVED' ? '已通过' : status === 'REJECTED' ? '已拒绝' : status === 'SUSPENDED' ? '已暂停' : '黑名单'; }
@@ -433,7 +433,7 @@ function reviewReasonCode(action: MerchantReviewAction | '') {
   if (action === 'BLACKLIST') return 'MERCHANT_BLACKLISTED';
   return '';
 }
-function fastShipNote(metric: MerchantLifecycleDetail['analytics']['fulfillment']['fastShip48h']) { return metric.status === 'AVAILABLE' ? `${metric.numerator} / ${metric.denominator}` : `暂不可用 · ${metric.numerator} / ${metric.denominator}`; }
+function fastShipNote(metric: MerchantLifecycleDetail['analytics']['fulfillment']['fastShip48h']) { return metric.status === 'AVAILABLE' ? `${metric.numerator} / ${metric.denominator}` : `未返回 · ${metric.numerator} / ${metric.denominator}`; }
 function amountRows(orders: MerchantLifecycleDetail['analytics']['orders']) { return [
   { label: '商品标价', cumulative: formatUsdt(orders.cumulative.listPriceUsdt), today: formatUsdt(orders.today.listPriceUsdt) },
   { label: '买家实付', cumulative: formatUsdt(orders.cumulative.buyerPaidUsdt), today: formatUsdt(orders.today.buyerPaidUsdt) },

@@ -987,7 +987,7 @@ export function BlockBurstScreen() {
                     id="block-burst-deposit-amount"
                     inputMode="decimal"
                     autoComplete="off"
-                    placeholder="例如 1000"
+                    placeholder="例如 10"
                     value={depositAmount}
                     onChange={(event) =>
                       setDepositAmount(event.currentTarget.value)
@@ -1010,7 +1010,7 @@ export function BlockBurstScreen() {
                 </div>
                 <p className="control-reason">
                   {depositReason ??
-                    "授权不足时会先弹出 NPL 授权，再弹出打入区块池交易。"}
+                    "授权不足时会先弹出 NPL 授权，再弹出打入区块池交易。这里不是商家保证金。"}
                 </p>
               </div>
               <div className="block-burst-action-grid">
@@ -1120,7 +1120,7 @@ function Metric({ label, value }: { label: string; value: string | null }) {
       <span>{label}</span>
       <strong
         className="metric__value"
-        aria-label={value ? `${label}${value}` : `${label}暂不可用`}
+        aria-label={value ? `${label}${value}` : `${label}暂无数据`}
       >
         {value ?? "待配置"}
       </strong>

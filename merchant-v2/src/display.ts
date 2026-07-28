@@ -11,11 +11,11 @@ const errorCodeLabels: Record<string, string> = {
   InvalidResponse: '系统返回异常',
   Forbidden: '当前钱包没有权限',
   Unauthorized: '请先连接正确钱包',
-  ExternalBlocked: '外部服务暂不可用',
+  ExternalBlocked: '系统服务暂时异常',
   ConfigurationRequired: '系统配置未完成',
-  DecisionBlocked: '缺少业务决策',
+  DecisionBlocked: '暂时不能操作',
   IdempotencyConflict: '操作状态已变化',
-  NetworkUnavailable: '网络不可用',
+  NetworkUnavailable: '网络连接失败',
 };
 
 export function formatUsdt(amount: string | null | undefined) {
@@ -99,8 +99,7 @@ export function humanizeError(error: unknown) {
   const raw = error instanceof CoreApiError || error instanceof Error ? error.message : '操作失败，请重试。';
   const message = translateErrorMessage(raw);
   const label = code ? errorCodeLabels[code] ?? '操作失败' : '操作失败';
-  const correlation = error instanceof CoreApiError && error.correlationId ? `（编号：${error.correlationId}）` : '';
-  return `${label}：${message}${correlation}`;
+  return `${label}：${message}`;
 }
 
 export function translateErrorMessage(message: string) {
@@ -118,17 +117,20 @@ export function translateErrorMessage(message: string) {
   if (/Invalid idempotency key|idempotencyKey|idempotency key|Idempotency key/i.test(cleaned)) return '系统提交编号异常，请刷新页面后重试。';
   if (/must be an integer from 1 to 100/i.test(cleaned)) return '数量请填写 1 到 100 之间的整数。';
   if (/must be a canonical atomic amount/i.test(cleaned)) return '金额格式不正确，请填写普通数字金额，例如 2 或 2.00。';
+  if (/does not match (the )?(coordinated|generated)|generated type|Core returned|Core response|Core API|non-JSON|unreachable|request failed/i.test(cleaned)) return '系统服务暂时无法连接，请刷新或稍后重试。';
+  if (/bytes32|TxHash|transaction hash/i.test(cleaned)) return '钱包交易编号格式不正确，请复制钱包里的 0x 开头交易编号。';
+  if (/must be an integer between 0 and 10000|bps/i.test(cleaned)) return '让利比例请填写 0 到 100 之间的数字。';
   if (/must contain 8-128 characters/i.test(cleaned)) return '系统提交编号异常，请刷新页面后重试。';
   if (/Secondary signer mismatch/i.test(cleaned)) return '签名钱包不匹配，请切换到页面要求的钱包后重试。';
-  if (/Merchant license storage is unreachable/i.test(cleaned)) return '证照上传服务暂时不可用，请稍后重试。';
+  if (/Merchant license storage is unreachable/i.test(cleaned)) return '证照上传服务暂时无法连接，请稍后重试。';
   if (/Merchant license storage rejected the upload/i.test(cleaned)) return '证照上传被存储服务拒绝，请更换文件后重试。';
   if (/Published guarantee policy version was not found/i.test(cleaned)) return '资金规则版本不正确，请刷新页面或联系平台确认当前规则版本。';
   if (/Policy and runtime operations wallets do not match/i.test(cleaned)) return '运营钱包和平台规则不一致，请联系平台确认。';
-  if (/Guarantee amount is invalid/i.test(cleaned)) return '金额格式不正确，请填写普通数字金额，例如 1000.00。';
+  if (/Guarantee amount is invalid/i.test(cleaned)) return '金额格式不正确，请填写普通数字金额，例如 2.00。';
   if (/Guarantee transaction hash is invalid/i.test(cleaned)) return '钱包转账编号格式不正确，请复制钱包里的 0x 交易编号。';
   if (/Guarantee idempotency key is invalid|Guarantee deposit idempotency conflict/i.test(cleaned)) return '系统提交编号异常，请刷新页面后重试。';
   if (/Current merchant role cannot submit this guarantee deposit|Merchant guarantee is outside the wallet scope/i.test(cleaned)) return '当前钱包不是这个商家的结算钱包，不能提交这笔历史资金记录。';
-  if (/Core resource unavailable|Core .* unavailable/i.test(cleaned)) return '系统服务暂时不可用，请稍后重试。';
+  if (/Core resource unavailable|Core .* unavailable/i.test(cleaned)) return '系统服务暂时无法连接，请稍后重试。';
   if (/Forbidden/i.test(cleaned)) return '当前钱包没有权限执行这个操作。';
   return cleaned;
 }

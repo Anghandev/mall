@@ -116,7 +116,7 @@ export function CatalogPage() {
       )}
       {error ? <CatalogError error={error} /> : null}
       {notice ? <p className="healthy-copy catalog-notice" role="status"><Check aria-hidden="true" />{notice}</p> : null}
-      <section className="catalog-snapshot-rule"><ShieldAlert aria-hidden="true" /><div><strong>精确阻断边界</strong><p>类目、标签、商品和库存如果被活动、预留订单或未结清记录锁定，页面会明确提示原因；历史商品只隐藏或下架，不会物理删除。</p></div></section>
+      <section className="catalog-snapshot-rule"><ShieldAlert aria-hidden="true" /><div><strong>哪些情况不能改</strong><p>类目、标签、商品和库存如果被活动、预留订单或未结清记录锁定，页面会明确提示原因；历史商品只隐藏或下架，不会物理删除。</p></div></section>
     </>
   );
 }
@@ -130,7 +130,7 @@ function CatalogError({ error }: { error: CoreApiError }) {
   return (
     <div className="resource-state resource-state-error catalog-error" role="alert">
       <Ban aria-hidden="true" />
-      <div><strong>操作失败</strong><p>{humanizeError(error)}</p>{blocking ? <details className="catalog-technical-evidence"><summary>高级锁定信息</summary><code>锁定资源：{lockResourceTypeLabel(blocking.type)} · {blocking.id} · {lockResourceStateLabel(blocking.state)}</code></details> : null}{error.correlationId ? <small>编号：{error.correlationId}</small> : null}</div>
+      <div><strong>操作失败</strong><p>{humanizeError(error)}</p>{blocking ? <details className="catalog-technical-evidence"><summary>锁定原因</summary><code>锁定资源：{lockResourceTypeLabel(blocking.type)} · {blocking.id} · {lockResourceStateLabel(blocking.state)}</code></details> : null}{error.correlationId ? <details className="catalog-technical-evidence"><summary>错误编号</summary><code>{error.correlationId}</code></details> : null}</div>
     </div>
   );
 }
@@ -176,5 +176,5 @@ function lockResourceStateLabel(value: string) {
 }
 
 function asCoreError(cause: unknown) {
-  return cause instanceof CoreApiError ? cause : new CoreApiError({ code: 'ExternalBlocked', message: '商品管理服务暂时不可用', status: 503 });
+  return cause instanceof CoreApiError ? cause : new CoreApiError({ code: 'ExternalBlocked', message: '商品管理服务暂时无法连接', status: 503 });
 }

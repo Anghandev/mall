@@ -185,7 +185,7 @@ function websocketUrl(baseUrl: string | undefined, sessionId: string, cursor: st
   const origin = baseUrl || browserOrigin;
   if (!origin) throw new CoreClientError('ConfigurationRequired', '缺少实时服务地址');
   if (websocketProtocol.publicationStatus !== 'AVAILABLE' || typeof websocketProtocol.endpoint !== 'string') {
-    throw new CoreClientError('ConfigurationRequired', '实时服务暂未开放');
+    throw new CoreClientError('ConfigurationRequired', '实时服务暂不支持');
   }
   const url = new URL(`${origin.replace(/\/+$/, '')}${websocketProtocol.endpoint}`, browserOrigin);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
