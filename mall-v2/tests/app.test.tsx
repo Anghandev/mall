@@ -660,6 +660,107 @@ describe('Mall V2 payment consumer', () => {
     expect(screen.getByText(/当前支付功能还没发布/)).toBeTruthy();
   });
 
+  it('keeps checkout usable while account panels continue syncing', async () => {
+    const user = userEvent.setup();
+    const quote = paymentQuote();
+    const createOrdinaryQuote = vi.fn<CoreClient['createOrdinaryQuote']>().mockResolvedValue(quote);
+    const services = readyServices({
+      createOrdinaryQuote,
+      listOrders: vi.fn(() => new Promise<never>(() => undefined)),
+    });
+    renderAt('/mall', services);
+
+    await screen.findByRole('heading', { name: product.title });
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+    await screen.findByRole('button', { name: /0x1111/ });
+    await openProductCheckout(user);
+    await user.click(screen.getByRole('button', { name: /42码 \/ 黑金/ }));
+    await prepareDeliveryTarget(user);
+
+    const quoteButton = screen.getByRole('button', { name: '生成付款报价' });
+    expect(quoteButton.hasAttribute('disabled')).toBe(false);
+    await user.click(quoteButton);
+
+    await screen.findByRole('heading', { name: '库存已预留' });
+    expect(createOrdinaryQuote).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not let a stale wallet account sync overwrite the current wallet', async () => {
+    const user = userEvent.setup();
+    const oldWalletAddresses = deferred<(typeof buyerSavedAddress)[]>();
+    const nextWallet = '0x3333333333333333333333333333333333333333';
+    const oldAddress = { ...buyerSavedAddress, addressId: 'old-wallet-address', label: '旧钱包地址' };
+    const nextAddress = { ...buyerSavedAddress, addressId: 'next-wallet-address', label: '新钱包地址' };
+    const walletForToken = (token: string) => token === 'old-session' ? BUYER : nextWallet;
+    const services = readyServices({
+      authenticate: vi.fn(async (walletAddress: string) => ({
+        token: walletAddress.toLowerCase() === BUYER.toLowerCase() ? 'old-session' : 'next-session',
+        walletAddress,
+        roles: ['BUYER'] as const,
+      })),
+      getBuyerProfile: vi.fn(async (token: string) => ({ ...buyerProfile, wallet: walletForToken(token) })),
+      getBuyerOverview: vi.fn(async (token: string) => ({ ...buyerOverview, wallet: walletForToken(token) })),
+      listBuyerAddresses: vi.fn((token: string) => (
+        token === 'old-session' ? oldWalletAddresses.promise : Promise.resolve([nextAddress])
+      )),
+      listSettlements: vi.fn(async (token: string) => ({
+        artifactVersion,
+        wallet: walletForToken(token),
+        balances: [],
+        points: [],
+        requests: [],
+      })),
+    });
+    services.wallet.connect = vi.fn()
+      .mockResolvedValueOnce(BUYER)
+      .mockResolvedValueOnce(nextWallet);
+    renderAt('/assets/addresses', services);
+
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+    await screen.findByRole('button', { name: /0x1111/ });
+    await user.click(screen.getByRole('button', { name: /重新验证或切换钱包/ }));
+    await screen.findByRole('button', { name: /0x3333/ });
+    expect(await screen.findByText('新钱包地址')).toBeTruthy();
+
+    await act(async () => {
+      oldWalletAddresses.resolve([oldAddress]);
+      await oldWalletAddresses.promise;
+    });
+
+    await waitFor(() => expect(screen.queryByText('旧钱包地址')).toBeNull());
+    expect(screen.getByText('新钱包地址')).toBeTruthy();
+  });
+
+  it('reuses the same quote request key when retrying the same checkout selection', async () => {
+    const user = userEvent.setup();
+    const quote = paymentQuote();
+    const createOrdinaryQuote = vi.fn<CoreClient['createOrdinaryQuote']>()
+      .mockRejectedValueOnce(new CoreClientError('NetworkUnavailable', '网络连接失败'))
+      .mockResolvedValue(quote);
+    const services = readyServices({ createOrdinaryQuote });
+    const createIdempotencyKey = vi.fn()
+      .mockReturnValueOnce('address-target-key')
+      .mockReturnValueOnce('quote-key-1')
+      .mockReturnValueOnce('quote-key-2');
+    services.createIdempotencyKey = createIdempotencyKey;
+    renderAt('/mall', services);
+
+    await screen.findByRole('heading', { name: product.title });
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+    await openProductCheckout(user);
+    await user.click(screen.getByRole('button', { name: /42码 \/ 黑金/ }));
+    await prepareDeliveryTarget(user);
+    await user.click(screen.getByRole('button', { name: '生成付款报价' }));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('网络连接失败'));
+    await user.click(screen.getByRole('button', { name: '生成付款报价' }));
+
+    await screen.findByRole('heading', { name: '库存已预留' });
+    expect(createOrdinaryQuote).toHaveBeenCalledTimes(2);
+    expect(createOrdinaryQuote.mock.calls[0]?.[1].idempotencyKey).toBe('quote-key-1');
+    expect(createOrdinaryQuote.mock.calls[1]?.[1].idempotencyKey).toBe('quote-key-1');
+    expect(createIdempotencyKey).toHaveBeenCalledTimes(2);
+  });
+
   it('rechecks the Core payment switch before opening the wallet', async () => {
     const user = userEvent.setup();
     const quote = paymentQuote();

@@ -2138,7 +2138,7 @@ export function CheckoutScreen() {
           ? runtime.requestSeckillQuote(runtime.selectedSeckillSessionId)
           : runtime.requestOrdinaryQuote())}
       >
-        {runtime.busy ? '正在预留库存' : runtime.selectedSeckillSessionId ? '生成秒杀报价' : '生成付款报价'}
+        {quoteButtonLabel(runtime)}
       </button>
       {!canQuote ? <p className="control-reason">{quoteDisabledReason(runtime)}</p> : null}
       {runtime.quote ? (
@@ -2491,6 +2491,12 @@ function skuLabel(attributes: Readonly<Record<string, unknown>>, fallback: strin
 }
 
 function quoteDisabledReason(runtime: MallRuntimeValue) {
+  if (runtime.busy) {
+    if (runtime.checkoutBusy === 'PICKUP_TARGET') return '正在确认自提门店，请稍候';
+    if (runtime.checkoutBusy === 'QUOTE') return '正在向系统生成报价，请稍候';
+    if (runtime.checkoutBusy === 'PAYMENT') return '正在处理付款，请稍候';
+    return '正在同步账户信息，请稍候';
+  }
   if (!runtime.selectedProduct) return '请先从商城选择商品';
   if (!runtime.selectedSku) return '请手动选择一个可售规格';
   if (!runtime.selectedProduct.fulfillmentModes.includes(runtime.fulfillmentMode)) return '该商品未发布当前履约方式';
@@ -2505,7 +2511,17 @@ function quoteDisabledReason(runtime: MallRuntimeValue) {
   if (!runtime.checkoutTarget || runtime.checkoutTarget.fulfillmentMode !== runtime.fulfillmentMode) {
     return runtime.fulfillmentMode === 'DELIVERY' ? '请先选择已保存的收货地址' : '请先选择自提门店';
   }
-  return '请完成当前配置';
+  return '配置还差一步，请检查规格、履约方式、收货信息和购买数量';
+}
+
+function quoteButtonLabel(runtime: MallRuntimeValue) {
+  if (runtime.busy) {
+    if (runtime.checkoutBusy === 'PICKUP_TARGET') return '正在确认门店';
+    if (runtime.checkoutBusy === 'QUOTE') return '正在生成报价';
+    if (runtime.checkoutBusy === 'PAYMENT') return '正在处理付款';
+    return '正在同步';
+  }
+  return runtime.selectedSeckillSessionId ? '生成秒杀报价' : '生成付款报价';
 }
 
 type CountdownState = Readonly<{

@@ -78,6 +78,7 @@ describe('seckill signed quote review', () => {
       pendingSubmission: null,
       submittedTxHash: null,
       busy: false,
+      checkoutBusy: null,
       error: null,
       walletWritesAuthorized: true,
       supportUrl: null,

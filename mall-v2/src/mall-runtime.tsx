@@ -62,6 +62,7 @@ import { createBrowserWalletGateway, type ApprovalStatus, type WalletGateway } f
 
 type SignedQuote = PaymentQuoteResponse | SeckillQuoteResponse;
 type LoadState = 'loading' | 'ready' | 'empty' | 'error';
+type CheckoutBusyKind = 'PICKUP_TARGET' | 'QUOTE' | 'PAYMENT';
 
 export type BuyerAddressDraft = Omit<BuyerAddressWriteRequest, 'expectedVersion' | 'idempotencyKey'>;
 
@@ -157,6 +158,7 @@ export interface MallRuntimeValue {
   pendingSubmission: PendingSubmission | null;
   submittedTxHash: string | null;
   busy: boolean;
+  checkoutBusy: CheckoutBusyKind | null;
   error: string | null;
   walletWritesAuthorized: boolean;
   supportUrl: string | null;
@@ -267,9 +269,11 @@ export function MallRuntimeProvider({
   const [pendingSubmission, setPendingSubmission] = useState<PendingSubmission | null>(null);
   const [submittedTxHash, setSubmittedTxHash] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [checkoutBusy, setCheckoutBusy] = useState<CheckoutBusyKind | null>(null);
   const [error, setError] = useState<string | null>(null);
   const broadcastInFlight = useRef(false);
   const walletConnectionAttempt = useRef(0);
+  const quoteRequest = useRef<{ fingerprint: string; idempotencyKey: string } | null>(null);
   const notificationRequestGeneration = useRef(0);
   const buyerActionAttempts = useRef(new Map<string, BuyerActionAttempt>());
   const mediaAccessCache = useRef(new Map<string, MediaReadAccessProjection>());
@@ -455,12 +459,15 @@ export function MallRuntimeProvider({
     pendingSubmission,
     submittedTxHash,
     busy,
+    checkoutBusy,
     error,
     walletWritesAuthorized: services.walletWritesAuthorized,
     supportUrl: supportConfiguration.url,
     supportConfigurationError: supportConfiguration.error,
 
     async connectWallet() {
+      let postLoginAttempt: number | null = null;
+      let postLoginSession: WalletSession | null = null;
       await run(async () => {
         const connectionAttempt = ++walletConnectionAttempt.current;
         resetAuthenticatedState();
@@ -478,9 +485,11 @@ export function MallRuntimeProvider({
         const products = await services.core.listCatalog(nextSession.token);
         setCatalog(products);
         setCatalogState(products.length > 0 ? 'ready' : 'empty');
-        await loadAuthenticatedBundles(nextSession);
-        await loadCms(nextSession.token).catch(() => setCmsState('error'));
+        postLoginAttempt = connectionAttempt;
+        postLoginSession = nextSession;
       });
+      if (!postLoginSession || postLoginAttempt === null) return;
+      void loadAuthenticatedBundlesAfterLogin(postLoginSession, postLoginAttempt);
     },
 
     async reloadCatalog() {
@@ -552,23 +561,28 @@ export function MallRuntimeProvider({
     },
 
     async createPickupTarget(storeId) {
-      await run(async () => {
-        const activeSession = requireSession();
-        const store = stores.find((item) => item.storeId === storeId && item.status === 'ACTIVE');
-        if (!store) throw new CoreClientError('InvalidRequest', '请选择当前可用门店');
-        const target = await services.core.createPickupTarget(activeSession.token, {
-          idempotencyKey: services.createIdempotencyKey(),
-          storeId: store.storeId,
+      setCheckoutBusy('PICKUP_TARGET');
+      try {
+        await run(async () => {
+          const activeSession = requireSession();
+          const store = stores.find((item) => item.storeId === storeId && item.status === 'ACTIVE');
+          if (!store) throw new CoreClientError('InvalidRequest', '请选择当前可用门店');
+          const target = await services.core.createPickupTarget(activeSession.token, {
+            idempotencyKey: services.createIdempotencyKey(),
+            storeId: store.storeId,
+          });
+          setCheckoutTarget({
+            fulfillmentMode: target.fulfillmentMode,
+            fulfillmentTargetHash: target.targetHash,
+            regionCodeHash: target.regionCodeHash,
+            label: `${target.store.name} · ${target.store.address}`,
+            review: { kind: 'PICKUP', store: target.store },
+          });
+          clearQuoteState();
         });
-        setCheckoutTarget({
-          fulfillmentMode: target.fulfillmentMode,
-          fulfillmentTargetHash: target.targetHash,
-          regionCodeHash: target.regionCodeHash,
-          label: `${target.store.name} · ${target.store.address}`,
-          review: { kind: 'PICKUP', store: target.store },
-        });
-        clearQuoteState();
-      });
+      } finally {
+        setCheckoutBusy(null);
+      }
     },
 
     async reloadOrders() {
@@ -926,33 +940,44 @@ export function MallRuntimeProvider({
     },
 
     async requestOrdinaryQuote() {
-      await run(async () => {
-        const selection = await buildSelection();
-        const nextQuote = await services.core.createOrdinaryQuote(requireSession().token, selection);
-        setQuote(nextQuote);
-        setProjection(null);
-        setApprovals(await services.wallet.inspectApprovals(nextQuote.approvalRequirements));
-      });
+      setCheckoutBusy('QUOTE');
+      try {
+        await run(async () => {
+          const selection = await buildSelection();
+          const nextQuote = await services.core.createOrdinaryQuote(requireSession().token, selection);
+          setQuote(nextQuote);
+          setProjection(null);
+          setApprovals(await services.wallet.inspectApprovals(nextQuote.approvalRequirements));
+        });
+      } finally {
+        setCheckoutBusy(null);
+      }
     },
 
     async requestSeckillQuote(sessionId) {
-      await run(async () => {
-        if (sessionId !== selectedSeckillSessionId
-          || sessionId !== seckillSession?.sessionId
-          || seckillSession.phase !== 'LIVE') {
-          throw new CoreClientError('InvalidRequest', '秒杀场次选择已失效，请返回大厅重新同步');
-        }
-        const selection = await buildSelection();
-        const nextQuote = await services.core.createSeckillQuote(requireSession().token, sessionId, selection);
-        setQuote(nextQuote);
-        setProjection(null);
-        setApprovals(await services.wallet.inspectApprovals(nextQuote.approvalRequirements));
-      });
+      setCheckoutBusy('QUOTE');
+      try {
+        await run(async () => {
+          if (sessionId !== selectedSeckillSessionId
+            || sessionId !== seckillSession?.sessionId
+            || seckillSession.phase !== 'LIVE') {
+            throw new CoreClientError('InvalidRequest', '秒杀场次选择已失效，请返回大厅重新同步');
+          }
+          const selection = await buildSelection();
+          const nextQuote = await services.core.createSeckillQuote(requireSession().token, sessionId, selection);
+          setQuote(nextQuote);
+          setProjection(null);
+          setApprovals(await services.wallet.inspectApprovals(nextQuote.approvalRequirements));
+        });
+      } finally {
+        setCheckoutBusy(null);
+      }
     },
 
     async broadcastPayment(acknowledgeUnlimitedApproval, acknowledgeSeckillFallback) {
       if (broadcastInFlight.current) return;
       broadcastInFlight.current = true;
+      setCheckoutBusy('PAYMENT');
       try {
         await run(async () => {
           const activeQuote = requireQuote();
@@ -983,6 +1008,7 @@ export function MallRuntimeProvider({
           await submitAndRefresh(submission);
         });
       } finally {
+        setCheckoutBusy(null);
         broadcastInFlight.current = false;
       }
     },
@@ -1023,6 +1049,7 @@ export function MallRuntimeProvider({
     bootstrap,
     approvals,
     busy,
+    checkoutBusy,
     catalog,
     catalogState,
     categories,
@@ -1092,6 +1119,16 @@ export function MallRuntimeProvider({
     } finally {
       setBusy(false);
     }
+  }
+
+  async function loadAuthenticatedBundlesAfterLogin(activeSession: WalletSession, connectionAttempt: number) {
+    const isCurrent = () => connectionAttempt === walletConnectionAttempt.current;
+    if (!isCurrent()) return;
+    await loadAuthenticatedBundles(activeSession, isCurrent);
+    if (!isCurrent()) return;
+    await loadCms(activeSession.token, isCurrent).catch(() => {
+      if (isCurrent()) setCmsState('error');
+    });
   }
 
   function resolvePublicMedia(assetId: string, forceRefresh = false) {
@@ -1164,11 +1201,26 @@ export function MallRuntimeProvider({
       fulfillmentTargetHash: target.fulfillmentTargetHash,
       regionCodeHash: target.regionCodeHash,
       label: target.label,
-      idempotencyKey: services.createIdempotencyKey(),
+      idempotencyKey: quoteIdempotencyKey([
+        selectedProduct.productId,
+        selectedSku.skuId,
+        String(quantity),
+        target.fulfillmentMode,
+        target.fulfillmentTargetHash,
+        target.regionCodeHash,
+        selectedSeckillSessionId ?? 'ORDINARY',
+      ].join('|')),
       productId: selectedProduct.productId,
       skuId: selectedSku.skuId,
       quantity,
     };
+  }
+
+  function quoteIdempotencyKey(fingerprint: string) {
+    if (quoteRequest.current?.fingerprint === fingerprint) return quoteRequest.current.idempotencyKey;
+    const idempotencyKey = services.createIdempotencyKey();
+    quoteRequest.current = { fingerprint, idempotencyKey };
+    return idempotencyKey;
   }
 
   function clearPaymentState() {
@@ -1178,12 +1230,18 @@ export function MallRuntimeProvider({
   }
 
   function clearQuoteState() {
+    quoteRequest.current = null;
     setQuote(null);
     setProjection(null);
     setApprovals([]);
   }
 
-  async function loadOrderBundle(activeSession: WalletSession, cursor?: FulfillmentOrderCursor) {
+  async function loadOrderBundle(
+    activeSession: WalletSession,
+    cursor?: FulfillmentOrderCursor,
+    isActive: () => boolean = () => true,
+  ) {
+    if (!isActive()) return;
     if (!cursor) setOrdersState('loading');
     const page = await services.core.listOrders(activeSession.token, cursor);
     const actions: Record<string, readonly AllowedAction[]> = cursor ? { ...orderActions } : {};
@@ -1202,6 +1260,7 @@ export function MallRuntimeProvider({
       if (timelineResult.status === 'fulfilled') timelines[order.orderId] = timelineResult.value;
       else timelineErrors[order.orderId] = errorMessage(timelineResult.reason);
     }));
+    if (!isActive()) return;
     const nextOrders = cursor ? mergeOrders(orders, page.orders) : page.orders;
     setOrders(nextOrders);
     setOrdersNextCursor(page.nextCursor);
@@ -1213,14 +1272,15 @@ export function MallRuntimeProvider({
     setOrdersState(nextOrders.length > 0 ? 'ready' : 'empty');
   }
 
-  async function loadAuthenticatedBundles(activeSession: WalletSession) {
+  async function loadAuthenticatedBundles(activeSession: WalletSession, isActive: () => boolean = () => true) {
     const results = await Promise.allSettled([
-      loadBuyerAccountBundle(activeSession),
-      loadOrderBundle(activeSession),
-      loadShoppingStatementBundle(activeSession),
-      loadSettlementBundle(activeSession),
-      loadNotificationBundle(activeSession),
+      loadBuyerAccountBundle(activeSession, isActive),
+      loadOrderBundle(activeSession, undefined, isActive),
+      loadShoppingStatementBundle(activeSession, undefined, isActive),
+      loadSettlementBundle(activeSession, isActive),
+      loadNotificationBundle(activeSession, isActive),
     ]);
+    if (!isActive()) return;
     if (results[0]?.status === 'rejected') {
       setBuyerProfileState('error');
       setBuyerOverviewState('error');
@@ -1235,7 +1295,8 @@ export function MallRuntimeProvider({
     }
   }
 
-  async function loadBuyerAccountBundle(activeSession: WalletSession) {
+  async function loadBuyerAccountBundle(activeSession: WalletSession, isActive: () => boolean = () => true) {
+    if (!isActive()) return;
     setBuyerProfileState('loading');
     setBuyerOverviewState('loading');
     setBuyerAddressesState('loading');
@@ -1246,16 +1307,22 @@ export function MallRuntimeProvider({
     ]);
     assertBuyerProjectionWallet(profile.wallet, activeSession);
     assertBuyerProjectionWallet(overview.wallet, activeSession);
+    if (!isActive()) return;
     setBuyerProfile(profile);
     setBuyerProfileState('ready');
     setBuyerOverview(overview);
     setBuyerOverviewState('ready');
     setBuyerAddresses(addresses);
     setBuyerAddressesState(addresses.length > 0 ? 'ready' : 'empty');
-    await loadBuyerAvatar(activeSession, profile).catch(() => undefined);
+    await loadBuyerAvatar(activeSession, profile, isActive).catch(() => undefined);
   }
 
-  async function loadBuyerAvatar(activeSession: WalletSession, profile: BuyerProfile) {
+  async function loadBuyerAvatar(
+    activeSession: WalletSession,
+    profile: BuyerProfile,
+    isActive: () => boolean = () => true,
+  ) {
+    if (!isActive()) return;
     setBuyerAvatarAccess(null);
     if (!profile.avatarAssetId) {
       setBuyerAvatarState('empty');
@@ -1268,9 +1335,11 @@ export function MallRuntimeProvider({
         profile.avatarAssetId,
       );
       assertBuyerAvatarRead(access, activeSession, profile.avatarAssetId);
+      if (!isActive()) return;
       setBuyerAvatarAccess(access);
       setBuyerAvatarState('ready');
     } catch (reason) {
+      if (!isActive()) return;
       setBuyerAvatarState('error');
       throw reason;
     }
@@ -1283,7 +1352,12 @@ export function MallRuntimeProvider({
     setBuyerAddressesState(addresses.length > 0 ? 'ready' : 'empty');
   }
 
-  async function loadShoppingStatementBundle(activeSession: WalletSession, cursor?: OrderStatementCursor) {
+  async function loadShoppingStatementBundle(
+    activeSession: WalletSession,
+    cursor?: OrderStatementCursor,
+    isActive: () => boolean = () => true,
+  ) {
+    if (!isActive()) return;
     if (cursor) setShoppingStatementsLoadingMore(true);
     else setShoppingStatementsState('loading');
     setShoppingStatementsError(null);
@@ -1293,10 +1367,12 @@ export function MallRuntimeProvider({
       const nextStatements = cursor
         ? mergeShoppingStatements(shoppingStatements, page.statements)
         : page.statements;
+      if (!isActive()) return;
       setShoppingStatements(nextStatements);
       setShoppingStatementsNextCursor(page.nextCursor);
       setShoppingStatementsState(nextStatements.length > 0 ? 'ready' : 'empty');
     } catch (reason) {
+      if (!isActive()) return;
       setShoppingStatementsError(errorMessage(reason));
       if (!cursor) {
         setShoppingStatements([]);
@@ -1305,7 +1381,7 @@ export function MallRuntimeProvider({
       }
       throw reason;
     } finally {
-      setShoppingStatementsLoadingMore(false);
+      if (isActive()) setShoppingStatementsLoadingMore(false);
     }
   }
 
@@ -1336,12 +1412,14 @@ export function MallRuntimeProvider({
     return address;
   }
 
-  async function loadSettlementBundle(activeSession: WalletSession) {
+  async function loadSettlementBundle(activeSession: WalletSession, isActive: () => boolean = () => true) {
+    if (!isActive()) return;
     setSettlementsState('loading');
     const nextSettlements = await services.core.listSettlements(activeSession.token);
     if (nextSettlements.wallet.toLowerCase() !== activeSession.walletAddress.toLowerCase()) {
       throw new CoreClientError('WalletMismatch', '收益结算投影与当前钱包不一致');
     }
+    if (!isActive()) return;
     setSettlements(nextSettlements);
     setSettlementsState(
       nextSettlements.balances.length > 0 || nextSettlements.points.length > 0 || nextSettlements.requests.length > 0
@@ -1387,23 +1465,26 @@ export function MallRuntimeProvider({
     throw current.reason;
   }
 
-  async function loadNotificationBundle(activeSession: WalletSession) {
+  async function loadNotificationBundle(activeSession: WalletSession, isActive: () => boolean = () => true) {
     const requestGeneration = ++notificationRequestGeneration.current;
+    if (!isActive()) return;
     setNotificationsState('loading');
     try {
       const nextNotifications = deduplicateNotifications(await services.core.listNotifications(activeSession.token));
-      if (requestGeneration !== notificationRequestGeneration.current) return;
+      if (requestGeneration !== notificationRequestGeneration.current || !isActive()) return;
       setNotifications(nextNotifications);
       setNotificationsState(nextNotifications.length > 0 ? 'ready' : 'empty');
     } catch (reason) {
-      if (requestGeneration !== notificationRequestGeneration.current) return;
+      if (requestGeneration !== notificationRequestGeneration.current || !isActive()) return;
       throw reason;
     }
   }
 
-  async function loadCms(token?: string) {
+  async function loadCms(token?: string, isActive: () => boolean = () => true) {
+    if (!isActive()) return;
     setCmsState('loading');
     const items = await services.core.listPublicCms(token);
+    if (!isActive()) return;
     setCmsItems(items);
     setCmsState(items.length > 0 ? 'ready' : 'empty');
   }
