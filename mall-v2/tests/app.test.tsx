@@ -660,6 +660,36 @@ describe('Mall V2 payment consumer', () => {
     expect(screen.getByText(/当前支付功能还没发布/)).toBeTruthy();
   });
 
+  it('rechecks the Core payment switch before opening the wallet', async () => {
+    const user = userEvent.setup();
+    const quote = paymentQuote();
+    const getBootstrap = vi.fn<CoreClient['getBootstrap']>()
+      .mockResolvedValueOnce(bootstrap(true))
+      .mockResolvedValue(bootstrap(false));
+    const services = readyServices({
+      getBootstrap,
+      createOrdinaryQuote: vi.fn().mockResolvedValue(quote),
+    });
+    services.walletWritesAuthorized = true;
+    const saveSubmission = vi.spyOn(services.submissionStore, 'save');
+    renderAt('/mall', services);
+
+    await screen.findByRole('heading', { name: product.title });
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+    await openProductCheckout(user);
+    await user.click(screen.getByRole('button', { name: /42码 \/ 黑金/ }));
+    await prepareDeliveryTarget(user);
+    await user.click(screen.getByRole('button', { name: '生成付款报价' }));
+    await user.click(await screen.findByRole('link', { name: /核对报价/ }));
+    await user.click(screen.getByRole('checkbox', { name: /无限额度授权风险/ }));
+    await user.click(screen.getByRole('button', { name: /确认支付/ }));
+
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('当前暂时不能付款'));
+    expect(getBootstrap).toHaveBeenCalledTimes(2);
+    expect(services.wallet.broadcastPayment).not.toHaveBeenCalled();
+    expect(saveSubmission).not.toHaveBeenCalled();
+  });
+
   it('renders exact Core finality and never promotes a submitted hash to final', async () => {
     const user = userEvent.setup();
     const quote = paymentQuote();

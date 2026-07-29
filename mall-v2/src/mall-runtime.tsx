@@ -960,7 +960,9 @@ export function MallRuntimeProvider({
           if ('dual' in activeQuote && !acknowledgeSeckillFallback) {
             throw new CoreClientError('InvalidRequest', '请先确认秒杀与日常备用报价及链上分类规则');
           }
-          if (!bootstrap?.writesEnabled) {
+          const latestBootstrap = await services.core.getBootstrap();
+          setBootstrap(latestBootstrap);
+          if (!latestBootstrap.writesEnabled) {
             throw new CoreClientError('ExternalBlocked', '当前系统暂不支持新支付');
           }
           if (!services.walletWritesAuthorized) {
