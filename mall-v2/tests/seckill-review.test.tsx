@@ -126,10 +126,7 @@ describe('seckill signed quote review', () => {
     expect(screen.getByText(/付款在活动时间内/)).toBeTruthy();
     expect(screen.getByText(/付款超过活动截止/)).toBeTruthy();
     expect(screen.getByText(/是否命中秒杀只看奖金付款时间/)).toBeTruthy();
-    const payButton = screen.getByRole('button', { name: /确认支付/ });
-    expect(payButton.hasAttribute('disabled')).toBe(true);
-
-    await user.click(screen.getByRole('checkbox', { name: /我已核对秒杀价和截止后普通价/ }));
+    const payButton = screen.getByRole('button', { name: /打开钱包支付/ });
     expect(payButton.hasAttribute('disabled')).toBe(false);
     await user.click(payButton);
     expect(broadcastPayment).toHaveBeenCalledWith(false, true);

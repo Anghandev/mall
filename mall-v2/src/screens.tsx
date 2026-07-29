@@ -40,6 +40,7 @@ import {
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   chainIdentity,
+  type ApprovalRequirement,
   type AllowedAction,
   type AllowedActionName,
   type BuyerSavedAddress,
@@ -1978,6 +1979,7 @@ function PublishedContent({
 
 export function CheckoutScreen() {
   const runtime = useMallRuntime();
+  const navigate = useNavigate();
   const product = runtime.selectedProduct;
   const sku = runtime.selectedSku;
   const canQuote = Boolean(
@@ -2134,9 +2136,7 @@ export function CheckoutScreen() {
         className="button button--primary"
         type="button"
         disabled={!canQuote}
-        onClick={() => void (runtime.selectedSeckillSessionId
-          ? runtime.requestSeckillQuote(runtime.selectedSeckillSessionId)
-          : runtime.requestOrdinaryQuote())}
+        onClick={() => void createQuoteAndReview()}
       >
         {quoteButtonLabel(runtime)}
       </button>
@@ -2153,6 +2153,13 @@ export function CheckoutScreen() {
       ) : null}
     </div>
   );
+
+  async function createQuoteAndReview() {
+    const ok = runtime.selectedSeckillSessionId
+      ? await runtime.requestSeckillQuote(runtime.selectedSeckillSessionId)
+      : await runtime.requestOrdinaryQuote();
+    if (ok) navigate('/checkout/review');
+  }
 }
 
 function CheckoutFlow({
@@ -2280,8 +2287,6 @@ function CheckoutTargetSelector() {
 
 export function ReviewScreen() {
   const runtime = useMallRuntime();
-  const [approvalAcknowledged, setApprovalAcknowledged] = useState(false);
-  const [seckillAcknowledged, setSeckillAcknowledged] = useState(false);
   const quote = runtime.quote;
   const intent = quote ? primaryIntent(quote) : null;
   const isSeckillQuote = Boolean(quote && 'dual' in quote);
@@ -2368,17 +2373,19 @@ export function ReviewScreen() {
           <p className="field-help">金额已按普通小数展示；实际支付仍以系统报价为准。</p>
           {quote.approvalRequirements.map((requirement, index) => (
             <article className="approval-row" key={requirement.token}>
-              <div><strong>{shortHash(requirement.token)}</strong><span>授权对象 {shortHash(requirement.spender)}</span></div>
+              <div><strong>{approvalTokenLabel(requirement.token)}</strong><span>支付合约 {shortHash(requirement.spender)}</span></div>
               <div><span>当前 {formatApprovalAmount(requirement.token, runtime.approvals[index]?.currentAllowance)}</span><span>{runtime.approvals[index]?.sufficient ? '额度足够' : '需要授权'}</span></div>
-              <div><span>最低 {formatApprovalAmount(requirement.token, requirement.requiredAmount)}</span><span>请求 {formatApprovalAmount(requirement.token, requirement.requestedAllowance)}</span></div>
-              <button className="text-button" type="button" onClick={() => void runtime.revokeApproval(index)} disabled={runtime.busy || !runtime.session}>撤销额度</button>
+              <div><span>本次至少 {formatApprovalAmount(requirement.token, requirement.requiredAmount)}</span><span>授权 {formatRequestedApprovalAmount(requirement)}</span></div>
+              {isMaxApproval(requirement.requestedAllowance) ? (
+                <p className="field-help">
+                  无限额度授权：钱包会给上面的支付合约长期扣 {approvalTokenLabel(requirement.token)} 的权限。请确认支付合约地址正确；不想长期授权时，点“撤销额度”可把额度归零。
+                </p>
+              ) : null}
+              <button className="text-button" type="button" onClick={() => void runtime.revokeApproval(index)} disabled={runtime.busy || !runtime.session}>撤销额度归零</button>
             </article>
           ))}
           {requiresApproval ? (
-            <label className="check-field approval-check">
-              <input type="checkbox" checked={approvalAcknowledged} onChange={(event) => setApprovalAcknowledged(event.target.checked)} />
-              <span>我已了解无限额度授权风险与上述撤销入口</span>
-            </label>
+            <p className="field-help">首次购买会先弹出授权，再弹出签名和付款。授权只给当前支付合约，用于本商城支付；不想保留长期额度时，可随时撤销额度归零。</p>
           ) : <p className="field-help">当前两笔代币额度均充足，本次不重复请求授权。</p>}
         </section>
       ) : null}
@@ -2391,20 +2398,16 @@ export function ReviewScreen() {
             <div><strong>付款超过活动截止</strong><span>商品 {formatUsdtAmount(quote.routerCall.intent.fallbackPayment.listPriceUsdt)}</span><span>服务费 {formatUsdtAmount(quote.routerCall.intent.fallbackPayment.platformServiceFeeUsdt)}</span><span>商家货款 {formatUsdtAmount(quote.routerCall.intent.fallbackPayment.custodyProductUsdt)}</span><span>运费 {formatUsdtAmount(quote.routerCall.intent.fallbackPayment.freightUsdt)}</span><span>USDT 实付 {formatUsdtAmount(quote.routerCall.intent.fallbackPayment.usdtPaymentAmount)}</span><span>NPL {formatNplAmount(quote.routerCall.intent.fallbackPayment.nplPaymentAmount)}</span></div>
           </div>
           <p className="field-help">是否命中秒杀只看奖金付款时间；截止后自动使用普通报价和普通库存预留。</p>
-          <label className="check-field approval-check">
-            <input type="checkbox" checked={seckillAcknowledged} onChange={(event) => setSeckillAcknowledged(event.target.checked)} />
-            <span>我已核对秒杀价和截止后普通价</span>
-          </label>
         </section>
       ) : null}
 
       <button
         className="button button--primary"
         type="button"
-        disabled={!quote || (requiresApproval && !approvalAcknowledged) || (isSeckillQuote && !seckillAcknowledged) || Boolean(runtime.submittedTxHash) || runtime.busy || !runtime.bootstrap?.writesEnabled || !runtime.walletWritesAuthorized}
-        onClick={() => void runtime.broadcastPayment(approvalAcknowledged, seckillAcknowledged)}
+        disabled={!quote || Boolean(runtime.submittedTxHash) || runtime.busy || !runtime.bootstrap?.writesEnabled || !runtime.walletWritesAuthorized}
+        onClick={() => void runtime.broadcastPayment(requiresApproval, isSeckillQuote)}
       >
-        <WalletCards aria-hidden="true" size={18} /> {runtime.busy ? '正在处理' : '确认支付'}
+        <WalletCards aria-hidden="true" size={18} /> {paymentButtonLabel(runtime, requiresApproval)}
       </button>
       {!runtime.walletWritesAuthorized ? (
         <p className="control-reason">当前支付功能还没发布，不会发起钱包交易。</p>
@@ -2481,6 +2484,34 @@ function primaryIntent(quote: NonNullable<MallRuntimeValue['quote']>): PaymentRo
   return quote.routerCall.functionName === 'pay'
     ? quote.routerCall.intent
     : quote.routerCall.intent.seckillPayment;
+}
+
+function approvalTokenLabel(token: string) {
+  if (token.toLowerCase() === chainIdentity.usdtAddress.toLowerCase()) return 'USDT';
+  if (token.toLowerCase() === chainIdentity.nplAddress.toLowerCase()) return 'NPL';
+  return shortHash(token);
+}
+
+function formatRequestedApprovalAmount(requirement: ApprovalRequirement) {
+  return isMaxApproval(requirement.requestedAllowance)
+    ? '无限额度（最大额度）'
+    : formatApprovalAmount(requirement.token, requirement.requestedAllowance);
+}
+
+function isMaxApproval(value: string) {
+  try {
+    return BigInt(value) === (2n ** 256n - 1n);
+  } catch {
+    return false;
+  }
+}
+
+function paymentButtonLabel(runtime: MallRuntimeValue, requiresApproval: boolean) {
+  if (runtime.busy) {
+    if (runtime.checkoutBusy === 'PAYMENT') return '正在处理付款';
+    return '正在处理';
+  }
+  return requiresApproval ? '授权并支付' : '打开钱包支付';
 }
 
 function skuLabel(attributes: Readonly<Record<string, unknown>>, fallback: string) {

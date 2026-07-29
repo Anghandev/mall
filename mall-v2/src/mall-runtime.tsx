@@ -196,8 +196,8 @@ export interface MallRuntimeValue {
   selectSku(skuId: string): void;
   setQuantity(quantity: number): void;
   setFulfillmentMode(mode: 'DELIVERY' | 'PICKUP'): void;
-  requestOrdinaryQuote(): Promise<void>;
-  requestSeckillQuote(sessionId: string): Promise<void>;
+  requestOrdinaryQuote(): Promise<boolean>;
+  requestSeckillQuote(sessionId: string): Promise<boolean>;
   broadcastPayment(acknowledgeUnlimitedApproval: boolean, acknowledgeSeckillFallback: boolean): Promise<void>;
   retrySubmission(): Promise<void>;
   refreshPayment(): Promise<void>;
@@ -940,6 +940,7 @@ export function MallRuntimeProvider({
     },
 
     async requestOrdinaryQuote() {
+      let success = false;
       setCheckoutBusy('QUOTE');
       try {
         await run(async () => {
@@ -948,13 +949,16 @@ export function MallRuntimeProvider({
           setQuote(nextQuote);
           setProjection(null);
           setApprovals(await services.wallet.inspectApprovals(nextQuote.approvalRequirements));
+          success = true;
         });
       } finally {
         setCheckoutBusy(null);
       }
+      return success;
     },
 
     async requestSeckillQuote(sessionId) {
+      let success = false;
       setCheckoutBusy('QUOTE');
       try {
         await run(async () => {
@@ -968,10 +972,12 @@ export function MallRuntimeProvider({
           setQuote(nextQuote);
           setProjection(null);
           setApprovals(await services.wallet.inspectApprovals(nextQuote.approvalRequirements));
+          success = true;
         });
       } finally {
         setCheckoutBusy(null);
       }
+      return success;
     },
 
     async broadcastPayment(acknowledgeUnlimitedApproval, acknowledgeSeckillFallback) {

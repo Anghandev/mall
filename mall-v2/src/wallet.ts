@@ -6,6 +6,7 @@ import type {
   SeckillQuoteResponse,
   SettlementIntentProjection,
 } from '@abu24k/core-artifacts';
+import abiBundle from '@abu24k/core-artifacts/contracts';
 import { chainIdentity } from '@abu24k/core-artifacts';
 import type {
   BrowserProvider,
@@ -189,11 +190,8 @@ export class WalletGatewayError extends Error {
 }
 
 export async function encodeRouterPaymentCall(quote: SignedQuote, buyerSignature: string) {
-  const [{ Interface }, abiModule] = await Promise.all([
-    import('ethers'),
-    import('@abu24k/core-artifacts/contracts', { with: { type: 'json' } }),
-  ]);
-  const router = new Interface(abiModule.default.contracts.PaymentRouterV2);
+  const { Interface } = await import('ethers');
+  const router = new Interface(abiBundle.contracts.PaymentRouterV2);
   return router.encodeFunctionData(quote.routerCall.functionName, [
     quote.routerCall.intent,
     quote.routerCall.quoteSignature,

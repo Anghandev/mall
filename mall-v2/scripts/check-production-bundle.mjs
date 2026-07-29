@@ -37,6 +37,9 @@ for (const root of roots) {
         throw new Error(`${check.reason}: ${file}`);
       }
     }
+    if (file.startsWith('dist/') && /@abu24k\/core-artifacts\/contracts/.test(content)) {
+      throw new Error(`Core contract artifact bare specifier entered browser bundle: ${file}`);
+    }
   }
 }
 

@@ -627,7 +627,7 @@ describe('Mall V2 payment consumer', () => {
     await prepareDeliveryTarget(user);
     await user.click(screen.getByRole('button', { name: '生成付款报价' }));
 
-    await screen.findByRole('heading', { name: '库存已预留' });
+    await screen.findByRole('heading', { name: '付款明细' });
     expect(createOrdinaryQuote).toHaveBeenCalledWith('buyer-session', {
       idempotencyKey: 'mall-test-idempotency',
       productId: product.productId,
@@ -638,9 +638,8 @@ describe('Mall V2 payment consumer', () => {
       regionCodeHash: deliveryTarget.regionCodeHash,
       label: '张三 · 辽宁省大连市中山区示例路 24 号',
     });
-    expect(screen.getAllByText('120.00 USDT').length).toBeGreaterThan(0);
+    expect(screen.getByText(/120.00 USDT/)).toBeTruthy();
 
-    await user.click(screen.getByRole('link', { name: /核对报价/ }));
     expect(screen.getByText('84.00 USDT')).toBeTruthy();
     expect(screen.getByText('1.20 USDT')).toBeTruthy();
     expect(screen.getByText('82.80 USDT')).toBeTruthy();
@@ -651,12 +650,16 @@ describe('Mall V2 payment consumer', () => {
     expect(screen.getByText(/实际支付仍以系统报价为准/)).toBeTruthy();
     expect(screen.getByText('当前 0.00 USDT')).toBeTruthy();
     expect(screen.getByText('需要授权')).toBeTruthy();
+    expect(screen.getAllByText('授权 无限额度（最大额度）')).toHaveLength(2);
+    expect(screen.getAllByText(/无限额度授权/)).toHaveLength(2);
+    expect(screen.getAllByText(/支付合约地址正确/)).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: '撤销额度归零' })).toHaveLength(2);
     expect(screen.getByText('额度足够')).toBeTruthy();
     expect(screen.getByRole('heading', { name: '完整收货信息' })).toBeTruthy();
     expect(screen.getByText(buyerSavedAddress.phone)).toBeTruthy();
     expect(screen.getByText(`${buyerSavedAddress.province} / ${buyerSavedAddress.city} / ${buyerSavedAddress.district}`)).toBeTruthy();
     expect(screen.getByText(/付款成功后，商品、规格、数量、履约方式与所在行政区将写入订单/)).toBeTruthy();
-    expect(screen.getByRole('button', { name: /确认支付/ }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: /授权并支付|打开钱包支付/ }).hasAttribute('disabled')).toBe(true);
     expect(screen.getByText(/当前支付功能还没发布/)).toBeTruthy();
   });
 
@@ -681,7 +684,7 @@ describe('Mall V2 payment consumer', () => {
     expect(quoteButton.hasAttribute('disabled')).toBe(false);
     await user.click(quoteButton);
 
-    await screen.findByRole('heading', { name: '库存已预留' });
+    await screen.findByRole('heading', { name: '付款明细' });
     expect(createOrdinaryQuote).toHaveBeenCalledTimes(1);
   });
 
@@ -754,7 +757,7 @@ describe('Mall V2 payment consumer', () => {
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('网络连接失败'));
     await user.click(screen.getByRole('button', { name: '生成付款报价' }));
 
-    await screen.findByRole('heading', { name: '库存已预留' });
+    await screen.findByRole('heading', { name: '付款明细' });
     expect(createOrdinaryQuote).toHaveBeenCalledTimes(2);
     expect(createOrdinaryQuote.mock.calls[0]?.[1].idempotencyKey).toBe('quote-key-1');
     expect(createOrdinaryQuote.mock.calls[1]?.[1].idempotencyKey).toBe('quote-key-1');
@@ -781,9 +784,7 @@ describe('Mall V2 payment consumer', () => {
     await user.click(screen.getByRole('button', { name: /42码 \/ 黑金/ }));
     await prepareDeliveryTarget(user);
     await user.click(screen.getByRole('button', { name: '生成付款报价' }));
-    await user.click(await screen.findByRole('link', { name: /核对报价/ }));
-    await user.click(screen.getByRole('checkbox', { name: /无限额度授权风险/ }));
-    await user.click(screen.getByRole('button', { name: /确认支付/ }));
+    await user.click(screen.getByRole('button', { name: /授权并支付/ }));
 
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('当前暂时不能付款'));
     expect(getBootstrap).toHaveBeenCalledTimes(2);
@@ -806,7 +807,6 @@ describe('Mall V2 payment consumer', () => {
     await user.click(screen.getByRole('button', { name: /42码 \/ 黑金/ }));
     await prepareDeliveryTarget(user);
     await user.click(screen.getByRole('button', { name: '生成付款报价' }));
-    await user.click(await screen.findByRole('link', { name: /核对报价/ }));
     await user.click(screen.getByRole('button', { name: '刷新支付状态' }));
 
     await waitFor(() => expect(screen.getAllByText('已提交').length).toBeGreaterThan(0));
@@ -858,13 +858,11 @@ describe('Mall V2 payment consumer', () => {
     await user.click(screen.getByRole('button', { name: /42码 \/ 黑金/ }));
     await prepareDeliveryTarget(user);
     await user.click(screen.getByRole('button', { name: '生成付款报价' }));
-    await user.click(await screen.findByRole('link', { name: /核对报价/ }));
-    await user.click(screen.getByRole('checkbox', { name: /无限额度授权风险/ }));
-    await user.click(screen.getByRole('button', { name: /确认支付/ }));
+    await user.click(screen.getByRole('button', { name: /授权并支付/ }));
 
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('网络连接失败，请检查网络后重试。'));
     expect(screen.getByRole('button', { name: '重试提交付款凭证' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: /确认支付/ }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: /授权并支付|打开钱包支付/ }).hasAttribute('disabled')).toBe(true);
     expect(services.wallet.broadcastPayment).toHaveBeenCalledTimes(1);
     expect(saveSubmission).toHaveBeenCalledWith(pendingRecord(quote.orderId, HASH_3));
 
@@ -922,9 +920,7 @@ describe('Mall V2 payment consumer', () => {
     await user.click(screen.getByRole('button', { name: /42码 \/ 黑金/ }));
     await prepareDeliveryTarget(user);
     await user.click(screen.getByRole('button', { name: '生成付款报价' }));
-    await user.click(await screen.findByRole('link', { name: /核对报价/ }));
-    await user.click(screen.getByRole('checkbox', { name: /无限额度授权风险/ }));
-    await user.click(screen.getByRole('button', { name: /确认支付/ }));
+    await user.click(screen.getByRole('button', { name: /授权并支付/ }));
 
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('projection unavailable'));
     expect(screen.getAllByRole('button', { name: '刷新支付状态' }).length).toBeGreaterThan(0);
@@ -1187,7 +1183,7 @@ describe('Mall V2 payment consumer', () => {
     await prepareDeliveryTarget(user);
     await user.click(screen.getByRole('button', { name: '生成秒杀报价' }));
 
-    await screen.findByRole('heading', { name: '库存已预留' });
+    await screen.findByRole('heading', { name: '付款明细' });
     expect(createSeckillQuote).toHaveBeenCalledWith('buyer-session', seckillSessionId, expect.objectContaining({
       productId: product.productId,
       skuId: product.skus[1]!.skuId,
@@ -1305,7 +1301,6 @@ describe('Mall V2 payment consumer', () => {
     expect(screen.getByText(`${store.name} · ${store.address}`)).toBeTruthy();
     expect(screen.getByRole('button', { name: '生成付款报价' }).hasAttribute('disabled')).toBe(false);
     await user.click(screen.getByRole('button', { name: '生成付款报价' }));
-    await user.click(await screen.findByRole('link', { name: /核对报价/ }));
     expect(screen.getByRole('heading', { name: '完整自提信息' })).toBeTruthy();
     expect(within(screen.getByRole('region', { name: '完整自提信息' })).getByText(store.businessHours)).toBeTruthy();
     expect(screen.getByText(/营业时间内到店/)).toBeTruthy();
