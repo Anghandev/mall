@@ -3201,6 +3201,68 @@ input[aria-invalid="true"] {
   background: var(--surface);
 }
 
+.disclosure-card {
+  gap: 0;
+}
+
+.disclosure-card summary {
+  display: flex;
+  min-height: 50px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.disclosure-card summary::-webkit-details-marker {
+  display: none;
+}
+
+.disclosure-card summary > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.disclosure-card summary h2 {
+  margin: 0;
+}
+
+.disclosure-card summary span {
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.disclosure-card summary > strong {
+  flex: 0 0 auto;
+  min-width: 44px;
+  color: var(--accent);
+  font-size: 12px;
+  text-align: end;
+}
+
+.disclosure-card__open {
+  display: none;
+}
+
+.disclosure-card[open] .disclosure-card__closed {
+  display: none;
+}
+
+.disclosure-card[open] .disclosure-card__open {
+  display: inline;
+}
+
+.disclosure-card__body {
+  display: grid;
+  gap: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
 .reservation-summary h2,
 .payment-intent h2,
 .payment-status h2 {

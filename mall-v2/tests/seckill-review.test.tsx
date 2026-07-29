@@ -17,7 +17,7 @@ vi.mock('../src/mall-runtime', async (importOriginal) => {
 import { ReviewScreen } from '../src/screens';
 
 describe('seckill signed quote review', () => {
-  it('requires explicit acknowledgement of both prices and Router classification', async () => {
+  it('keeps seckill fallback pricing collapsed while preserving Router classification', async () => {
     const user = userEvent.setup();
     const quote = seckillQuote();
     const broadcastPayment = vi.fn().mockResolvedValue(undefined);
@@ -121,8 +121,12 @@ describe('seckill signed quote review', () => {
       clearError: vi.fn(),
     };
 
-    render(<MemoryRouter><ReviewScreen /></MemoryRouter>);
-    expect(screen.getByRole('heading', { name: '秒杀与日常备用报价' })).toBeTruthy();
+    const { container } = render(<MemoryRouter><ReviewScreen /></MemoryRouter>);
+    const dualQuote = container.querySelector('.dual-quote');
+    expect(dualQuote?.hasAttribute('open')).toBe(false);
+    expect(screen.getByRole('heading', { name: '秒杀备用报价' })).toBeTruthy();
+    await user.click(screen.getByText('秒杀备用报价'));
+    expect(dualQuote?.hasAttribute('open')).toBe(true);
     expect(screen.getByText(/付款在活动时间内/)).toBeTruthy();
     expect(screen.getByText(/付款超过活动截止/)).toBeTruthy();
     expect(screen.getByText(/是否命中秒杀只看奖金付款时间/)).toBeTruthy();

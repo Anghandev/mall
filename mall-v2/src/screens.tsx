@@ -2357,48 +2357,64 @@ export function ReviewScreen() {
       </section>
 
       {quote ? (
-        <section className="payment-intent" aria-labelledby="payment-intent-title">
-          <div className="section-heading"><h2 id="payment-intent-title">付款明细</h2><WalletCards aria-hidden="true" size={19} /></div>
-          <dl>
-            <div><dt>商品 USDT</dt><dd>{formatUsdtAmount(intent?.productUsdtPaymentAmount)}</dd></div>
-            <div><dt>平台服务费 USDT</dt><dd>{formatUsdtAmount(intent?.platformServiceFeeUsdt)}</dd></div>
-            <div><dt>商家货款 USDT</dt><dd>{formatUsdtAmount(intent?.custodyProductUsdt)}</dd></div>
-            <div><dt>运费 USDT</dt><dd>{formatUsdtAmount(intent?.freightUsdt)}</dd></div>
-            <div><dt>USDT 实付</dt><dd>{formatUsdtAmount(intent?.usdtPaymentAmount)}</dd></div>
-            <div><dt>NPL 支付</dt><dd>{formatNplAmount(intent?.nplPaymentAmount)}</dd></div>
-            <div><dt>NPL 销毁</dt><dd>{formatNplAmount(intent?.nplBurnAmount)}</dd></div>
-            <div><dt>NPL 奖励钱包</dt><dd>{formatNplAmount(intent?.nplRewardAmount)}</dd></div>
-            <div><dt>BNM 锁定</dt><dd>{formatBnmAmount(intent?.bnmAmount)}</dd></div>
-          </dl>
-          <p className="field-help">金额已按普通小数展示；实际支付仍以系统报价为准。</p>
-          {quote.approvalRequirements.map((requirement, index) => (
-            <article className="approval-row" key={requirement.token}>
-              <div><strong>{approvalTokenLabel(requirement.token)}</strong><span>支付合约 {shortHash(requirement.spender)}</span></div>
-              <div><span>当前 {formatApprovalAmount(requirement.token, runtime.approvals[index]?.currentAllowance)}</span><span>{runtime.approvals[index]?.sufficient ? '额度足够' : '需要授权'}</span></div>
-              <div><span>本次至少 {formatApprovalAmount(requirement.token, requirement.requiredAmount)}</span><span>授权 {formatRequestedApprovalAmount(requirement)}</span></div>
-              {isMaxApproval(requirement.requestedAllowance) ? (
-                <p className="field-help">
-                  无限额度授权：钱包会给上面的支付合约长期扣 {approvalTokenLabel(requirement.token)} 的权限。请确认支付合约地址正确；不想长期授权时，点“撤销额度”可把额度归零。
-                </p>
-              ) : null}
-              <button className="text-button" type="button" onClick={() => void runtime.revokeApproval(index)} disabled={runtime.busy || !runtime.session}>撤销额度归零</button>
-            </article>
-          ))}
-          {requiresApproval ? (
-            <p className="field-help">首次购买会先弹出授权，再弹出签名和付款。授权只给当前支付合约，用于本商城支付；不想保留长期额度时，可随时撤销额度归零。</p>
-          ) : <p className="field-help">当前两笔代币额度均充足，本次不重复请求授权。</p>}
-        </section>
+        <details className="payment-intent disclosure-card">
+          <summary>
+            <div>
+              <h2>付款明细</h2>
+              <span>{formatUsdtAmount(intent?.usdtPaymentAmount)} · {requiresApproval ? '首次需授权' : '额度充足'}</span>
+            </div>
+            <strong><span className="disclosure-card__closed">展开</span><span className="disclosure-card__open">收起</span></strong>
+          </summary>
+          <div className="disclosure-card__body">
+            <dl>
+              <div><dt>商品 USDT</dt><dd>{formatUsdtAmount(intent?.productUsdtPaymentAmount)}</dd></div>
+              <div><dt>平台服务费 USDT</dt><dd>{formatUsdtAmount(intent?.platformServiceFeeUsdt)}</dd></div>
+              <div><dt>商家货款 USDT</dt><dd>{formatUsdtAmount(intent?.custodyProductUsdt)}</dd></div>
+              <div><dt>运费 USDT</dt><dd>{formatUsdtAmount(intent?.freightUsdt)}</dd></div>
+              <div><dt>USDT 实付</dt><dd>{formatUsdtAmount(intent?.usdtPaymentAmount)}</dd></div>
+              <div><dt>NPL 支付</dt><dd>{formatNplAmount(intent?.nplPaymentAmount)}</dd></div>
+              <div><dt>NPL 销毁</dt><dd>{formatNplAmount(intent?.nplBurnAmount)}</dd></div>
+              <div><dt>NPL 奖励钱包</dt><dd>{formatNplAmount(intent?.nplRewardAmount)}</dd></div>
+              <div><dt>BNM 锁定</dt><dd>{formatBnmAmount(intent?.bnmAmount)}</dd></div>
+            </dl>
+            <p className="field-help">金额已按普通小数展示；实际支付仍以系统报价为准。</p>
+            {quote.approvalRequirements.map((requirement, index) => (
+              <article className="approval-row" key={requirement.token}>
+                <div><strong>{approvalTokenLabel(requirement.token)}</strong><span>支付合约 {shortHash(requirement.spender)}</span></div>
+                <div><span>当前 {formatApprovalAmount(requirement.token, runtime.approvals[index]?.currentAllowance)}</span><span>{runtime.approvals[index]?.sufficient ? '额度足够' : '需要授权'}</span></div>
+                <div><span>本次至少 {formatApprovalAmount(requirement.token, requirement.requiredAmount)}</span><span>授权 {formatRequestedApprovalAmount(requirement)}</span></div>
+                {isMaxApproval(requirement.requestedAllowance) ? (
+                  <p className="field-help">
+                    无限额度授权：钱包会给上面的支付合约长期扣 {approvalTokenLabel(requirement.token)} 的权限。请确认支付合约地址正确；不想长期授权时，点“撤销额度”可把额度归零。
+                  </p>
+                ) : null}
+                <button className="text-button" type="button" onClick={() => void runtime.revokeApproval(index)} disabled={runtime.busy || !runtime.session}>撤销额度归零</button>
+              </article>
+            ))}
+            {requiresApproval ? (
+              <p className="field-help">首次购买会先弹出授权，再弹出签名和付款。授权只给当前支付合约，用于本商城支付；不想保留长期额度时，可随时撤销额度归零。</p>
+            ) : <p className="field-help">当前两笔代币额度均充足，本次不重复请求授权。</p>}
+          </div>
+        </details>
       ) : null}
 
       {quote && 'dual' in quote ? (
-        <section className="dual-quote" aria-labelledby="dual-quote-title">
-          <div className="section-heading"><h2 id="dual-quote-title">秒杀与日常备用报价</h2><Zap aria-hidden="true" size={19} /></div>
-          <div className="dual-quote__grid">
-            <div><strong>付款在活动时间内</strong><span>商品 {formatUsdtAmount(quote.routerCall.intent.seckillPayment.listPriceUsdt)}</span><span>服务费 {formatUsdtAmount(quote.routerCall.intent.seckillPayment.platformServiceFeeUsdt)}</span><span>商家货款 {formatUsdtAmount(quote.routerCall.intent.seckillPayment.custodyProductUsdt)}</span><span>运费 {formatUsdtAmount(quote.routerCall.intent.seckillPayment.freightUsdt)}</span><span>USDT 实付 {formatUsdtAmount(quote.routerCall.intent.seckillPayment.usdtPaymentAmount)}</span><span>NPL {formatNplAmount(quote.routerCall.intent.seckillPayment.nplPaymentAmount)}</span></div>
-            <div><strong>付款超过活动截止</strong><span>商品 {formatUsdtAmount(quote.routerCall.intent.fallbackPayment.listPriceUsdt)}</span><span>服务费 {formatUsdtAmount(quote.routerCall.intent.fallbackPayment.platformServiceFeeUsdt)}</span><span>商家货款 {formatUsdtAmount(quote.routerCall.intent.fallbackPayment.custodyProductUsdt)}</span><span>运费 {formatUsdtAmount(quote.routerCall.intent.fallbackPayment.freightUsdt)}</span><span>USDT 实付 {formatUsdtAmount(quote.routerCall.intent.fallbackPayment.usdtPaymentAmount)}</span><span>NPL {formatNplAmount(quote.routerCall.intent.fallbackPayment.nplPaymentAmount)}</span></div>
+        <details className="dual-quote disclosure-card">
+          <summary>
+            <div>
+              <h2>秒杀备用报价</h2>
+              <span>活动内按秒杀价，超时自动按普通价</span>
+            </div>
+            <strong><span className="disclosure-card__closed">展开</span><span className="disclosure-card__open">收起</span></strong>
+          </summary>
+          <div className="disclosure-card__body">
+            <div className="dual-quote__grid">
+              <div><strong>付款在活动时间内</strong><span>商品 {formatUsdtAmount(quote.routerCall.intent.seckillPayment.listPriceUsdt)}</span><span>服务费 {formatUsdtAmount(quote.routerCall.intent.seckillPayment.platformServiceFeeUsdt)}</span><span>商家货款 {formatUsdtAmount(quote.routerCall.intent.seckillPayment.custodyProductUsdt)}</span><span>运费 {formatUsdtAmount(quote.routerCall.intent.seckillPayment.freightUsdt)}</span><span>USDT 实付 {formatUsdtAmount(quote.routerCall.intent.seckillPayment.usdtPaymentAmount)}</span><span>NPL {formatNplAmount(quote.routerCall.intent.seckillPayment.nplPaymentAmount)}</span></div>
+              <div><strong>付款超过活动截止</strong><span>商品 {formatUsdtAmount(quote.routerCall.intent.fallbackPayment.listPriceUsdt)}</span><span>服务费 {formatUsdtAmount(quote.routerCall.intent.fallbackPayment.platformServiceFeeUsdt)}</span><span>商家货款 {formatUsdtAmount(quote.routerCall.intent.fallbackPayment.custodyProductUsdt)}</span><span>运费 {formatUsdtAmount(quote.routerCall.intent.fallbackPayment.freightUsdt)}</span><span>USDT 实付 {formatUsdtAmount(quote.routerCall.intent.fallbackPayment.usdtPaymentAmount)}</span><span>NPL {formatNplAmount(quote.routerCall.intent.fallbackPayment.nplPaymentAmount)}</span></div>
+            </div>
+            <p className="field-help">是否命中秒杀只看奖金付款时间；截止后自动使用普通报价和普通库存预留。</p>
           </div>
-          <p className="field-help">是否命中秒杀只看奖金付款时间；截止后自动使用普通报价和普通库存预留。</p>
-        </section>
+        </details>
       ) : null}
 
       <button
