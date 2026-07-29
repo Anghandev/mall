@@ -1592,7 +1592,7 @@ export const defaultMallServices: MallServices = Object.freeze({
   },
   submissionStore: createBrowserSubmissionStore(),
   walletWritesAuthorized:
-    productBaseline.deploymentAuthorized
+    productBaseline.manifestsAligned
       && productBaseline.payOrderExecutable
       && productBaseline.paymentRouterAddress !== null,
   supportUrl: import.meta.env.VITE_MALL_SUPPORT_URL ?? null,

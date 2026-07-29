@@ -2407,7 +2407,7 @@ export function ReviewScreen() {
         <WalletCards aria-hidden="true" size={18} /> {runtime.busy ? '正在处理' : '确认支付'}
       </button>
       {!runtime.walletWritesAuthorized ? (
-        <p className="control-reason">当前支付尚未通过系统上线开关，不会发起钱包交易。</p>
+        <p className="control-reason">当前支付功能还没发布，不会发起钱包交易。</p>
       ) : null}
 
       {quote ? (

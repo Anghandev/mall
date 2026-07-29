@@ -15,7 +15,7 @@ import { vi } from 'vitest';
 import { MallApp, mallRuntimeBoundary } from '../src/App';
 import { isCoreOrderActionExecutable, productBaseline } from '../src/bootstrap';
 import { CoreClientError, type CoreClient, type CorePaymentAvailability, type PublishedSeckillSessionProjection } from '../src/core-client';
-import { MallRuntimeProvider, useMallRuntime, validateSupportUrl, type MallServices, type PendingSubmission } from '../src/mall-runtime';
+import { defaultMallServices, MallRuntimeProvider, useMallRuntime, validateSupportUrl, type MallServices, type PendingSubmission } from '../src/mall-runtime';
 import type { WalletGateway } from '../src/wallet';
 import { catalogCategories, catalogTags, publicMediaAccess } from './catalog-fixtures';
 import {
@@ -132,6 +132,7 @@ describe('Mall V2 payment consumer', () => {
       },
       sharedInterface: '@abu24k/core-artifacts',
     });
+    expect(defaultMallServices.walletWritesAuthorized).toBe(true);
     await waitFor(() => expect(screen.getByText('暂无可买商品')).toBeTruthy());
   });
 
@@ -656,7 +657,7 @@ describe('Mall V2 payment consumer', () => {
     expect(screen.getByText(`${buyerSavedAddress.province} / ${buyerSavedAddress.city} / ${buyerSavedAddress.district}`)).toBeTruthy();
     expect(screen.getByText(/付款成功后，商品、规格、数量、履约方式与所在行政区将写入订单/)).toBeTruthy();
     expect(screen.getByRole('button', { name: /确认支付/ }).hasAttribute('disabled')).toBe(true);
-    expect(screen.getByText(/当前支付尚未通过系统上线开关/)).toBeTruthy();
+    expect(screen.getByText(/当前支付功能还没发布/)).toBeTruthy();
   });
 
   it('renders exact Core finality and never promotes a submitted hash to final', async () => {

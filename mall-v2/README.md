@@ -69,10 +69,12 @@ Requirement Matrix and consumes only coordinated Core artifacts.
   `OPEN_TAKEOVER` remains fail closed because it is absent from the published
   evidence-action schema; `VERIFY_PICKUP` evidence is authorized only for
   merchant/platform roles.
-- The coordinated manifest still has `deploymentAuthorized=false` and no
-  executable `PAY_ORDER`. Wallet broadcast therefore remains fail closed until
-  Core publishes deployment evidence. Native navigation and production-device
-  GPS are Phase 2 and do not participate in launch acceptance.
+- The coordinated manifest still keeps release authorization external. Wallet
+  broadcast requires Core runtime `writesEnabled=true`, the published
+  `PAY_ORDER` action and a deployed `PaymentRouterV2` address; the browser does
+  not hand-edit artifact manifest GO fields. Native navigation and
+  production-device GPS are Phase 2 and do not participate in launch
+  acceptance.
 - The copied brand assets in `public/brand/` have no runtime dependency on the
   read-only legacy tree.
 
