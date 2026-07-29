@@ -16,7 +16,7 @@ import { MallApp, mallRuntimeBoundary } from '../src/App';
 import { isCoreOrderActionExecutable, productBaseline } from '../src/bootstrap';
 import { CoreClientError, type CoreClient, type CorePaymentAvailability, type PublishedSeckillSessionProjection } from '../src/core-client';
 import { defaultMallServices, MallRuntimeProvider, useMallRuntime, validateSupportUrl, type MallServices, type PendingSubmission } from '../src/mall-runtime';
-import type { WalletGateway } from '../src/wallet';
+import type { ApprovalStatus, WalletGateway } from '../src/wallet';
 import { catalogCategories, catalogTags, publicMediaAccess } from './catalog-fixtures';
 import {
   authenticatedAvatarAccess,
@@ -663,6 +663,27 @@ describe('Mall V2 payment consumer', () => {
     expect(screen.getByText(/当前支付功能还没发布/)).toBeTruthy();
   });
 
+  it('opens payment review as soon as the signed quote returns without waiting for allowance reads', async () => {
+    const user = userEvent.setup();
+    const quote = paymentQuote();
+    const approvalRead = deferred<readonly ApprovalStatus[]>();
+    const createOrdinaryQuote = vi.fn<CoreClient['createOrdinaryQuote']>().mockResolvedValue(quote);
+    const services = readyServices({ createOrdinaryQuote });
+    services.wallet.inspectApprovals = vi.fn().mockReturnValue(approvalRead.promise);
+    renderAt('/mall', services);
+
+    await screen.findByRole('heading', { name: product.title });
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+    await openProductCheckout(user);
+    await user.click(screen.getByRole('button', { name: /42码 \/ 黑金/ }));
+    await prepareDeliveryTarget(user);
+    await user.click(screen.getByRole('button', { name: '生成付款报价' }));
+
+    expect(await screen.findByRole('heading', { name: '付款明细' })).toBeTruthy();
+    expect(createOrdinaryQuote).toHaveBeenCalledTimes(1);
+    expect(services.wallet.inspectApprovals).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps checkout usable while account panels continue syncing', async () => {
     const user = userEvent.setup();
     const quote = paymentQuote();
@@ -686,6 +707,74 @@ describe('Mall V2 payment consumer', () => {
 
     await screen.findByRole('heading', { name: '付款明细' });
     expect(createOrdinaryQuote).toHaveBeenCalledTimes(1);
+  });
+
+  it('reuses an unexpired wallet session after refresh instead of requesting another SIWE challenge', async () => {
+    window.sessionStorage.clear();
+    try {
+      const user = userEvent.setup();
+      const authenticate = vi.fn<CoreClient['authenticate']>().mockResolvedValue({
+        token: testSessionToken(BUYER, Math.floor(Date.now() / 1000) + 600),
+        walletAddress: BUYER,
+        roles: ['BUYER'],
+      });
+      const services = readyServices({ authenticate });
+      const first = render(<MallRuntimeProvider services={services}><NotificationConnectionProbe /></MallRuntimeProvider>);
+
+      await user.click(screen.getByRole('button', { name: '连接测试钱包' }));
+      await waitFor(() => expect(authenticate).toHaveBeenCalledTimes(1));
+      first.unmount();
+
+      render(<MallRuntimeProvider services={services}><NotificationConnectionProbe /></MallRuntimeProvider>);
+      await user.click(screen.getByRole('button', { name: '连接测试钱包' }));
+
+      await waitFor(() => expect(screen.getByTestId('notification-state').textContent).toBe('empty'));
+      expect(authenticate).toHaveBeenCalledTimes(1);
+    } finally {
+      window.sessionStorage.clear();
+    }
+  });
+
+  it('refreshes a cached wallet session once when Core rejects the cached token', async () => {
+    window.sessionStorage.clear();
+    try {
+      const user = userEvent.setup();
+      const staleToken = testSessionToken(BUYER, Math.floor(Date.now() / 1000) + 600, 'stale-session');
+      const authenticate = vi.fn<CoreClient['authenticate']>()
+        .mockResolvedValueOnce({
+          token: staleToken,
+          walletAddress: BUYER,
+          roles: ['BUYER'],
+        })
+        .mockResolvedValueOnce({
+          token: testSessionToken(BUYER, Math.floor(Date.now() / 1000) + 600, 'fresh-session'),
+          walletAddress: BUYER,
+          roles: ['BUYER'],
+        });
+      let rejectCachedToken = false;
+      const listCatalog = vi.fn<CoreClient['listCatalog']>(async (token) => {
+        if (rejectCachedToken && token === staleToken) {
+          rejectCachedToken = false;
+          throw new CoreClientError('Unauthorized', 'Expired or invalid session token');
+        }
+        return [product];
+      });
+      const services = readyServices({ authenticate, listCatalog });
+      const first = render(<MallRuntimeProvider services={services}><NotificationConnectionProbe /></MallRuntimeProvider>);
+
+      await user.click(screen.getByRole('button', { name: '连接测试钱包' }));
+      await waitFor(() => expect(authenticate).toHaveBeenCalledTimes(1));
+      rejectCachedToken = true;
+      first.unmount();
+
+      render(<MallRuntimeProvider services={services}><NotificationConnectionProbe /></MallRuntimeProvider>);
+      await user.click(screen.getByRole('button', { name: '连接测试钱包' }));
+
+      await waitFor(() => expect(authenticate).toHaveBeenCalledTimes(2));
+      expect(listCatalog).toHaveBeenCalledTimes(5);
+    } finally {
+      window.sessionStorage.clear();
+    }
   });
 
   it('does not let a stale wallet account sync overwrite the current wallet', async () => {
@@ -2220,6 +2309,26 @@ function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((next) => { resolve = next; });
   return { promise, resolve };
+}
+
+function testSessionToken(walletAddress: string, exp: number, jti = 'test-session') {
+  const encode = (value: unknown) => btoa(JSON.stringify(value))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+  return [
+    encode({ alg: 'HS256', typ: 'JWT' }),
+    encode({
+      sub: walletAddress.toLowerCase(),
+      roles: ['BUYER'],
+      iat: Math.floor(Date.now() / 1000),
+      exp,
+      jti,
+      iss: 'abu24k-v2-core',
+      aud: 'abu24k-v2-products',
+    }),
+    'test-signature',
+  ].join('.');
 }
 
 const BUYER = '0x1111111111111111111111111111111111111111';

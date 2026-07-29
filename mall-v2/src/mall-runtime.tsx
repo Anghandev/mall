@@ -37,6 +37,7 @@ import type {
   SeckillQuoteResponse,
   SettlementListProjection,
   SettlementRail,
+  UserRole,
 } from '@abu24k/core-artifacts';
 
 import {
@@ -274,6 +275,7 @@ export function MallRuntimeProvider({
   const broadcastInFlight = useRef(false);
   const walletConnectionAttempt = useRef(0);
   const quoteRequest = useRef<{ fingerprint: string; idempotencyKey: string } | null>(null);
+  const quoteApprovalInspection = useRef(0);
   const notificationRequestGeneration = useRef(0);
   const buyerActionAttempts = useRef(new Map<string, BuyerActionAttempt>());
   const mediaAccessCache = useRef(new Map<string, MediaReadAccessProjection>());
@@ -472,17 +474,28 @@ export function MallRuntimeProvider({
         const connectionAttempt = ++walletConnectionAttempt.current;
         resetAuthenticatedState();
         const walletAddress = await services.wallet.connect();
-        const nextSession = await services.core.authenticate(
-          walletAddress,
-          (message) => services.wallet.signMessage(message),
-        );
+        const cachedSession = loadCachedWalletSession(walletAddress);
+        const signMessage = (message: string) => services.wallet.signMessage(message);
+        let nextSession = cachedSession ?? await services.core.authenticate(walletAddress, signMessage);
         if (connectionAttempt !== walletConnectionAttempt.current) return;
         if (!nextSession.roles.includes('BUYER')) throw new CoreClientError('Forbidden', '当前钱包没有购买权限');
+        if (!cachedSession) saveCachedWalletSession(nextSession);
+        let products: readonly CatalogProduct[];
+        try {
+          products = await services.core.listCatalog(nextSession.token);
+        } catch (error) {
+          if (!cachedSession || !isWalletSessionAuthFailure(error)) throw error;
+          clearCachedWalletSession(walletAddress);
+          nextSession = await services.core.authenticate(walletAddress, signMessage);
+          if (connectionAttempt !== walletConnectionAttempt.current) return;
+          if (!nextSession.roles.includes('BUYER')) throw new CoreClientError('Forbidden', '当前钱包没有购买权限');
+          saveCachedWalletSession(nextSession);
+          products = await services.core.listCatalog(nextSession.token);
+        }
         const recovered = services.submissionStore.load(nextSession.walletAddress);
         setPendingSubmission(recovered);
         setSubmittedTxHash(recovered?.txHash ?? null);
         setSession(nextSession);
-        const products = await services.core.listCatalog(nextSession.token);
         setCatalog(products);
         setCatalogState(products.length > 0 ? 'ready' : 'empty');
         postLoginAttempt = connectionAttempt;
@@ -948,7 +961,7 @@ export function MallRuntimeProvider({
           const nextQuote = await services.core.createOrdinaryQuote(requireSession().token, selection);
           setQuote(nextQuote);
           setProjection(null);
-          setApprovals(await services.wallet.inspectApprovals(nextQuote.approvalRequirements));
+          inspectQuoteApprovals(nextQuote);
           success = true;
         });
       } finally {
@@ -971,7 +984,7 @@ export function MallRuntimeProvider({
           const nextQuote = await services.core.createSeckillQuote(requireSession().token, sessionId, selection);
           setQuote(nextQuote);
           setProjection(null);
-          setApprovals(await services.wallet.inspectApprovals(nextQuote.approvalRequirements));
+          inspectQuoteApprovals(nextQuote);
           success = true;
         });
       } finally {
@@ -1039,10 +1052,12 @@ export function MallRuntimeProvider({
 
     async revokeApproval(index) {
       await run(async () => {
-        const requirement = requireQuote().approvalRequirements[index];
+        const activeQuote = requireQuote();
+        const requirement = activeQuote.approvalRequirements[index];
         if (!requirement) throw new CoreClientError('InvalidRequest', '授权记录不存在');
+        quoteApprovalInspection.current += 1;
         await services.wallet.revokeApproval(requirement);
-        setApprovals(await services.wallet.inspectApprovals(requireQuote().approvalRequirements));
+        inspectQuoteApprovals(activeQuote, { clearBeforeRead: false });
       });
     },
 
@@ -1229,6 +1244,22 @@ export function MallRuntimeProvider({
     return idempotencyKey;
   }
 
+  function inspectQuoteApprovals(
+    nextQuote: SignedQuote,
+    options: { clearBeforeRead?: boolean } = {},
+  ) {
+    const inspection = ++quoteApprovalInspection.current;
+    if (options.clearBeforeRead ?? true) setApprovals([]);
+    void services.wallet.inspectApprovals(nextQuote.approvalRequirements)
+      .then((nextApprovals) => {
+        if (inspection === quoteApprovalInspection.current) setApprovals(nextApprovals);
+      })
+      .catch(() => {
+        // Payment broadcast re-checks allowances before any wallet transaction.
+        // A slow or failed read must not block checkout review.
+      });
+  }
+
   function clearPaymentState() {
     clearQuoteState();
     setPendingSubmission(null);
@@ -1236,6 +1267,7 @@ export function MallRuntimeProvider({
   }
 
   function clearQuoteState() {
+    quoteApprovalInspection.current += 1;
     quoteRequest.current = null;
     setQuote(null);
     setProjection(null);
@@ -1763,8 +1795,96 @@ function translateMallError(message: string, code?: string) {
   if (/Product requires 1-5 verified main images/i.test(cleaned)) return '商品还缺少主图，请商家补齐后再购买。';
   if (/does not match (the )?(coordinated|generated)|generated type|Core returned|Core response|Core API|non-JSON|unreachable|request failed|gateway is unavailable/i.test(cleaned)) return '系统服务暂时无法连接，请刷新或稍后重试。';
   if (/Network|fetch|Failed to fetch|Load failed/i.test(cleaned)) return '网络连接失败，请检查网络后重试。';
+  if (/SIWE challenge rate limit exceeded|SIWE[^。]*rate limit/i.test(cleaned)) return '钱包登录请求太频繁，请稍等一会儿再试。刷新页面后 15 分钟内会尽量复用登录状态，不需要反复签名。';
   if (/IdempotencyConflict/i.test(code ?? '') || /current payment/i.test(cleaned)) return '当前付款状态已更新，请刷新订单后重试。';
   return cleaned || '操作失败，请稍后重试。';
+}
+
+const WALLET_SESSION_CACHE_PREFIX = 'abu24k:mall:wallet-session';
+const WALLET_SESSION_EXPIRY_SAFETY_MS = 60_000;
+
+function walletSessionCacheKey(walletAddress: string) {
+  return [
+    WALLET_SESSION_CACHE_PREFIX,
+    productBaseline.coreArtifacts,
+    productBaseline.chainId,
+    walletAddress.toLowerCase(),
+  ].join(':');
+}
+
+function clearCachedWalletSession(walletAddress: string) {
+  try {
+    globalThis.sessionStorage?.removeItem(walletSessionCacheKey(walletAddress));
+  } catch {
+    // Session storage is unavailable.
+  }
+}
+
+function loadCachedWalletSession(walletAddress: string): WalletSession | null {
+  const key = walletSessionCacheKey(walletAddress);
+  try {
+    const raw = globalThis.sessionStorage?.getItem(key);
+    if (!raw) return null;
+    const value = JSON.parse(raw) as Partial<WalletSession>;
+    if (!isCachedWalletSession(value, walletAddress)) {
+      globalThis.sessionStorage?.removeItem(key);
+      return null;
+    }
+    if ((sessionTokenExpiryMs(value.token) ?? 0) <= Date.now() + WALLET_SESSION_EXPIRY_SAFETY_MS) {
+      globalThis.sessionStorage?.removeItem(key);
+      return null;
+    }
+    return value;
+  } catch {
+    try { globalThis.sessionStorage?.removeItem(key); } catch { /* Session storage is unavailable. */ }
+    return null;
+  }
+}
+
+function saveCachedWalletSession(session: WalletSession) {
+  if ((sessionTokenExpiryMs(session.token) ?? 0) <= Date.now() + WALLET_SESSION_EXPIRY_SAFETY_MS) return;
+  try {
+    globalThis.sessionStorage?.setItem(walletSessionCacheKey(session.walletAddress), JSON.stringify(session));
+  } catch {
+    // Login still works normally when sessionStorage is blocked.
+  }
+}
+
+const WALLET_SESSION_ROLES = ['BUYER', 'MERCHANT', 'ADMIN', 'OPERATOR', 'ARBITRATOR', 'AUDITOR'] as const satisfies readonly UserRole[];
+const WALLET_SESSION_ROLE_SET = new Set<string>(WALLET_SESSION_ROLES);
+
+function isCachedWalletSession(value: Partial<WalletSession>, walletAddress: string): value is WalletSession {
+  const payload = typeof value.token === 'string' ? sessionTokenPayload(value.token) : null;
+  return typeof value.token === 'string'
+    && typeof value.walletAddress === 'string'
+    && value.walletAddress.toLowerCase() === walletAddress.toLowerCase()
+    && payload?.sub === walletAddress.toLowerCase()
+    && payload.iss === 'abu24k-v2-core'
+    && payload.aud === 'abu24k-v2-products'
+    && Array.isArray(value.roles)
+    && value.roles.every((role) => typeof role === 'string' && WALLET_SESSION_ROLE_SET.has(role));
+}
+
+function isWalletSessionAuthFailure(error: unknown) {
+  return error instanceof CoreClientError
+    && ['Unauthorized', 'Forbidden', 'WalletMismatch'].includes(error.code);
+}
+
+function sessionTokenExpiryMs(token: string) {
+  const payload = sessionTokenPayload(token);
+  return typeof payload?.exp === 'number' ? payload.exp * 1000 : null;
+}
+
+function sessionTokenPayload(token: string) {
+  const parts = token.split('.');
+  if (parts.length !== 3) return null;
+  try {
+    const normalized = parts[1]!.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
+    return JSON.parse(globalThis.atob(padded)) as { exp?: unknown; sub?: unknown; iss?: unknown; aud?: unknown };
+  } catch {
+    return null;
+  }
 }
 
 export function createBrowserSubmissionStore(): SubmissionStore {
