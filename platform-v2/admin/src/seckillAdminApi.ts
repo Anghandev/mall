@@ -269,22 +269,22 @@ export function subscribeSeckillEvents(
       const event = parseRealtimeEvent(message.data, sessionId);
       if (acceptedEventIds.has(event.eventId)) return;
       const nextCursor = BigInt(event.cursor);
-      if (nextCursor <= lastCursor) throw invalid('Realtime seckill cursor is not strictly increasing');
+      if (nextCursor <= lastCursor) throw invalid('秒杀实时消息顺序异常');
       acceptedEventIds.add(event.eventId);
       lastCursor = nextCursor;
       handlers.onEvent(event);
     } catch (cause) {
-      handlers.onError(cause instanceof CoreApiError ? cause : invalid('Realtime seckill payload is not valid JSON'));
-      socket.close(4403, 'Protocol violation');
+      handlers.onError(cause instanceof CoreApiError ? cause : invalid('秒杀实时消息格式异常'));
+      socket.close(4403, '秒杀实时协议异常');
     }
   };
-  socket.onerror = () => handlers.onError(new CoreApiError({ code: 'ExternalBlocked', message: 'Seckill realtime connection failed', status: 503 }));
+  socket.onerror = () => handlers.onError(new CoreApiError({ code: 'ExternalBlocked', message: '秒杀实时连接失败，请刷新后重试', status: 503 }));
   socket.onclose = (event) => handlers.onClose(event.code, event.reason);
 
   return {
     close() {
       socket.onclose = null;
-      socket.close(1000, 'Admin view closed');
+      socket.close(1000, '后台页面已关闭');
     },
   };
 }
@@ -298,7 +298,7 @@ export function seckillWebSocketUrl(
   requireSessionId(sessionId);
   requireCursor(cursor);
   if (websocketProtocol.publicationStatus !== 'AVAILABLE' || typeof websocketProtocol.endpoint !== 'string') {
-    throw new CoreApiError({ code: 'ConfigurationRequired', message: 'Coordinated WebSocket protocol is unavailable', status: 503 });
+    throw new CoreApiError({ code: 'ConfigurationRequired', message: '秒杀实时服务配置未完成', status: 503 });
   }
   const url = new URL(`${coreApiOrigin}${websocketProtocol.endpoint}`, pageOrigin);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -312,9 +312,9 @@ export function parseRealtimeEvent(value: unknown, sessionId: string): RealtimeE
   let body = value;
   if (typeof value === 'string') {
     try { body = JSON.parse(value) as unknown; }
-    catch { throw invalid('Realtime seckill payload is not valid JSON'); }
+    catch { throw invalid('秒杀实时消息格式异常'); }
   }
-  if (!isRealtimeEvent(body, sessionId)) throw invalid('Realtime seckill event does not match the coordinated protocol');
+  if (!isRealtimeEvent(body, sessionId)) throw invalid('秒杀实时消息和当前场次不匹配');
   return body;
 }
 

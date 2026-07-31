@@ -30,6 +30,7 @@ describe('seckill signed quote review', () => {
       taxonomyState: 'empty',
       stores: [],
       storesState: 'empty',
+      storesScope: { productId: null },
       checkoutTarget: null,
       seckillSession: null,
       seckillSessionState: 'empty',
@@ -43,6 +44,8 @@ describe('seckill signed quote review', () => {
       ordersNextCursor: null,
       orderActions: {},
       orderTargets: {},
+      pickupCredentials: {},
+      pickupCredentialErrors: {},
       orderCapabilityErrors: {},
       takeoverTimelines: {},
       takeoverTimelineErrors: {},
@@ -91,6 +94,7 @@ describe('seckill signed quote review', () => {
       selectSeckillSession: vi.fn(),
       reloadStores: vi.fn(),
       createPickupTarget: vi.fn(),
+      createPickupCredential: vi.fn(),
       reloadOrders: vi.fn(),
       loadMoreOrders: vi.fn(),
       submitBuyerAction: vi.fn(),
@@ -116,6 +120,7 @@ describe('seckill signed quote review', () => {
       requestSeckillQuote: vi.fn(),
       broadcastPayment,
       retrySubmission: vi.fn(),
+      recoverPaymentSubmission: vi.fn(),
       refreshPayment: vi.fn(),
       revokeApproval: vi.fn(),
       clearError: vi.fn(),
@@ -129,7 +134,7 @@ describe('seckill signed quote review', () => {
     expect(dualQuote?.hasAttribute('open')).toBe(true);
     expect(screen.getByText(/付款在活动时间内/)).toBeTruthy();
     expect(screen.getByText(/付款超过活动截止/)).toBeTruthy();
-    expect(screen.getByText(/是否命中秒杀只看奖金付款时间/)).toBeTruthy();
+    expect(screen.getByText(/是否命中秒杀只看你的钱包付款上链时间/)).toBeTruthy();
     const payButton = screen.getByRole('button', { name: /打开钱包支付/ });
     expect(payButton.hasAttribute('disabled')).toBe(false);
     await user.click(payButton);

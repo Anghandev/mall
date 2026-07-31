@@ -319,6 +319,7 @@ function isManagedCatalogProduct(value: unknown): value is ManagedCatalogProduct
     && amountPattern.test(String(sku.stockTotal))
     && amountPattern.test(String(sku.stockAvailable))
     && amountPattern.test(String(sku.stockReserved))
+    && amountPattern.test(String(sku.stockSeckillLocked))
     && amountPattern.test(String(sku.proposedSeckillInventory))
     && catalogProductLifecycleStates.includes(sku.lifecycleState as never));
 }

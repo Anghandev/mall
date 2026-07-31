@@ -1,8 +1,8 @@
 import type { PolicyDraftProjection } from '@abu24k/core-artifacts';
 import { AlertTriangle, Ban, Check, FileDiff, KeyRound, LockKeyhole, Plus, RefreshCw, Save, ShieldCheck, Trash2, WalletCards } from 'lucide-react';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { CoreApiError } from '../coreApi';
-import { commonStateLabel, formatUsdtInput, humanizeError, shortAddress, shortId } from '../display';
+import { CoreApiError, signTypedDataWithWallet } from '../coreApi';
+import { commonStateLabel, formatUsdtInput, humanizeError, shortId } from '../display';
 import { useCoreSession } from '../coreSession';
 import {
   createPolicyApprovalChallenge,
@@ -30,7 +30,7 @@ const policyGroups: readonly { title: string; fields: readonly PolicyField[] }[]
     { name: 'nplBurnListPriceBps', label: 'NPL 销毁比例（%）', kind: 'percent', locked: true },
     { name: 'nplRewardListPriceBps', label: 'NPL 奖励比例（%）', kind: 'percent', locked: true },
     { name: 'platformFeeBps', label: '平台服务费比例（%）', kind: 'percent', locked: true },
-    { name: 'seckillPrizeBps', label: '额外商家秒杀收益比例（%）', kind: 'percent', locked: true },
+    { name: 'seckillPrizeBps', label: '秒杀额外商家收益：固定 0，不可修改。', kind: 'percent', locked: true },
   ] },
   { title: 'NPL 奖励分配', fields: [
     { name: 'genesisBps', label: '创世节点比例（%）', kind: 'percent', locked: true },
@@ -122,8 +122,7 @@ export function PolicyPage() {
     await run(async () => {
       const { nonce, deadline } = approvalWindow();
       const challenge = await createPolicyApprovalChallenge(selected.draftId, nonce, deadline, session.token);
-      const signature = await window.ethereum!.request({ method: 'eth_signTypedData_v4', params: [challenge.signer, JSON.stringify(challenge.typedData)] });
-      if (typeof signature !== 'string' || !signature) throw invalid('钱包未返回二次签名');
+      const signature = await signTypedDataWithWallet(window.ethereum, challenge.signer, challenge.typedData);
       const updated = await submitPolicySecondarySignature(selected.draftId, { nonce, deadline, signature }, session.token);
       replaceDraft(updated); setNotice(`二次确认已通过，当前状态：${commonStateLabel(updated.state)}。`);
     });
@@ -151,7 +150,10 @@ export function PolicyPage() {
             : <><div className="table-scroll"><table className="data-table"><thead><tr><th>草稿编号</th><th>版本</th><th>状态</th><th>校验</th><th>更新时间</th></tr></thead><tbody>{drafts.map((draft) => <tr key={draft.draftId} className={selectedId === draft.draftId ? 'is-selected' : undefined}><td><button className="table-link" type="button" onClick={() => setSelectedId(draft.draftId)} title={draft.draftId}>{shortId(draft.draftId)}</button></td><td>{draft.nextPolicyVersion}</td><td>{commonStateLabel(draft.state)}</td><td>{draft.validationErrors.length ? `${draft.validationErrors.length} 项需要处理` : '通过'}</td><td>{draft.updatedAt}</td></tr>)}</tbody></table></div>{!drafts.length && !loading ? <p className="muted-copy">当前没有政策草稿。</p> : null}</>}
         {canEdit ? <form className="governed-form" onSubmit={createDraft}>
           <fieldset><legend>版本绑定</legend><div className="form-grid"><label>规则文件编号<input value={rulesContentHash} onChange={(event) => setRulesContentHash(event.target.value)} placeholder="0x…" required /><small className="field-help">从内容中心已发布规则复制；系统保存完整编号。</small></label></div></fieldset>
-          {policyGroups.map((group) => <fieldset key={group.title}><legend>{group.title}</legend><div className="governed-field-grid">{group.fields.map((field) => <label key={field.name}>{field.label}<input inputMode={field.kind === 'number' ? 'numeric' : field.kind === 'percent' || field.kind === 'usdt' ? 'decimal' : undefined} value={fields[field.name] ?? ''} onChange={(event) => setFields((current) => ({ ...current, [field.name]: event.target.value }))} /></label>)}</div></fieldset>)}
+          {policyGroups.map((group) => <fieldset key={group.title}><legend>{group.title}</legend><div className="governed-field-grid">{group.fields.map((field) => <label key={field.name}>{field.label}<input inputMode={field.kind === 'number' ? 'numeric' : field.kind === 'percent' || field.kind === 'usdt' ? 'decimal' : undefined} value={fields[field.name] ?? ''} onChange={(event) => {
+            if (field.locked) return;
+            setFields((current) => ({ ...current, [field.name]: event.target.value }));
+          }} disabled={field.locked} readOnly={field.locked} />{field.locked ? <small className="field-help">固定规则，不可修改。</small> : null}</label>)}</div></fieldset>)}
           <DestinationEditor title="创世节点奖励目的账户" value={genesisNodeDestinations} onChange={setGenesisNodeDestinations} />
           <DestinationEditor title="运营奖励目的账户" value={operationsDestinations} onChange={setOperationsDestinations} />
           <div className="governed-form-actions"><button className="button button-primary" type="submit" disabled={loading}><Plus aria-hidden="true" />创建新草稿</button><button className="button button-quiet" type="button" onClick={() => void saveDraft()} disabled={!selected || !hasUnsavedChanges || loading}><Save aria-hidden="true" />保存选中草稿</button><span className={hasUnsavedChanges ? 'status-chip status-warning' : 'status-chip status-ready'}>{hasUnsavedChanges ? '存在未保存修改' : '编辑值与草稿一致'}</span></div>

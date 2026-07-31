@@ -47,7 +47,7 @@ import type { SqlExecutor, SqlTransactionRunner } from '../data/migrations.ts';
 import { LogisticsPrintWorker } from './logistics-print-worker.ts';
 import { HttpEoaSettlementBroadcaster, ResilientBscEoaSettlementChainSource } from './eoa-settlement-adapters.ts';
 import { ResilientBscCoverageSource } from './coverage-source.ts';
-import { deterministicEoaSettlementExecutorErrorCodes } from './settlement-worker.ts';
+import { deterministicEoaSettlementExecutorErrorCodes, SettlementTransferScheduler } from './settlement-worker.ts';
 
 const CONTRACT = '0x3333333333333333333333333333333333333333';
 const BUYER = '0x1111111111111111111111111111111111111111';
@@ -58,6 +58,43 @@ const HASH_2 = `0x${'2'.repeat(64)}`;
 const HASH_3 = `0x${'3'.repeat(64)}`;
 const EXECUTOR_INTERFACE = new Interface(['function settle(bytes32 resourceId,uint64 policyVersion,uint256 amount)']);
 const ALLOWED_CALLDATA = EXECUTOR_INTERFACE.encodeFunctionData('settle', [ORDER_ID, 1, 25]);
+
+test('settlement transfer scheduler does not attest wallets when no transfer is pending', async () => {
+  let pendingChecks = 0;
+  let attestations = 0;
+  let creations = 0;
+  const scheduler = new SettlementTransferScheduler({
+    platformWallet: '0x3333333333333333333333333333333333333333',
+    service: {
+      hasPendingTransfer: async (input) => {
+        pendingChecks += 1;
+        assert.deepEqual(input, {
+          asset: 'USDT',
+          executorWallet: '0x4444444444444444444444444444444444444444',
+        });
+        return false;
+      },
+      createTransfer: async () => {
+        creations += 1;
+        throw new Error('createTransfer should not run without pending work');
+      },
+    },
+    targets: [{
+      asset: 'USDT',
+      executorWallet: '0x4444444444444444444444444444444444444444',
+      gasCap: '100000',
+      attest: async () => {
+        attestations += 1;
+        throw new Error('attest should not run without pending work');
+      },
+    }],
+  });
+
+  assert.equal(await scheduler.pollOnce(), 0);
+  assert.equal(pendingChecks, 1);
+  assert.equal(attestations, 0);
+  assert.equal(creations, 0);
+});
 const BUNDLE_PATH = fileURLToPath(
   new URL('../../../packages/core-artifacts/contracts/abi-bundle.json', import.meta.url),
 );
@@ -963,6 +1000,15 @@ test('contract reader serializes concurrent public RPC calls per provider', asyn
   assert.equal(fallback.maximum, 1);
 });
 
+test('contract reader times out a stalled public RPC request', async () => {
+  const reader = new ResilientBscContractReader(undefined, undefined, [
+    pairRpcProvider({ hang: true }),
+    pairRpcProvider(),
+  ], 20);
+
+  await assert.rejects(reader.code(CONTRACT), /BSC RPC contract request timed out/);
+});
+
 test('payment policy attestation binds all 27 Registry fields and latest-version semantics', async () => {
   const policy = paymentPolicySnapshot();
   const operationAccounts = policy.operationsDestinations.map((item) => item.account);
@@ -1145,6 +1191,33 @@ test('runtime readiness attests deployed code, bindings, roles, NPL quote source
   monitor.start();
   await new Promise((resolve) => setTimeout(resolve, 15));
   await monitor.stop();
+
+  let startedPoll = 0;
+  let resolveStartedPoll: (() => void) | undefined;
+  const startedPollPromise = new Promise<void>((resolve) => {
+    resolveStartedPoll = resolve;
+  });
+  const startupMonitor = new PaymentRuntimeReadinessMonitor({
+    attest: async () => {
+      startedPoll += 1;
+      resolveStartedPoll?.();
+      return attestor.attest();
+    },
+    componentHashesVerified: async () => true,
+    databaseHealthy: async () => true,
+    redisHealthy: async () => true,
+    signerHealthy: async () => true,
+    receiptWorkerStatus: () => ({ healthy: true }),
+    clock: () => now,
+    intervalMs: 60_000,
+  });
+  startupMonitor.start();
+  await Promise.race([
+    startedPollPromise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('startup readiness poll did not run immediately')), 50)),
+  ]);
+  await startupMonitor.stop();
+  assert.equal(startedPoll, 1);
 });
 
 test('scheduler opens eligible delivery takeover and records pickup DecisionBlocked', () => {
@@ -1659,6 +1732,7 @@ function pairRpcProvider(input: {
   reserve1?: bigint;
   delayMs?: number;
   tracker?: { active: number; maximum: number };
+  hang?: boolean;
 } = {}) {
   const pair = new Interface([
     'function token0() view returns (address)',
@@ -1671,6 +1745,7 @@ function pairRpcProvider(input: {
       input.tracker.maximum = Math.max(input.tracker.maximum, input.tracker.active);
     }
     try {
+      if (input.hang) await new Promise(() => undefined);
       if (input.delayMs) await new Promise((resolve) => setTimeout(resolve, input.delayMs));
       return await operation();
     } finally {

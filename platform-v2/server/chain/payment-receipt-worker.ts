@@ -307,6 +307,7 @@ export interface PaymentReceiptRepository {
     observation: Extract<PaymentReceiptObservation, { state: 'MINED' }>,
   ): Promise<void>;
   recordFinal(input: FinalPaymentReceipt): Promise<void>;
+  recordFinalAudit(candidate: PaymentReceiptCandidate, status: 'VERIFIED' | 'TRANSIENT_RPC_FAILURE'): Promise<void>;
   recordReorged(candidate: PaymentReceiptCandidate, canonicalBlockHash: string): Promise<void>;
   recordFailed(candidate: PaymentReceiptCandidate, reasonCode: string): Promise<void>;
   recordRecoveryRequired(
@@ -377,13 +378,30 @@ export class PaymentReceiptWorker {
       recoveryRequired: 0,
     };
     try {
+      let transientFinalAuditFailure = false;
       const candidates = await this.#repository.pendingReceipts();
       result.checked = candidates.length;
       const finalReceipts: FinalPaymentReceipt[] = [];
       for (const candidate of candidates) {
         validateCandidate(candidate);
-        const observation = await this.#source.observe(candidate);
-        if (observation.state === 'NOT_FOUND') continue;
+        let observation: PaymentReceiptObservation;
+        try {
+          observation = await this.#source.observe(candidate);
+        } catch (error) {
+          if (candidate.finalityState === 'FINAL' && isTransientReceiptRpcFailure(error)) {
+            await this.#repository.recordFinalAudit(candidate, 'TRANSIENT_RPC_FAILURE');
+            transientFinalAuditFailure = true;
+            continue;
+          }
+          throw error;
+        }
+        if (observation.state === 'NOT_FOUND') {
+          if (candidate.finalityState === 'FINAL') {
+            await this.#repository.recordFinalAudit(candidate, 'TRANSIENT_RPC_FAILURE');
+            transientFinalAuditFailure = true;
+          }
+          continue;
+        }
         if (observation.state === 'REORGED') {
           await this.#repository.recordReorged(candidate, normalizedHash(observation.canonicalBlockHash));
           result.reorged += 1;
@@ -402,6 +420,7 @@ export class PaymentReceiptWorker {
           if (observation.confirmations < REQUIRED_CONFIRMATIONS || !observation.confirmationBlock) {
             throw new CoreError('ReorgPending', 'Final payment receipt lost canonical confirmation depth', 409);
           }
+          await this.#repository.recordFinalAudit(candidate, 'VERIFIED');
           continue;
         }
         if (validation.reasonCode) {
@@ -456,7 +475,9 @@ export class PaymentReceiptWorker {
         await this.#repository.expireUnresolvedQuote(quote, evidence, now);
         result.expired += 1;
       }
-      this.#status = Object.freeze({ healthy: true, checkedAt: now.toISOString() });
+      this.#status = transientFinalAuditFailure
+        ? Object.freeze({ healthy: false, checkedAt: now.toISOString(), errorCode: 'ExternalBlocked' })
+        : Object.freeze({ healthy: true, checkedAt: now.toISOString() });
       return result;
     } catch (error) {
       this.#status = Object.freeze({
@@ -681,4 +702,16 @@ function rpcUnavailable(message: string, error: unknown) {
   return new CoreError('ExternalBlocked', message, 503, {
     reason: error instanceof Error ? error.name : 'UnknownRpcFailure',
   });
+}
+
+function isTransientReceiptRpcFailure(error: unknown) {
+  return error instanceof CoreError
+    && error.code === 'ExternalBlocked'
+    && (
+      error.message === 'Payment receipt RPC operation timed out'
+      || (
+        typeof error.details?.timeoutMs === 'number'
+        && error.message === 'Primary RPC is unavailable for final payment evidence'
+      )
+    );
 }

@@ -280,8 +280,12 @@ export class PaymentRuntimeReadinessMonitor {
 
   async #run(signal: AbortSignal) {
     while (!signal.aborted) {
+      try {
+        await this.pollOnce();
+      } catch {
+        // Keep the monitor alive and fail closed through the previous or absent snapshot.
+      }
       await delay(this.#intervalMs, signal);
-      if (!signal.aborted) await this.pollOnce();
     }
   }
 }

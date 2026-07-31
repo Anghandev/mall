@@ -1,7 +1,7 @@
 import type { SensitiveApproval, TakeoverFundingDetail } from '@abu24k/core-artifacts';
 import { Ban, CheckCircle2, CircleDollarSign, KeyRound, Search, ShieldCheck } from 'lucide-react';
 import { useEffect, useState, type FormEvent } from 'react';
-import { CoreApiError } from '../coreApi';
+import { CoreApiError, signTypedDataWithWallet } from '../coreApi';
 import { useCoreSession } from '../coreSession';
 import { formatUsdt, humanizeError, parseUsdtInput } from '../display';
 import { createTakeoverFundingChallenge, fetchTakeoverFunding, fundTakeover } from '../settlementAdminApi';
@@ -29,8 +29,7 @@ export function TakeoverFundingPanel() {
     await run(async () => {
       const requiredUsdtAtomic = parseUsdtInput(requiredUsdt, '需要筹资金额', true);
       const challenge = await createTakeoverFundingChallenge({ caseId, requiredUsdt: requiredUsdtAtomic, nonce, deadline }, session.token);
-      const signature = await window.ethereum!.request({ method: 'eth_signTypedData_v4', params: [session.walletAddress, JSON.stringify(challenge.typedData)] });
-      if (typeof signature !== 'string' || !signature) throw invalid('钱包未返回二次签名');
+      const signature = await signTypedDataWithWallet(window.ethereum, challenge.signer, challenge.typedData);
       const approval = approvalFromChallenge(challenge.typedData.message, signature);
       const result = await fundTakeover({ caseId: challenge.plan.caseId, requiredUsdt: challenge.plan.requiredUsdt, idempotencyKey, approval }, session.token);
       setNotice(`筹资已完成。平台垫资 ${formatUsdt(result.platformAdvanceUsdt)}，商家债务 ${formatUsdt(result.merchantDebtUsdt)}。`);

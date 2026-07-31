@@ -99,7 +99,7 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
           </div>
           <div className="topbar-actions">
             <span className={bootstrap.phase === 'ready' ? 'connection-state ready' : 'connection-state'}><i /> {session ? shortAddress(session.walletAddress) : bootstrap.phase === 'ready' ? '系统已连接' : '未连接'}</span>
-            <button className="button quiet" disabled={!session} onClick={signOut} type="button">
+            <button className="button quiet" disabled={!session} onClick={() => signOut()} type="button">
               <LogOut aria-hidden="true" size={16} /> 退出
             </button>
           </div>

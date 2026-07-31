@@ -227,13 +227,25 @@ export class FulfillmentService {
     return this.#transactions.transaction(async (executor) => {
       const currentActor = await revalidateActor(executor, actor);
       const privileged = hasRole(currentActor, 'ADMIN', 'OPERATOR', 'ARBITRATOR', 'AUDITOR');
+      const params: string[] = [];
+      const scope: string[] = [];
+      if (!privileged) {
+        if (currentActor.roles.includes('BUYER')) {
+          params.push(normalizedWallet(currentActor.walletAddress));
+          scope.push(`buyer_wallet = $${params.length}`);
+        }
+        if (currentActor.roles.includes('MERCHANT') && currentActor.merchantId) {
+          params.push(currentActor.merchantId);
+          scope.push(`merchant_id = $${params.length}`);
+        }
+      }
       const result = await executor.query<{ order_id: string }>(
         privileged
           ? 'SELECT order_id FROM core.orders ORDER BY created_at DESC, order_id'
           : `SELECT order_id FROM core.orders
-             WHERE buyer_wallet = $1 OR merchant_wallet = $1 OR merchant_id = $2
+             WHERE ${scope.length > 0 ? scope.join(' OR ') : 'FALSE'}
              ORDER BY created_at DESC, order_id`,
-        privileged ? [] : [normalizedWallet(currentActor.walletAddress), currentActor.merchantId ?? ''],
+        params,
       );
       const orders = [];
       for (const row of result.rows) {
@@ -258,9 +270,10 @@ export class FulfillmentService {
       for (const row of pageRows) {
         const order = normalizeOrderDates(row);
         await assertCanRead(executor, currentActor, order);
+        const assignment = await currentTakeoverAssignment(executor, order.order_id);
         orders.push(orderPageProjection(
           order,
-          allowedActionsFromState(order, order, currentActor, now, pausedScopes, this.#executableActions),
+          allowedActionsFromState(order, order, currentActor, now, pausedScopes, this.#executableActions, assignment),
           this.#decryptTracking,
         ));
       }
@@ -1728,10 +1741,22 @@ function orderPageSql(actor: FulfillmentActor, query: ReturnType<typeof orderPag
     const scope: string[] = [];
     const wallet = normalizedWallet(actor.walletAddress);
     if (actor.roles.includes('BUYER')) scope.push(`orders.buyer_wallet = ${add(wallet)}`);
+    if (actor.roles.includes('MERCHANT') && actor.merchantId) {
+      scope.push(`orders.merchant_id = ${add(actor.merchantId)}`);
+    }
     if (actor.roles.includes('MERCHANT')) {
-      const merchantScope = [`orders.merchant_wallet = ${add(wallet)}`];
-      if (actor.merchantId) merchantScope.push(`orders.merchant_id = ${add(actor.merchantId)}`);
-      scope.push(`(${merchantScope.join(' OR ')})`);
+      const replacementScope = [`assignment.replacement_wallet = ${add(wallet)}`];
+      if (actor.merchantId) replacementScope.push(`assignment.replacement_merchant_id = ${add(actor.merchantId)}`);
+      scope.push(`EXISTS (
+        SELECT 1 FROM core.takeover_cases takeover
+        JOIN LATERAL (
+          SELECT replacement_merchant_id, replacement_wallet
+          FROM core.takeover_assignments current_assignment
+          WHERE current_assignment.case_id = takeover.case_id
+          ORDER BY assignment_version DESC LIMIT 1
+        ) assignment ON true
+        WHERE takeover.order_id = orders.order_id AND (${replacementScope.join(' OR ')})
+      )`);
     }
     conditions.push(scope.length > 0 ? `(${scope.join(' OR ')})` : 'FALSE');
   }
@@ -2071,14 +2096,12 @@ async function pickupStoreId(executor: SqlExecutor, order: OrderRow) {
   const result = await executor.query<{ store_id: string }>(
     `SELECT target.store_id FROM core.fulfillment_targets target
      JOIN core.merchant_stores store ON store.store_id = target.store_id
-     WHERE target.target_hash = $1 AND target.fulfillment_mode = 'PICKUP'
+     WHERE lower(target.target_hash) = lower($1) AND target.fulfillment_mode = 'PICKUP'
        AND store.merchant_id = $2`,
     [order.fulfillment_target_hash, order.merchant_id],
   );
-  if (!result.rows[0]?.store_id) {
-    throw new CoreError('InvalidFinality', 'Order pickup-store snapshot is unavailable', 409);
-  }
-  return result.rows[0].store_id;
+  if (result.rows[0]?.store_id) return result.rows[0].store_id;
+  throw new CoreError('InvalidFinality', 'Order pickup-store snapshot is unavailable', 409);
 }
 
 async function insertPickupAttempt(

@@ -56,9 +56,9 @@ export function SeckillPage() {
         onEvent: (event) => {
           if (!active) return;
           setEvents((items) => items.some((item) => item.eventId === event.eventId) ? items : [...items, event].slice(-100));
-          void fetchCurrentSeckillSession().then((session) => { if (active && session?.sessionId === sessionId) setCurrent(session); }).catch((cause) => { if (active) setStreamError(asCoreError(cause).message); });
+          void fetchCurrentSeckillSession().then((session) => { if (active && session?.sessionId === sessionId) setCurrent(session); }).catch((cause) => { if (active) setStreamError(humanizeError(asCoreError(cause))); });
         },
-        onError: (realtimeError) => { if (active) setStreamError(realtimeError.message); },
+        onError: (realtimeError) => { if (active) setStreamError(humanizeError(realtimeError)); },
         onClose: (code, reason) => {
           if (!active) return;
           setStreamState(code === 4409 ? 'ARTIFACT_MISMATCH' : 'DISCONNECTED');
@@ -68,7 +68,7 @@ export function SeckillPage() {
     }).catch((cause) => {
       if (!active || controller.signal.aborted) return;
       setStreamState('DISCONNECTED');
-      setStreamError(asCoreError(cause).message);
+      setStreamError(humanizeError(asCoreError(cause)));
     });
     return () => { active = false; controller.abort(); subscription?.close(); };
   }, [sessionId, reload]);

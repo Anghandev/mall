@@ -321,7 +321,50 @@ export async function validatePaymentQuoteForWallet(quote: SignedQuote, publishe
   if (quote.approvalRequirements.some((requirement) => requirement.spender.toLowerCase() !== router)) {
     throw new WalletGatewayError('InvalidQuote', '授权对象与签名报价 Router 不一致');
   }
+  assertApprovalRequirementsCoverPayment(quote);
   assertAuthorizationMatchesRouterCall(quote);
+}
+
+function assertApprovalRequirementsCoverPayment(quote: SignedQuote) {
+  const byToken = new Map(quote.approvalRequirements.map((requirement) => [requirement.token.toLowerCase(), requirement]));
+  const usdt = byToken.get(chainIdentity.usdtAddress.toLowerCase());
+  const npl = byToken.get(chainIdentity.nplAddress.toLowerCase());
+  if (!usdt || !npl) {
+    throw new WalletGatewayError('InvalidQuote', '签名报价没有完整的 USDT/NPL 授权要求');
+  }
+  const expectedUsdt = 'intent' in quote
+    ? atomicBigInt(quote.intent.usdtPaymentAmount)
+    : maxBigInt(
+      atomicBigInt(quote.dual.seckill.usdtPaymentAmount),
+      atomicBigInt(quote.dual.fallback.usdtPaymentAmount),
+    );
+  const expectedNpl = 'intent' in quote
+    ? atomicBigInt(quote.intent.nplPaymentAmount)
+    : maxBigInt(
+      atomicBigInt(quote.dual.seckill.nplPaymentAmount),
+      atomicBigInt(quote.dual.fallback.nplPaymentAmount),
+    );
+  assertApprovalRequirementCovers(usdt, expectedUsdt, 'USDT');
+  assertApprovalRequirementCovers(npl, expectedNpl, 'NPL');
+}
+
+function assertApprovalRequirementCovers(requirement: ApprovalRequirement, expectedAmount: bigint, label: 'USDT' | 'NPL') {
+  const requiredAmount = atomicBigInt(requirement.requiredAmount);
+  const requestedAllowance = atomicBigInt(requirement.requestedAllowance);
+  if (requiredAmount < expectedAmount || requestedAllowance < requiredAmount) {
+    throw new WalletGatewayError('InvalidQuote', `${label} 授权额度与实际支付金额不一致`);
+  }
+}
+
+function maxBigInt(left: bigint, right: bigint) {
+  return left > right ? left : right;
+}
+
+function atomicBigInt(value: string) {
+  if (!/^(0|[1-9][0-9]*)$/.test(value)) {
+    throw new WalletGatewayError('InvalidQuote', '签名报价授权金额格式无效');
+  }
+  return BigInt(value);
 }
 
 function assertQuoteNotExpired(quote: SignedQuote) {

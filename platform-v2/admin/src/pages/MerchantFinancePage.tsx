@@ -6,7 +6,6 @@ import {
   type MerchantLifecycleList,
   type MerchantLifecycleStatus,
   type MerchantReviewAction,
-  type MerchantReviewChallenge,
 } from '@abu24k/core-artifacts';
 import {
   AlertTriangle,
@@ -25,7 +24,7 @@ import {
   WalletCards,
 } from 'lucide-react';
 import { useEffect, useState, type FormEvent } from 'react';
-import { CoreApiError } from '../coreApi';
+import { CoreApiError, signTypedDataWithWallet } from '../coreApi';
 import { useCoreSession } from '../coreSession';
 import { formatBnm, formatBpsAsPercent, formatNpl, formatTokenAmount, formatUsdt, humanizeError } from '../display';
 import {
@@ -321,21 +320,7 @@ function ReviewWorkspace(props: { detail: MerchantLifecycleDetail; token: string
         reasonCode,
         idempotencyKey,
       }, props.token);
-      if (!window.ethereum) throw new CoreApiError({ code: 'ConfigurationRequired', message: '未检测到可用的二次签名钱包', status: 503 });
-      const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-      const signer = Array.isArray(accounts) && typeof accounts[0] === 'string' ? accounts[0].toLowerCase() : '';
-      if (signer !== challenge.secondarySigner.toLowerCase()) {
-        throw new CoreApiError({
-          code: 'InvalidSignature',
-          message: `请把钱包插件当前账号切换到二次确认钱包 ${shortAddress(challenge.secondarySigner)} 后再签名；当前插件账号是 ${signer ? shortAddress(signer) : '未读取'}`,
-          status: 401,
-        });
-      }
-      const signature = await window.ethereum.request({
-        method: 'eth_signTypedData_v4',
-        params: [challenge.secondarySigner, JSON.stringify(withEip712DomainType(challenge.typedData))],
-      });
-      if (typeof signature !== 'string') throw new CoreApiError({ code: 'InvalidResponse', message: '钱包没有返回签名', status: 502 });
+      const signature = await signTypedDataWithWallet(window.ethereum, challenge.secondarySigner, challenge.typedData);
       const next = await publishMerchantReview(challenge, signature, props.token);
       const review = next.reviews.find((item) => item.actionId.toLowerCase() === challenge.actionId.toLowerCase());
       props.onChanged(next, `${actionLabel(action)}已发布，签名凭证 ${review?.approvalSignatureHash ? shortHash(review.approvalSignatureHash) : '已记录'}`);
@@ -450,21 +435,6 @@ function formatMerchantAsset(amount: string, asset: string) {
 function merchantIdempotencyKey(scope: 'merchant-create' | 'merchant-update' | 'merchant-license' | 'merchant-review') {
   const random = globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2);
   return `${scope}-${Date.now()}-${random}`;
-}
-function withEip712DomainType(typedData: MerchantReviewChallenge['typedData']) {
-  const types = typeof typedData.types === 'object' && typedData.types !== null ? typedData.types as Record<string, unknown> : {};
-  return {
-    ...typedData,
-    types: {
-      EIP712Domain: [
-        { name: 'name', type: 'string' },
-        { name: 'version', type: 'string' },
-        { name: 'chainId', type: 'uint256' },
-        { name: 'verifyingContract', type: 'address' },
-      ],
-      ...types,
-    },
-  };
 }
 function shortAddress(value: string) { return `${value.slice(0, 6)}...${value.slice(-4)}`; }
 function shortHash(value: string) { return `${value.slice(0, 10)}…${value.slice(-8)}`; }

@@ -35,6 +35,8 @@ import {
   deliveryOrder,
   deliveryOrderTarget,
   deliveryTarget,
+  pickupOrder,
+  pickupOrderTarget,
   pickupTarget,
   store,
 } from './fulfillment-fixtures';
@@ -176,6 +178,7 @@ describe('coordinated Core HTTP client', () => {
       stores: '/v2/stores',
       deliveryTarget: '/v2/fulfillment-targets/delivery',
       pickupTarget: '/v2/fulfillment-targets/pickup',
+      pickupCredential: '/v2/orders/{orderId}/pickup-credential',
       orders: '/v2/orders',
       order: '/v2/orders/{orderId}',
       orderTarget: '/v2/orders/{orderId}/fulfillment-target',
@@ -552,6 +555,7 @@ describe('coordinated Core HTTP client', () => {
       const url = String(input);
       calls.push({ url, ...(init ? { init } : {}) });
       if (url.endsWith('/v2/stores?regionCode=210202')) return json({ stores: [store] });
+      if (url.endsWith('/v2/stores?productId=product%3Acheckout')) return json({ stores: [store] });
       if (url.endsWith('/v2/fulfillment-targets/delivery')) return json(deliveryTarget, 201);
       if (url.endsWith('/v2/fulfillment-targets/pickup')) return json(pickupTarget, 201);
       if (url.endsWith('/v2/orders?limit=50')) return json({
@@ -560,6 +564,7 @@ describe('coordinated Core HTTP client', () => {
       });
       if (url.includes('/v2/orders?cursorCreatedAt=')) return json({ orders: [], nextCursor: null });
       if (url.endsWith(`/v2/orders/${deliveryOrder.orderId}/fulfillment-target`)) return json({ target: deliveryOrderTarget });
+      if (url.endsWith(`/v2/orders/${pickupOrder.orderId}/pickup-credential`)) return json({ orderId: pickupOrder.orderId, credentialId: 'pickup:test-credential', expiresAt: '2033-05-19T03:00:00.000Z' }, 201);
       if (url.endsWith(`/v2/orders/${deliveryOrder.orderId}`)) return json({ order: deliveryOrder });
       if (url.endsWith('/v2/actions/order')) return json({ allowedActions: deliveryActions });
       throw new Error(`unexpected URL ${url}`);
@@ -576,8 +581,15 @@ describe('coordinated Core HTTP client', () => {
     };
 
     expect(await client.listStores('210202')).toEqual([store]);
+    expect(await client.listStores(undefined, 'product:checkout')).toEqual([store]);
     expect(await client.createDeliveryTarget('session', targetDraft)).toEqual(deliveryTarget);
     expect(await client.createPickupTarget('session', { idempotencyKey: 'mall-pickup-1234', storeId: store.storeId })).toEqual(pickupTarget);
+    expect(await client.registerPickupCredential('session', pickupOrder.orderId, {
+      idempotencyKey: 'mall-pickup-code-1234',
+      evidenceHash: orderEvidenceHash,
+      code: '123456',
+      expiresAt: '2033-05-19T03:00:00.000Z',
+    })).toEqual({ orderId: pickupOrder.orderId, credentialId: 'pickup:test-credential', expiresAt: '2033-05-19T03:00:00.000Z' });
     const firstOrderPage = await client.listOrders('session');
     expect(firstOrderPage).toEqual({
       orders: [deliveryOrder],
@@ -616,6 +628,24 @@ describe('coordinated Core HTTP client', () => {
     await expect(createCoreClient({
       fetch: vi.fn().mockResolvedValue(json({ stores: [store], cursor: null })),
     }).listStores()).rejects.toMatchObject({ code: 'InvalidResponse' });
+  });
+
+  it('rejects pickup targets and order targets that do not match the requested store or mode', async () => {
+    const wrongStoreTarget = {
+      ...pickupTarget,
+      storeId: 'store-other',
+      store: { ...pickupTarget.store, storeId: 'store-other' },
+    };
+    await expect(createCoreClient({
+      fetch: vi.fn().mockResolvedValue(json(wrongStoreTarget, 201)),
+    }).createPickupTarget('session', {
+      idempotencyKey: 'mall-pickup-1234',
+      storeId: store.storeId,
+    })).rejects.toMatchObject({ code: 'InvalidResponse' });
+
+    await expect(createCoreClient({
+      fetch: vi.fn().mockResolvedValue(json({ target: { ...pickupOrderTarget, fulfillmentMode: 'DELIVERY' } })),
+    }).getOrderTarget('session', pickupOrder.orderId)).rejects.toMatchObject({ code: 'InvalidResponse' });
   });
 
   it('uses generated responses and passes exact quote/routerCall fields through unchanged', async () => {

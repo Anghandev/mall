@@ -89,9 +89,55 @@ describe('platform admin simplified zero-guarantee experience', () => {
     }));
 
     expect(copy).toContain('商家还不能上架');
-    expect(copy).toContain('商家已通过审核、门店已激活');
+    expect(copy).toContain('商家暂不满足上架条件');
     expect(copy).not.toContain('publish-denied');
     expect(copy).not.toMatch(/保证金|1000|1,000|deposit/i);
+  });
+
+
+  it('explains seckill CMS rule binding failures in plain Chinese', () => {
+    const missingPolicy = humanizeError(new CoreApiError({
+      code: 'DecisionBlocked',
+      message: 'Seckill rules require a policyVersion',
+      status: 409,
+    }));
+    const hashMismatch = humanizeError(new CoreApiError({
+      code: 'DecisionBlocked',
+      message: 'Seckill rules hash does not match policyVersion',
+      status: 409,
+    }));
+
+    expect(missingPolicy).toContain('秒杀规则还没绑定资金规则版本');
+    expect(missingPolicy).toContain('不要自己编');
+    expect(hashMismatch).toContain('秒杀规则正文和资金规则版本对不上');
+    expect(hashMismatch).toContain('重新保存并发布');
+    expect(missingPolicy).not.toMatch(/policyVersion|Seckill rules/i);
+    expect(hashMismatch).not.toMatch(/hash|policyVersion|Seckill rules/i);
+  });
+
+
+  it('turns unknown English technical errors into plain Chinese', () => {
+    const copy = humanizeError(new CoreApiError({
+      code: 'InvalidResponse',
+      message: 'Order not found',
+      status: 404,
+    }));
+
+    expect(copy).toContain('系统返回异常，请刷新或联系平台处理。');
+    expect(copy).not.toMatch(/Order not found/i);
+  });
+
+  it('translates settlement, seckill and RPC blockers without raw English', () => {
+    for (const message of [
+      'Merchant settlement is frozen',
+      'Merchant is not eligible for a seckill session',
+      'Fresh wallet coverage evidence is unavailable',
+      'BSC RPC contract request timed out',
+    ]) {
+      const copy = humanizeError(new CoreApiError({ code: 'Forbidden', message, status: 409 }));
+      expect(copy).not.toContain(message);
+      expect(copy).toMatch(/商家|资金覆盖|链上节点|商品/);
+    }
   });
 
 

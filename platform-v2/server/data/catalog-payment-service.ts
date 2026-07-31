@@ -169,6 +169,48 @@ interface CatalogSeckillRow {
   total_stock_available: string | number;
 }
 
+interface CatalogSeckillOverlay {
+  sessionId: string;
+  policyVersion: string;
+  phase: 'PREHEAT' | 'LIVE' | 'SETTLING';
+  startsAt: string;
+  mainDeadline: string;
+  relayDeadline: string;
+  seckillListPriceUsdt: string;
+  inventory: {
+    total: string;
+    sold: string;
+    reserved: string;
+    available: string;
+  };
+  ordinaryCheckoutAllowed: false;
+}
+
+interface CatalogSkuProjection {
+  skuId: string;
+  chainSkuId: string;
+  attributes: unknown;
+  listPriceUsdt: string;
+  stockAvailable: string;
+  seckill: CatalogSeckillOverlay | null;
+}
+
+interface CatalogProductProjection {
+  productId: string;
+  chainProductId: string;
+  title: string;
+  subtitle: string;
+  metadata: Readonly<Record<string, unknown>>;
+  mainImageAssetIds: string[];
+  videoAssetId: string | null;
+  richDetail: Readonly<Record<string, unknown>>;
+  defaultFreightUsdt: string;
+  fulfillmentModes: string[];
+  categoryId: string | null;
+  tagIds: string[];
+  skus: CatalogSkuProjection[];
+}
+
 interface StoredQuoteRow {
   order_id: string;
   product_id: string;
@@ -787,6 +829,7 @@ async function loadPreparation(
       || !catalogRowPurchasable(catalog, buyer, input.quantity, mainnetMicrotestEntitlement, now)
       || Number(catalog.stock_available) < input.quantity
   ) throw new CoreError('InventoryUnavailable', 'Product, merchant or inventory is unavailable', 409);
+  await assertPickupTargetBelongsToMerchant(executor, input, catalog.merchant_id);
   const activeSessions = await executor.query<CatalogSeckillRow>(
     `SELECT session_id, policy_version, product_id, sku_id,
        seckill_list_price_usdt::text, phase, starts_at, main_deadline,
@@ -827,6 +870,25 @@ async function loadPreparation(
   return { catalog, policy };
 }
 
+async function assertPickupTargetBelongsToMerchant(
+  executor: SqlExecutor,
+  input: Pick<CreateOrdinaryQuoteInput, 'fulfillmentMode' | 'fulfillmentTargetHash'>,
+  merchantId: string,
+) {
+  if (input.fulfillmentMode !== 'PICKUP') return;
+  const result = await executor.query<{ merchant_id: string }>(
+    `SELECT store.merchant_id
+     FROM core.fulfillment_targets target
+     JOIN core.merchant_stores store ON store.store_id = target.store_id
+     WHERE lower(target.target_hash) = lower($1)
+       AND target.fulfillment_mode = 'PICKUP'`,
+    [input.fulfillmentTargetHash],
+  );
+  if (result.rows[0]?.merchant_id !== merchantId) {
+    throw new CoreError('InvalidRequest', '自提门店不属于当前商品商家，请重新选择门店。', 409);
+  }
+}
+
 async function loadSeckillPreparation(
   executor: SqlExecutor,
   buyer: string,
@@ -854,6 +916,7 @@ async function loadSeckillPreparation(
     !catalog || catalog.product_state !== 'ACTIVE' || catalog.sku_state !== 'ACTIVE'
       || !isMerchantOperationallyEligible(catalog.merchant_status, catalog.guarantee_status)
   ) throw new CoreError('InventoryUnavailable', 'Seckill product or merchant is unavailable', 409);
+  await assertPickupTargetBelongsToMerchant(executor, input, catalog.merchant_id);
   const sessionResult = await executor.query<SessionRow>(
     `SELECT session_id, policy_version, product_policy_hash, seckill_list_price_usdt::text,
        phase, starts_at, main_deadline, relay_deadline,
@@ -1389,21 +1452,7 @@ function maxAmount(left: string, right: string) {
 
 function catalogProjection(rows: CatalogRow[], sessionRows: CatalogSeckillRow[], now: Date) {
   const sessions = catalogSeckillOverlays(sessionRows, now);
-  const products = new Map<string, {
-    productId: string;
-    chainProductId: string;
-    title: string;
-    subtitle: string;
-    metadata: unknown;
-    mainImageAssetIds: string[];
-    videoAssetId: string | null;
-    richDetail: Readonly<Record<string, unknown>>;
-    defaultFreightUsdt: string;
-    fulfillmentModes: string[];
-    categoryId: string | null;
-    tagIds: string[];
-    skus: Array<Record<string, unknown>>;
-  }>();
+  const products = new Map<string, CatalogProductProjection>();
   for (const row of rows) {
     let product = products.get(row.product_id);
     if (!product) {
@@ -1442,13 +1491,15 @@ function mediaAssetIds(value: unknown) {
 }
 
 function catalogSeckillOverlays(rows: CatalogSeckillRow[], now: Date) {
-  const result = new Map<string, Record<string, unknown>>();
+  const result = new Map<string, CatalogSeckillOverlay>();
   for (const row of rows) {
-    if (!blocksOrdinaryQuote(row, now)) continue;
+    const phase = effectiveSeckillPhase(row, now);
+    if (!isCatalogSeckillPhase(phase)) continue;
     if (result.has(row.sku_id)) {
-      throw new CoreError('UnknownState', 'Multiple active seckill sessions exist for one SKU', 409, {
-        skuId: row.sku_id,
-      });
+      // Public catalog is a read surface: one bad overlapping seckill record must not
+      // make the whole mall look empty. Ordinary quote creation still detects the
+      // duplicate blocking sessions and fails closed before any reservation/signature.
+      continue;
     }
     const available = Number(row.inventory) - Number(row.sold) - Number(row.reserved);
     if (!Number.isSafeInteger(available) || available < 0) {
@@ -1457,7 +1508,7 @@ function catalogSeckillOverlays(rows: CatalogSeckillRow[], now: Date) {
     result.set(row.sku_id, {
       sessionId: row.session_id,
       policyVersion: String(row.policy_version),
-      phase: effectiveSeckillPhase(row, now),
+      phase,
       startsAt: isoTimestamp(row.starts_at),
       mainDeadline: isoTimestamp(row.main_deadline),
       relayDeadline: isoTimestamp(row.relay_deadline),
@@ -1472,6 +1523,10 @@ function catalogSeckillOverlays(rows: CatalogSeckillRow[], now: Date) {
     });
   }
   return result;
+}
+
+function isCatalogSeckillPhase(phase: StoredSeckillPhase): phase is CatalogSeckillOverlay['phase'] {
+  return phase === 'PREHEAT' || phase === 'LIVE' || phase === 'SETTLING';
 }
 
 async function loadCatalogSeckillRows(

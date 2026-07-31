@@ -2186,6 +2186,16 @@ test('seckill operations publish locked inventory, reconcile prize funding and g
       { stock_available: 6, stock_seckill_locked: 4 },
     );
     await assert.rejects(
+      service.createSession(operatorActor, {
+        ...sessionInput,
+        inventory: 1,
+        startsAt: new Date(now.getTime() + 91 * 60_000).toISOString(),
+        idempotencyKey: 'seckill-session-proposal-already-locked',
+      }),
+      /Activity inventory exceeds the remaining merchant proposal/,
+    );
+    await db.query('UPDATE core.skus SET proposed_seckill_inventory = 5 WHERE sku_id = $1', ['sku-1']);
+    await assert.rejects(
       service.createSession({ walletAddress: secondary.address, roles: ['AUDITOR'] }, {
         policyVersion: '1', rulesContentHash: HASH, productId: 'product-1', skuId: 'sku-1',
         inventory: 1, seckillListPriceUsdt: '80', startsAt: new Date(now.getTime() + 60 * 60_000).toISOString(),
@@ -2212,6 +2222,7 @@ test('seckill operations publish locked inventory, reconcile prize funding and g
     await db.query("UPDATE core.seckill_sessions SET phase = 'SETTLED' WHERE session_id = $1", [alreadySettledSessionId]);
 
     const approve = async (actionId: string, nonce: string) => {
+      const previousClock = clock;
       const deadline = String(Math.floor(clock.getTime() / 1_000) + 600);
       const challenge = await service.approvalChallenge(adminActor, actionId, { nonce, deadline });
       const signature = await secondary.signTypedData(
@@ -2226,6 +2237,9 @@ test('seckill operations publish locked inventory, reconcile prize funding and g
         correlationId: `seckill-approval-${nonce}`,
       });
       assert.deepEqual(approved.allowedActions, ['EXECUTE', 'CANCEL']);
+      clock = new Date((Number(deadline) + 1) * 1_000);
+      assert.deepEqual((await service.get(adminActor, actionId)).allowedActions, ['CANCEL']);
+      clock = previousClock;
       await service.execute(adminActor, actionId, `seckill-execution-${nonce}`);
     };
 
@@ -2795,10 +2809,62 @@ test('zero-guarantee approved merchant exposes product media, catalog and ordina
     assert.equal((await service.listCatalog(otherBuyer)).length, 1);
     assert.equal((await service.getProduct('product-1')).productId, 'product-1');
     assert.equal((await service.getProduct('product-1', BUYER)).productId, 'product-1');
+    const wrongPickupTargetHash = `0x${'6'.repeat(64)}`;
+    const wrongPickupRegionHash = `0x${'7'.repeat(64)}`;
+    await db.query(
+      `INSERT INTO core.merchants (
+         merchant_id, settlement_wallet, status, level, guarantee_status
+       ) VALUES ('merchant-2','0x2323232323232323232323232323232323232323','APPROVED','V1','READY')`,
+    );
+    await db.query(
+      `INSERT INTO core.merchant_stores (
+         store_id, merchant_id, idempotency_key, request_hash, name, region_code,
+         longitude, latitude, address, phone, business_hours, image_asset_ids,
+         status, version, created_at, updated_at
+       ) VALUES (
+         'store:wrong-merchant','merchant-2','wrong-store',$1,'Wrong Store','110101',
+         116.397,39.908,'Beijing Wrong Store','+8613900000000','09:00-18:00',
+         '[]'::jsonb,'ACTIVE',1,$2,$2
+       )`,
+      [HASH_2, now],
+    );
+    await db.query(
+      `INSERT INTO core.fulfillment_targets (
+         target_id, target_hash, buyer_wallet, idempotency_key, request_hash,
+         fulfillment_mode, region_code, region_code_hash, store_id,
+         encrypted_payload, encryption_iv, encryption_tag, expires_at, created_at
+       ) VALUES (
+         'target:wrong-merchant-pickup',$1,$2,'wrong-merchant-pickup',$1,
+         'PICKUP','110101',$3,'store:wrong-merchant',
+         $4,$5,$6,$7,$8
+       )`,
+      [
+        wrongPickupTargetHash,
+        BUYER,
+        wrongPickupRegionHash,
+        Buffer.from('00', 'hex'),
+        Buffer.alloc(12),
+        Buffer.alloc(16),
+        new Date(now.getTime() + 60 * 60_000),
+        now,
+      ],
+    );
+    await assert.rejects(
+      service.createOrdinaryQuote(BUYER, {
+        ...request,
+        idempotencyKey: 'zero-guarantee-wrong-pickup-store',
+        fulfillmentMode: 'PICKUP',
+        fulfillmentTargetHash: wrongPickupTargetHash,
+        regionCodeHash: wrongPickupRegionHash,
+      }),
+      (error: unknown) => error instanceof CoreError
+        && error.code === 'InvalidRequest'
+        && /自提门店不属于当前商品商家/.test(error.message),
+    );
+
     const quote = await service.createOrdinaryQuote(BUYER, request);
     assert.equal(quote.intent.deadline, Math.floor(now.getTime() / 1000) + 5 * 60);
     assert.equal(quote.intent.reservationDeadline, Math.floor(now.getTime() / 1000) + 10 * 60);
-
     await db.query(
       "UPDATE core.merchant_guarantees SET source_evidence_hash = $1 WHERE merchant_id = 'merchant-1'",
       [HASH],
@@ -3080,7 +3146,8 @@ test('catalog payment service builds an authoritative idempotent quote and recor
     );
     const overlappingSessionId = `0x${'e'.repeat(64)}`;
     await insertLiveSeckillSession(db, overlappingSessionId, quoteNow, 89);
-    await assert.rejects(service.getProduct('product-1'), /Multiple active seckill sessions/);
+    const overlappingCatalog = await service.getProduct('product-1');
+    assert.equal(overlappingCatalog.skus[0]?.seckill?.sessionId, overlappingSessionId);
     await assert.rejects(
       service.createOrdinaryQuote(BUYER, { ...request, idempotencyKey: 'checkout-attempt-overlap' }),
       (error: unknown) => error instanceof CoreError && error.code === 'UnknownState',
@@ -3404,11 +3471,35 @@ test('payment receipt repository resumes mined work and finalizes one immutable 
       transaction_id: `payment-submission:${intent.orderId}:${txHash}`,
       journals: '1',
     });
+    const immediateFinalAudit = await repository.pendingReceipts();
+    assert.equal(immediateFinalAudit.length, 0);
+    await db.query(
+      `UPDATE core.transaction_finality
+       SET updated_at = clock_timestamp() - interval '11 minutes'
+       WHERE resource_type = 'ORDER_PAYMENT' AND resource_id = $1`,
+      [intent.orderId],
+    );
     const monitored = await repository.pendingReceipts();
     assert.equal(monitored.length, 1);
     assert.equal(monitored[0]!.finalityState, 'FINAL');
+    await repository.recordFinalAudit(monitored[0]!, 'VERIFIED');
+    assert.equal((await repository.pendingReceipts()).length, 0);
+    const auditEvidence = await db.query<{ status: string | null }>(
+      `SELECT evidence ->> 'lastFinalAuditStatus' AS status
+       FROM core.transaction_finality
+       WHERE resource_type = 'ORDER_PAYMENT' AND resource_id = $1`,
+      [intent.orderId],
+    );
+    assert.equal(auditEvidence.rows[0]!.status, 'VERIFIED');
+    await db.query(
+      `UPDATE core.transaction_finality
+       SET updated_at = clock_timestamp() - interval '11 minutes'
+       WHERE resource_type = 'ORDER_PAYMENT' AND resource_id = $1`,
+      [intent.orderId],
+    );
+    const reorgCandidate = (await repository.pendingReceipts())[0]!;
     const replacementBlockHash = `0x${'9'.repeat(64)}`;
-    await repository.recordReorged(monitored[0]!, replacementBlockHash);
+    await repository.recordReorged(reorgCandidate, replacementBlockHash);
     const deepReorg = await db.query<{
       quote_state: string;
       order_state: string;
@@ -5444,7 +5535,7 @@ test('seckill prize award is revoked and quarantined when finalized funding reor
     )).rows[0], { cause_active: false, breaker_paused: false, recovery_count: '1' });
     payoutBlockCanonical = false;
     payoutCanonicalEvidence = `0x${'8'.repeat(64)}`;
-    workerNow = new Date(workerNow.getTime() + 1_000);
+    workerNow = new Date(workerNow.getTime() + 31 * 60_000);
     assert.equal(await settlementWorker.reconcileSettledCanonicalityOnce(), 1);
     assert.deepEqual((await db.query<{
       transfer_state: string;
@@ -5543,7 +5634,7 @@ test('seckill prize award is revoked and quarantined when finalized funding reor
       'SELECT updated_at FROM core.transaction_finality WHERE transaction_id = $1',
       [`settlement-finality:${replacementAttemptId}`],
     )).rows[0]!.updated_at;
-    workerNow = new Date(workerNow.getTime() + 1_000);
+    workerNow = new Date(workerNow.getTime() + 31 * 60_000);
     assert.equal(await settlementWorker.reconcileSettledCanonicalityOnce(), 1);
     const failedCanonicalityAfter = (await db.query<{ updated_at: Date }>(
       'SELECT updated_at FROM core.transaction_finality WHERE transaction_id = $1',
@@ -5717,7 +5808,7 @@ test('seckill prize award is revoked and quarantined when finalized funding reor
     );
     payoutBlockCanonical = false;
     payoutCanonicalEvidence = `0x${'c'.repeat(64)}`;
-    workerNow = new Date(workerNow.getTime() + 1_000);
+    workerNow = new Date(workerNow.getTime() + 31 * 60_000);
     assert.equal(await settlementWorker.reconcileSettledCanonicalityOnce(), 1);
     assert.deepEqual((await db.query<{
       finality_state: string;
@@ -5840,7 +5931,7 @@ test('seckill prize award is revoked and quarantined when finalized funding reor
     );
     payoutBlockCanonical = false;
     payoutCanonicalEvidence = `0x${'1'.repeat(63)}2`;
-    workerNow = new Date(workerNow.getTime() + 1_000);
+    workerNow = new Date(workerNow.getTime() + 31 * 60_000);
     assert.equal(await settlementWorker.reconcileSettledCanonicalityOnce(), 1);
     payoutBlockCanonical = true;
     payoutReceipt = {
@@ -6873,6 +6964,31 @@ test('fulfillment targets encrypt delivery PII and bind quotes to an AMap six-di
       "UPDATE core.merchant_stores SET status = 'ACTIVE', version = version + 1 WHERE store_id = $1",
       [store.storeId],
     );
+    await db.query(
+      `INSERT INTO core.merchants (
+         merchant_id, settlement_wallet, status, level, guarantee_status
+       ) VALUES ('merchant-2','0x2424242424242424242424242424242424242424','APPROVED','V1','READY')`,
+    );
+    await db.query(
+      `INSERT INTO core.merchant_stores (
+         store_id, merchant_id, idempotency_key, request_hash, name, region_code,
+         longitude, latitude, address, phone, business_hours, image_asset_ids,
+         status, version, created_at, updated_at
+       ) VALUES (
+         'store:other-merchant','merchant-2','other-store',$1,'Other Store','310101',
+         121.4738,31.2305,'Shanghai Other Store','+862187654321','09:00-18:00',
+         '[]'::jsonb,'ACTIVE',1,clock_timestamp(),clock_timestamp()
+       )`,
+      [HASH_2],
+    );
+    assert.deepEqual(
+      (await service.listStores(undefined, 'product-1')).map((item) => item.storeId),
+      [store.storeId],
+    );
+    assert.deepEqual(
+      (await service.listStores('310101')).map((item) => item.storeId).sort(),
+      ['store:other-merchant', store.storeId].sort(),
+    );
 
     const delivery = await service.createDeliveryTarget(buyer, {
       idempotencyKey: 'delivery-target-command-1',
@@ -7141,7 +7257,7 @@ test('fulfillment targets encrypt delivery PII and bind quotes to an AMap six-di
       [BUYER],
     )).rows[0]?.count, '0');
     await assert.doesNotReject(assertWalletPaymentAllowed(adapter(db), BUYER, new Date()));
-    assert.equal((await service.listStores('310101')).length, 2);
+    assert.equal((await service.listStores('310101')).length, 3);
     assert.throws(
       () => new FulfillmentTargetService({ transactions: transactionAdapter(db), regions, encryptionKey: 'short' }),
       /must contain 32 bytes/,
@@ -8120,6 +8236,48 @@ test('order pages use stable scoped cursors and shipment batches are canonical, 
       'SELECT state FROM core.orders WHERE order_id = $1',
       [orderC],
     )).rows[0]?.state, 'PAID');
+
+    const foreignScopedOrder = `0x${'f'.repeat(64)}`;
+    const foreignReservationId = 'reservation-page-f';
+    await reserveInventory(adapter(db), {
+      reservationId: foreignReservationId,
+      reservationHash: `0x${'f'.repeat(64)}`,
+      policyVersion: 1,
+      skuId: 'sku-1',
+      buyerWallet: BUYER,
+      quantity: 1,
+      classification: 'ORDINARY',
+      expiresAt: new Date(Date.now() + 10 * 60_000),
+    });
+    await db.query(
+      `INSERT INTO core.merchants (
+         merchant_id, settlement_wallet, status, level, guarantee_status
+       ) VALUES ('merchant-other','0x5555555555555555555555555555555555555555','APPROVED','V1','READY')`,
+    );
+    await db.query(
+      `INSERT INTO core.orders (
+         order_id, artifact_version, policy_version, buyer_wallet,
+         merchant_id, merchant_wallet, product_id, sku_id, quantity, fulfillment_mode,
+         fulfillment_target_hash, region_code_hash, product_policy_hash, reservation_id,
+         quote_snapshot, allocation_snapshot, exact_amounts, buyer_nonce, quote_deadline,
+         state, finality_status, payment_tx_hash, paid_at, created_at
+       ) VALUES (
+         $1, '${CORE_ARTIFACT_VERSION}', 1, $3, 'merchant-other', $4,
+         'product-1', 'sku-1', 1, 'DELIVERY', $6, $7, $2, $5,
+         '{}', '{}', '{"usdt":"50","npl":"500"}', 1,
+         clock_timestamp() + interval '1 hour', 'PAID', 'FINAL', $8, $9, $9
+       )`,
+      [foreignScopedOrder, HASH, BUYER, merchantAgent.toLowerCase(), foreignReservationId, HASH, HASH, `0x${'f'.repeat(64)}`, now],
+    );
+    const scopedReadService = new FulfillmentService({
+      transactions: transactionAdapter(db),
+      clock: () => now,
+      trackingEncryptionKey: 'cd'.repeat(32),
+    });
+    const merchantPageAfterForeign = await scopedReadService.listOrderPage(merchant, { limit: 20 });
+    assert.equal(merchantPageAfterForeign.orders.some((order) => order.orderId === foreignScopedOrder), false);
+    const merchantOrdersAfterForeign = await scopedReadService.listOrders(merchant);
+    assert.equal(merchantOrdersAfterForeign.some((order) => order.orderId === foreignScopedOrder), false);
   } finally {
     await db.close();
   }
@@ -8595,13 +8753,17 @@ test('takeover freezes the merchant after seven days while funds stay Locked and
   try {
     const intent = paymentIntent();
     intent.fulfillmentMode = 'PICKUP';
-    intent.fulfillmentTargetHash = `0x${'8'.repeat(64)}`;
+    intent.fulfillmentTargetHash = `0x${'a'.repeat(64)}`;
+    const storedPickupTargetHash = `0x${'A'.repeat(64)}`;
     await recordFinalPayment(pickupDb, intent);
     await pickupDb.exec(`
       INSERT INTO core.administrative_regions (
         region_code, province, city, district, source, source_reference_hash, status
       ) VALUES ('110101','Beijing','Beijing','Dongcheng','GOVERNED_IMPORT','${HASH}','ACTIVE')
       ON CONFLICT (region_code) DO NOTHING;
+      INSERT INTO core.merchants (
+        merchant_id, settlement_wallet, status, level, guarantee_status
+      ) VALUES ('merchant-legacy-pickup','0x2424242424242424242424242424242424242424','APPROVED','V1','READY');
       INSERT INTO core.merchant_stores (
         store_id, merchant_id, idempotency_key, request_hash, name, region_code,
         longitude, latitude, address, phone, status, version
@@ -8617,7 +8779,7 @@ test('takeover freezes the merchant after seven days while funds stay Locked and
         fulfillment_mode, region_code, region_code_hash, store_id,
         encrypted_payload, encryption_iv, encryption_tag, expires_at, created_at
       ) VALUES (
-        'target-pickup-1','${intent.fulfillmentTargetHash}','${BUYER}','pickup-target-fixture','${HASH_2}',
+        'target-pickup-1','${storedPickupTargetHash}','${BUYER}','pickup-target-fixture','${HASH_2}',
         'PICKUP','110101','${HASH}','store-pickup-1',
         decode(repeat('00',32),'hex'),decode(repeat('00',12),'hex'),decode(repeat('00',16),'hex'),
         clock_timestamp() + interval '1 day',clock_timestamp()
@@ -8742,6 +8904,66 @@ test('takeover freezes the merchant after seven days while funds stay Locked and
     );
   } finally {
     await pickupDb.close();
+  }
+});
+
+test('pickup credential and verification reject pickup targets outside the order merchant', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    const intent = paymentIntent();
+    intent.fulfillmentMode = 'PICKUP';
+    intent.fulfillmentTargetHash = `0x${'a'.repeat(64)}`;
+    await recordFinalPayment(db, intent);
+    await db.exec(`
+      INSERT INTO core.administrative_regions (
+        region_code, province, city, district, source, source_reference_hash, status
+      ) VALUES ('110101','Beijing','Beijing','Dongcheng','GOVERNED_IMPORT','${HASH}','ACTIVE')
+      ON CONFLICT (region_code) DO NOTHING;
+      INSERT INTO core.merchants (
+        merchant_id, settlement_wallet, status, level, guarantee_status
+      ) VALUES ('merchant-cross-pickup','0x2424242424242424242424242424242424242424','APPROVED','V1','READY');
+      INSERT INTO core.merchant_stores (
+        store_id, merchant_id, idempotency_key, request_hash, name, region_code,
+        longitude, latitude, address, phone, status, version
+      ) VALUES (
+        'store-cross-pickup','merchant-cross-pickup','pickup-store-cross-merchant','${HASH_2}',
+        'Cross Merchant Store','110101',116.397,39.908,'Cross Merchant Store Address','01012345678','ACTIVE',1
+      );
+      INSERT INTO core.fulfillment_targets (
+        target_id, target_hash, buyer_wallet, idempotency_key, request_hash,
+        fulfillment_mode, region_code, region_code_hash, store_id,
+        encrypted_payload, encryption_iv, encryption_tag, expires_at, created_at
+      ) VALUES (
+        'target-cross-pickup','${intent.fulfillmentTargetHash}','${BUYER}','pickup-target-cross-merchant','${HASH_2}',
+        'PICKUP','110101','${HASH}','store-cross-pickup',
+        decode(repeat('00',32),'hex'),decode(repeat('00',12),'hex'),decode(repeat('00',16),'hex'),
+        clock_timestamp() + interval '1 day',clock_timestamp()
+      );
+    `);
+    const now = new Date((intent.issuedAt + 60) * 1000);
+    const service = new FulfillmentService({ transactions: transactionAdapter(db), clock: () => now });
+    const buyer = { walletAddress: BUYER, roles: ['BUYER'] as const };
+    const merchant = { walletAddress: MERCHANT, roles: ['MERCHANT'] as const, merchantId: 'merchant-1' };
+    await assert.rejects(
+      service.registerPickupCredential(buyer, intent.orderId, {
+        idempotencyKey: 'pickup-cross-register',
+        evidenceHash: `0x${'3'.repeat(64)}`,
+        code: '123456',
+        expiresAt: new Date(now.getTime() + 60 * 60 * 1000),
+      }),
+      /pickup-store snapshot is unavailable/,
+    );
+    await assert.rejects(
+      service.verifyPickup(merchant, intent.orderId, {
+        idempotencyKey: 'pickup-cross-verify',
+        evidenceHash: `0x${'4'.repeat(64)}`,
+        code: '123456',
+        storeId: 'store-cross-pickup',
+      }),
+      /pickup-store snapshot is unavailable/,
+    );
+  } finally {
+    await db.close();
   }
 });
 
@@ -9642,6 +9864,13 @@ test('CMS sanitizes structured content, targets audiences, binds seckill rules a
       correlationId: 'cms-test-v1',
     })).versionId, first.versionId);
     await service.publish(actor, first.versionId, { evidenceHash: HASH, correlationId: 'cms-publish-v1' });
+    await assert.rejects(
+      service.rollback(actor, first.versionId, {
+        evidenceHash: `0x${'8'.repeat(64)}`,
+        correlationId: 'cms-rollback-current-noop',
+      }),
+      /already the active published version/,
+    );
     const buyerAudience = { walletAddress: BUYER, roles: ['BUYER'] as const };
     const firstPublished = await service.listPublished({ actor: buyerAudience, now });
     assert.equal(firstPublished.length, 1);
@@ -11235,6 +11464,120 @@ test('zero-guarantee merchant settlement creates a formal transfer without guara
   }
 });
 
+test('expired merchant settlement intents are closed before signature verification can loop', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    const prepared = await prepareAvailableMerchantSettlement(db);
+    const service = new SettlementService({
+      transactions: transactionAdapter(db),
+      clock: () => prepared.now,
+    });
+    const challenge = await service.createIntent(prepared.merchant, {
+      rail: 'MERCHANT_USDT',
+      amount: '45',
+      idempotencyKey: 'expired-settlement-intent-1',
+    });
+    const signature = await prepared.merchantWallet.signTypedData(
+      challenge.typedData.domain,
+      challenge.typedData.types,
+      challenge.typedData.message,
+    );
+
+    prepared.now = new Date((challenge.intent.deadline + 1) * 1000);
+    await assert.rejects(
+      service.submitRequest(prepared.merchant, { intentId: challenge.intent.intentId, signature }),
+      (error: unknown) => error instanceof CoreError && error.code === 'NonceExpired',
+    );
+    assert.equal((await db.query<{ state: string }>(
+      'SELECT state FROM core.settlement_intents WHERE intent_id = $1',
+      [challenge.intent.intentId],
+    )).rows[0]?.state, 'EXPIRED');
+  } finally {
+    await db.close();
+  }
+});
+
+test('merchant settlement intents expiring during wallet signing are closed', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    const prepared = await prepareAvailableMerchantSettlement(db);
+    const service = new SettlementService({
+      transactions: transactionAdapter(db),
+      clock: () => prepared.now,
+    });
+    const challenge = await service.createIntent(prepared.merchant, {
+      rail: 'MERCHANT_USDT',
+      amount: '45',
+      idempotencyKey: 'expired-settlement-signing-1',
+    });
+    const signature = await prepared.merchantWallet.signTypedData(
+      challenge.typedData.domain,
+      challenge.typedData.types,
+      challenge.typedData.message,
+    );
+    let submitClockCalls = 0;
+    const submitService = new SettlementService({
+      transactions: transactionAdapter(db),
+      clock: () => {
+        submitClockCalls += 1;
+        return submitClockCalls === 1
+          ? new Date((challenge.intent.deadline - 1) * 1000)
+          : new Date((challenge.intent.deadline + 1) * 1000);
+      },
+    });
+
+    await assert.rejects(
+      submitService.submitRequest(prepared.merchant, { intentId: challenge.intent.intentId, signature }),
+      (error: unknown) => error instanceof CoreError && error.code === 'NonceExpired',
+    );
+    assert.equal((await db.query<{ state: string }>(
+      'SELECT state FROM core.settlement_intents WHERE intent_id = $1',
+      [challenge.intent.intentId],
+    )).rows[0]?.state, 'EXPIRED');
+  } finally {
+    await db.close();
+  }
+});
+
+test('expired merchant settlement intent idempotency keys do not return stale typed data', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    const prepared = await prepareAvailableMerchantSettlement(db);
+    const service = new SettlementService({
+      transactions: transactionAdapter(db),
+      clock: () => prepared.now,
+    });
+    const input = {
+      rail: 'MERCHANT_USDT' as const,
+      amount: '45',
+      idempotencyKey: 'expired-settlement-intent-retry',
+    };
+    const expired = await service.createIntent(prepared.merchant, input);
+
+    prepared.now = new Date((expired.intent.deadline + 1) * 1000);
+    await assert.rejects(
+      service.createIntent(prepared.merchant, input),
+      (error: unknown) => error instanceof CoreError && error.code === 'NonceExpired',
+    );
+    await assert.rejects(
+      service.createIntent(prepared.merchant, input),
+      (error: unknown) => error instanceof CoreError && error.code === 'NonceExpired',
+    );
+    assert.equal((await db.query<{ state: string }>(
+      'SELECT state FROM core.settlement_intents WHERE intent_id = $1',
+      [expired.intent.intentId],
+    )).rows[0]?.state, 'EXPIRED');
+
+    const replacement = await service.createIntent(prepared.merchant, {
+      ...input,
+      idempotencyKey: 'expired-settlement-intent-replacement',
+    });
+    assert.notEqual(replacement.intent.intentId, expired.intent.intentId);
+  } finally {
+    await db.close();
+  }
+});
+
 test('signed settlement request executes one immutable EOA transfer and settles only after 15 confirmations', async () => {
   const db = await createBusinessDatabase();
   try {
@@ -11399,6 +11742,8 @@ test('signed settlement request executes one immutable EOA transfer and settles 
     await assertLedgerBalanced(db, 1);
 
     canonicalBlockHash = `0x${'a'.repeat(64)}`;
+    assert.equal(await worker.reconcileSettledCanonicalityOnce(), 0);
+    now = new Date(now.getTime() + 31 * 60_000);
     assert.equal(await worker.reconcileSettledCanonicalityOnce(), 1);
     const reorgedTransfer = await prepared.settlements.getAdminTransfer(
       { walletAddress: prepared.operator.walletAddress, roles: ['AUDITOR'] },
@@ -13704,6 +14049,12 @@ test('takeover assignment authorizes one qualified replacement merchant through 
     assert.equal(second.assignment.version, 2);
     assert.equal(second.assignment.supersedesAssignmentId, first.assignment.assignmentId);
     await assert.rejects(service.getMerchant(firstActor, takeover.caseId), /outside the replacement merchant scope/);
+    const replacementOrderPage = await fulfillment.listOrderPage(secondActor, { limit: 20 });
+    const replacementOrder = replacementOrderPage.orders.find((order) => order.orderId === intent.orderId);
+    assert.ok(replacementOrder);
+    assert.equal(replacementOrder.allowedActions.some((action) => (
+      action.action === 'RECORD_SHIPMENT' && action.enabled
+    )), true);
     await assert.rejects(
       db.query('UPDATE core.takeover_assignments SET reason_code = $2 WHERE assignment_id = $1', [
         first.assignment.assignmentId, 'MUTATED',
@@ -14847,7 +15198,7 @@ test('evidence and media stay scoped, idempotent, hashed and immutable', async (
   }
 });
 
-async function prepareRequestedSettlement(db: PGlite) {
+async function prepareAvailableMerchantSettlement(db: PGlite) {
   const merchantWallet = Wallet.createRandom();
   const intent = paymentIntent();
   intent.merchant = merchantWallet.address.toLowerCase();
@@ -14876,6 +15227,18 @@ async function prepareRequestedSettlement(db: PGlite) {
     { idempotencyKey: 'retry-receipt-1', evidenceHash: `0x${'6'.repeat(64)}` },
   );
   now = new Date(now.getTime() + 60_000);
+  return {
+    merchantWallet,
+    intent,
+    now,
+    merchant,
+  };
+}
+
+async function prepareRequestedSettlement(db: PGlite) {
+  const available = await prepareAvailableMerchantSettlement(db);
+  const { merchantWallet, intent, merchant } = available;
+  let now = available.now;
   const settlements = new SettlementService({ transactions: transactionAdapter(db), clock: () => now });
   const challenge = await settlements.createIntent(merchant, {
     rail: 'MERCHANT_USDT',

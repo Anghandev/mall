@@ -20,6 +20,7 @@ import {
 
 const EXPIRED_LIMIT = 100;
 const ORDINARY_FINAL_AUDIT_HOURS = 24;
+const FINAL_RECEIPT_AUDIT_INTERVAL_MINUTES = 10;
 
 interface PendingRow {
   order_id: string;
@@ -75,6 +76,7 @@ export class PostgresPaymentReceiptRepository implements PaymentReceiptRepositor
                OR (quote.state = 'PAID' AND finality.state = 'MINED')
                OR (
                  quote.state = 'PAID' AND finality.state = 'FINAL'
+                 AND finality.updated_at <= clock_timestamp() - ($2 * interval '1 minute')
                  AND (
                    (quote.session_id IS NOT NULL AND session.phase NOT IN ('SETTLED','FORCE_CLOSED'))
                    OR (quote.session_id IS NULL AND finality.finalized_at >=
@@ -92,7 +94,7 @@ export class PostgresPaymentReceiptRepository implements PaymentReceiptRepositor
          ORDER BY block_number NULLS LAST,
            COALESCE(payment_log_index, observed_log_index::bigint) NULLS LAST,
            submitted_at, order_id, submitted_tx_hash`,
-        [ORDINARY_FINAL_AUDIT_HOURS],
+        [ORDINARY_FINAL_AUDIT_HOURS, FINAL_RECEIPT_AUDIT_INTERVAL_MINUTES],
       );
       return result.rows.map(paymentCandidate);
     });
@@ -202,6 +204,28 @@ export class PostgresPaymentReceiptRepository implements PaymentReceiptRepositor
         finalizedAt: new Date(input.observation.confirmationBlock.timestamp * 1_000),
       });
       await resolveRecoveryJob(executor, input.candidate.orderId, 'PAYMENT_FINAL');
+    });
+  }
+
+  recordFinalAudit(candidate: PaymentReceiptCandidate, status: 'VERIFIED' | 'TRANSIENT_RPC_FAILURE') {
+    return this.#transactions.transaction(async (executor) => {
+      await lockKnownQuote(executor, candidate);
+      await ensureSubmissionFinality(executor, candidate, this.#routerAddress);
+      const updated = await executor.query<{ transaction_id: string }>(
+        `UPDATE core.transaction_finality
+         SET evidence = evidence || jsonb_build_object(
+             'lastFinalAuditStatus', $3::text,
+             'lastFinalAuditAt', clock_timestamp()
+           ),
+           updated_at = clock_timestamp()
+         WHERE resource_type = 'ORDER_PAYMENT' AND resource_id = $1 AND tx_hash = $2
+           AND state = 'FINAL'
+         RETURNING transaction_id`,
+        [candidate.orderId, candidate.txHash, status],
+      );
+      if (updated.rows.length !== 1) {
+        throw new CoreError('InvalidFinality', 'Final payment audit row is unavailable', 409);
+      }
     });
   }
 

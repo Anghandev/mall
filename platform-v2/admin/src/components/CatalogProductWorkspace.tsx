@@ -312,7 +312,7 @@ function ProductMedia({ product, token }: { product: ManagedCatalogProduct; toke
 }
 
 function SkuTable({ product }: { product: ManagedCatalogProduct }) {
-  return <div className="table-scroll"><table className="data-table catalog-sku-table"><thead><tr><th>规格</th><th>售价 / 商家应收</th><th>库存</th><th>秒杀库存</th><th>状态</th></tr></thead><tbody>{product.skus.map((sku, index) => <tr key={sku.skuId}><td><strong>规格 {index + 1}</strong><small>{attributeText(sku.attributes)}</small><details className="catalog-row-technical"><summary>规格编号</summary><code>{sku.skuId}</code></details></td><td className="tabular"><strong>{formatUsdt(sku.listPriceUsdt)}</strong><small>商家应收 {formatUsdt(sku.merchantBaseReceivableUsdt)}</small></td><td className="tabular"><strong>{sku.stockAvailable} 可售</strong><small>{sku.stockReserved} 已锁 / {sku.stockTotal} 总库存</small></td><td>{sku.proposedSeckillInventory}</td><td>{lifecycleText(sku.lifecycleState)}</td></tr>)}</tbody></table></div>;
+  return <div className="table-scroll"><table className="data-table catalog-sku-table"><thead><tr><th>规格</th><th>售价 / 商家应收</th><th>库存</th><th>秒杀库存</th><th>状态</th></tr></thead><tbody>{product.skus.map((sku, index) => <tr key={sku.skuId}><td><strong>规格 {index + 1}</strong><small>{attributeText(sku.attributes)}</small><details className="catalog-row-technical"><summary>规格编号</summary><code>{sku.skuId}</code></details></td><td className="tabular"><strong>{formatUsdt(sku.listPriceUsdt)}</strong><small>商家应收 {formatUsdt(sku.merchantBaseReceivableUsdt)}</small></td><td className="tabular"><strong>{sku.stockAvailable} 可售</strong><small>{sku.stockReserved} 普通订单锁定 / {sku.stockTotal} 总库存</small></td><td className="tabular"><strong>{sku.proposedSeckillInventory} 提报</strong><small>{sku.stockSeckillLocked} 已被秒杀草稿锁定</small></td><td>{lifecycleText(sku.lifecycleState)}</td></tr>)}</tbody></table></div>;
 }
 
 function ConcessionPanel(props: { busy: boolean; product: ManagedCatalogProduct; preview: MerchantConcessionPreview | null; onCreate(event: FormEvent): void; onSubmitReview(): void }) {
@@ -343,19 +343,26 @@ function SlotEvidence({ slot }: { slot: ProductSlotProjection }) {
 
 function SkuEditor({ index, sku, canRemove, onChange, onRemove }: { index: number; sku: SkuDraft; canRemove: boolean; onChange(value: SkuDraft): void; onRemove(): void }) {
   const derivedBase = derivedMerchantBaseReceivable(sku.listPriceUsdt);
-  return <article><div className="catalog-sku-editor-heading"><strong>规格 {index + 1}</strong>{canRemove ? <button className="icon-button" type="button" onClick={onRemove} aria-label={`删除规格 ${index + 1}`} title="删除规格"><Trash2 aria-hidden="true" /></button> : null}</div><div className="form-grid"><label>规格编号（新建可留空）<input value={sku.skuId} onChange={(event) => onChange({ ...sku, skuId: event.target.value })} /></label><label>规格说明<input value={sku.attributes} onChange={(event) => onChange({ ...sku, attributes: event.target.value })} placeholder="如：42码 / 曜石黑" /></label><label>售价（USDT）<input inputMode="decimal" value={sku.listPriceUsdt} onChange={(event) => onChange({ ...sku, listPriceUsdt: event.target.value })} placeholder="例如 2.00" required /></label><div className="catalog-form-hint"><strong>商家预计应收（USDT）</strong><output>{derivedBase ?? '输入售价后由系统计算'}</output><small>只读，实际金额以系统返回为准。</small></div><label>总库存<input type="number" min="1" value={sku.stockTotal} onChange={(event) => onChange({ ...sku, stockTotal: event.target.value })} required /></label><label>提报秒杀库存<input type="number" min="1" value={sku.proposedSeckillInventory} onChange={(event) => onChange({ ...sku, proposedSeckillInventory: event.target.value })} required /></label></div></article>;
+  return <article><div className="catalog-sku-editor-heading"><strong>规格 {index + 1}</strong>{canRemove ? <button className="icon-button" type="button" onClick={onRemove} aria-label={`删除规格 ${index + 1}`} title="删除规格"><Trash2 aria-hidden="true" /></button> : null}</div><div className="form-grid"><label>规格编号（新建可留空）<input value={sku.skuId} onChange={(event) => onChange({ ...sku, skuId: event.target.value })} /></label><label>规格说明<input value={sku.attributes} onChange={(event) => onChange({ ...sku, attributes: event.target.value })} placeholder="如：42码 / 曜石黑" /></label><label>售价（USDT）<input inputMode="decimal" value={sku.listPriceUsdt} onChange={(event) => onChange({ ...sku, listPriceUsdt: event.target.value })} placeholder="例如 2.00" required /></label><div className="catalog-form-hint"><strong>商家预计应收（USDT）</strong><output>{derivedBase ?? '输入售价后由系统计算'}</output><small>只读，实际金额以系统返回为准。</small></div><label>总库存<input type="number" min="1" step="1" value={sku.stockTotal} onChange={(event) => onChange({ ...sku, stockTotal: event.target.value })} required /></label><label>提报秒杀库存<input type="number" min="1" step="1" value={sku.proposedSeckillInventory} onChange={(event) => onChange({ ...sku, proposedSeckillInventory: event.target.value })} required /></label></div></article>;
 }
 
 function productInput(draft: ProductDraft, idempotencyKey: string): AdminProductSlotInput {
   const richDetail = parseLooseObject(draft.richDetail, '商品详情', 'description');
   const mainImageAssetIds = lines(draft.mainImageAssetIds);
-  const skus = draft.skus.map((sku, index) => ({
-    ...(sku.skuId.trim() ? { skuId: sku.skuId.trim() } : {}),
-    attributes: parseLooseObject(sku.attributes, `规格 ${index + 1} 说明`, 'spec'),
-    listPriceUsdt: parseUsdtInput(sku.listPriceUsdt, `规格 ${index + 1} 售价`, true),
-    stockTotal: Number(sku.stockTotal),
-    proposedSeckillInventory: Number(sku.proposedSeckillInventory),
-  }));
+  const skus = draft.skus.map((sku, index) => {
+    const stockTotal = parsePositiveInteger(sku.stockTotal, `规格 ${index + 1} 总库存`);
+    const proposedSeckillInventory = parsePositiveInteger(sku.proposedSeckillInventory, `规格 ${index + 1} 提报秒杀库存`);
+    if (proposedSeckillInventory > stockTotal) {
+      throw new Error(`规格 ${index + 1} 提报秒杀库存不能大于总库存`);
+    }
+    return {
+      ...(sku.skuId.trim() ? { skuId: sku.skuId.trim() } : {}),
+      attributes: parseLooseObject(sku.attributes, `规格 ${index + 1} 说明`, 'spec'),
+      listPriceUsdt: parseUsdtInput(sku.listPriceUsdt, `规格 ${index + 1} 售价`, true),
+      stockTotal,
+      proposedSeckillInventory,
+    };
+  });
   return {
     merchantId: draft.merchantId.trim(),
     idempotencyKey,
@@ -411,6 +418,14 @@ function percentToBps(value: string) {
   const bps = Number(whole) * 100 + Number(fraction.padEnd(2, '0'));
   if (!Number.isSafeInteger(bps) || bps < 0 || bps > 10_000) throw new Error('商家让利比例请填写 0 到 100 之间的数字');
   return bps;
+}
+
+function parsePositiveInteger(value: string, label: string) {
+  const trimmed = value.trim();
+  if (!/^[1-9][0-9]*$/.test(trimmed)) throw new Error(`${label}请填写正整数，不能有小数。`);
+  const parsed = Number(trimmed);
+  if (!Number.isSafeInteger(parsed)) throw new Error(`${label}数字太大，请重新填写。`);
+  return parsed;
 }
 
 function bpsToPercentInput(value: number) {
@@ -478,7 +493,16 @@ function catalogActionLabel(action: string) {
   } as Record<string, string>)[action] ?? action;
 }
 function lifecycleText(value: string) {
-  return ({ DRAFT: '草稿', REVIEW: '待审核', SCHEDULED: '待上架', PUBLISHED: '已上架', HIDDEN: '已隐藏', DELISTED: '已下架' } as Record<string, string>)[value] ?? value;
+  return ({
+    DRAFT: '草稿',
+    REVIEW: '待审核',
+    SCHEDULED: '待上架',
+    ACTIVE: '已上架',
+    SOLD_OUT: '已售罄',
+    HIDDEN: '已隐藏',
+    DELISTED: '已下架',
+    LOCKED: '已锁定',
+  } as Record<string, string>)[value] ?? value;
 }
 function fulfillmentText(value: FulfillmentMode) { return ({ DELIVERY: '快递发货', PICKUP: '到店自提' } as const)[value] ?? value; }
 function poolText(value: string) {

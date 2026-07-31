@@ -146,8 +146,15 @@ export function AssetsPage() {
   )) ?? [];
   const bnmPoints = settlements?.points ?? [];
   const disputedMerchantBalances = merchantBalances.filter((balance) => balance.state === 'DISPUTED');
-  const financeAllowsSettlement = finance?.allowedActions.includes('REQUEST_MERCHANT_USDT') === true;
-  const hasAvailableMerchantBalance = merchantBalances.some((balance) => balance.state === 'AVAILABLE');
+  const financeAllowsSettlement = finance?.allowedActions.some((action) => (
+    action === 'REQUEST_MERCHANT_USDT' || action === 'REQUEST_MERCHANT_SETTLEMENT'
+  )) === true;
+  const lockedMerchantBalanceAmount = sumAssetAmounts(merchantBalances.filter((balance) => balance.state === 'LOCKED'));
+  const availableMerchantBalanceAmount = sumAssetAmounts(merchantBalances.filter((balance) => balance.state === 'AVAILABLE'));
+  const lockedMerchantBalanceInput = formatExactTokenInput(lockedMerchantBalanceAmount);
+  const availableMerchantBalanceInput = formatExactTokenInput(availableMerchantBalanceAmount);
+  const hasLockedMerchantBalance = BigInt(lockedMerchantBalanceAmount) > 0n;
+  const hasAvailableMerchantBalance = BigInt(availableMerchantBalanceAmount) > 0n;
   const settlementValid = isPositiveUsdtInput(settlementAmount);
   const settlementSubmitting = settlementCommand.phase === 'submitting';
   const canRequestSettlement = Boolean(
@@ -198,11 +205,26 @@ export function AssetsPage() {
     settlementKey.current = idempotencyKey;
     setSettlementCommand({ phase: 'submitting' });
     try {
-      const projection = await api.createSettlementIntent({
+      const requestedAmount = parseUsdtInput(settlementAmount, '结算申请金额', true);
+      let idempotencyKeyForAttempt = idempotencyKey;
+      let projection = await api.createSettlementIntent({
         rail: 'MERCHANT_USDT',
-        amount: parseUsdtInput(settlementAmount, '结算申请金额', true),
-        idempotencyKey,
+        amount: requestedAmount,
+        idempotencyKey: idempotencyKeyForAttempt,
       }, token);
+      if (settlementIntentNeedsRefresh(projection.intent.deadline)) {
+        idempotencyKeyForAttempt = createIdempotencyKey('settlement-intent');
+        settlementKey.current = idempotencyKeyForAttempt;
+        projection = await api.createSettlementIntent({
+          rail: 'MERCHANT_USDT',
+          amount: requestedAmount,
+          idempotencyKey: idempotencyKeyForAttempt,
+        }, token);
+      }
+      if (settlementIntentNeedsRefresh(projection.intent.deadline)) {
+        settlementKey.current = undefined;
+        throw new CoreApiError('NonceExpired', '结算签名已过期，请重新点击提交。');
+      }
       if (projection.intent.wallet.toLowerCase() !== session.walletAddress.toLowerCase()) {
         throw new CoreApiError('InvalidResponse', '结算意图绑定了其他钱包。');
       }
@@ -219,6 +241,7 @@ export function AssetsPage() {
       setSettlementCommand({ phase: 'success', message: `结算请求已提交，状态：${statusLabel(request.state)}，记录号：${shortId(request.request_id)}` });
       void loadData(true);
     } catch (error) {
+      if (isStaleSettlementAttempt(error)) settlementKey.current = undefined;
       setSettlementCommand({ phase: 'error', message: readableError(error) });
     }
   }
@@ -330,7 +353,20 @@ export function AssetsPage() {
               placeholder="例如 2.00"
               value={settlementAmount}
             />
-            <span className="field-help">系统会校验可申请金额；商家只需要钱包签名，到账转账由平台执行。</span>
+            {hasAvailableMerchantBalance ? (
+              <button
+                className="button secondary inline-field-action"
+                disabled={settlementSubmitting}
+                onClick={() => {
+                  resetSettlementAttempt();
+                  setSettlementAmount(availableMerchantBalanceInput);
+                }}
+                type="button"
+              >
+                一键填入可结算金额 {availableMerchantBalanceInput} USDT
+              </button>
+            ) : null}
+            <span className="field-help">系统会按真实金额校验；建议点上面按钮自动填入。钱包签名 5 分钟内完成，过期后再点一次即可。</span>
           </div>
           <button className="button primary" disabled={!canRequestSettlement} type="submit">
             {settlementSubmitting ? <LoaderCircle aria-hidden="true" className="spin" size={16} /> : <WalletCards aria-hidden="true" size={16} />}
@@ -338,9 +374,9 @@ export function AssetsPage() {
           </button>
         </form>
         {!financeAllowsSettlement && finance ? (
-          <p className="command-block-reason" role="status">当前商家状态为 {merchantStatusLabel(finance.merchant.status)}，系统暂不允许申请结算。请联系平台确认商家状态。</p>
+          <p className="command-block-reason" role="status">{settlementBlockedReason(finance)}</p>
         ) : !hasAvailableMerchantBalance && settlements ? (
-          <p className="command-block-reason" role="status">当前没有可申请结算的货款。</p>
+          <p className="command-block-reason" role="status">{hasLockedMerchantBalance ? `有 ${lockedMerchantBalanceInput} USDT 已付款锁定中，暂时不能提。自提订单要先让买家出示 6 位核销码，商家在履约交付页核销后才会变成可申请；邮寄订单要先完成发货/履约确认。` : '当前没有可申请结算的货款。'}</p>
         ) : null}
         <CommandNotice state={settlementCommand} />
       </section>
@@ -747,6 +783,29 @@ function isPositiveUsdtInput(value: string) {
   }
 }
 
+function sumAssetAmounts(rows: readonly { amount: string }[]) {
+  return rows.reduce((total, row) => total + BigInt(row.amount), 0n).toString();
+}
+
+function formatExactTokenInput(amount: string, decimals = 18) {
+  if (!/^[0-9]+$/.test(amount)) return '';
+  const atomic = BigInt(amount);
+  const base = 10n ** BigInt(decimals);
+  const whole = atomic / base;
+  const fraction = (atomic % base).toString().padStart(decimals, '0').replace(/0+$/, '');
+  return fraction ? `${whole}.${fraction}` : whole.toString();
+}
+
+function settlementIntentNeedsRefresh(deadline: number) {
+  const secondsLeft = deadline - Math.floor(Date.now() / 1000);
+  return secondsLeft <= 180;
+}
+
+function isStaleSettlementAttempt(error: unknown) {
+  return error instanceof CoreApiError
+    && ['NonceExpired', 'InvalidSignature', 'NonceReplay'].includes(error.code);
+}
+
 function CommandNotice({ state }: { state: CommandState }) {
   if (state.phase === 'idle' || state.phase === 'submitting') return null;
   return <p className={`command-notice ${state.phase}`} role={state.phase === 'error' ? 'alert' : 'status'}>{state.message}</p>;
@@ -799,6 +858,25 @@ function merchantStatusLabel(value: string | null | undefined) {
     REJECTED: '已拒绝',
     SUSPENDED: '已暂停',
   } as Record<string, string>)[value ?? ''] ?? (value || '--');
+}
+
+function guaranteeStatusLabel(value: string | null | undefined) {
+  return ({
+    DECISION_BLOCKED: '旧保证金记录，不应阻断经营',
+    BELOW_MINIMUM: '保证金为 0，不应阻断经营',
+    READY: '正常',
+    FROZEN: '已冻结',
+  } as Record<string, string>)[value ?? ''] ?? (value || '--');
+}
+
+function settlementBlockedReason(finance: MerchantFinanceProjection) {
+  if (finance.merchant.status !== 'APPROVED') {
+    return `当前商家状态是 ${merchantStatusLabel(finance.merchant.status)}，还不能申请结算。`;
+  }
+  if (finance.merchant.guarantee_status === 'FROZEN') {
+    return '当前商家已被冻结，系统不允许申请结算。';
+  }
+  return `商家已入驻，保证金状态为 ${guaranteeStatusLabel(finance.merchant.guarantee_status)}，但系统没有返回“申请结算”动作。请刷新后重试；如果仍这样，让平台检查线上 Core 是否已经切到最新包。`;
 }
 
 function statusLabel(value: string) {

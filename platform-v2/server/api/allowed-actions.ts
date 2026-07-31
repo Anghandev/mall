@@ -59,7 +59,7 @@ export function orderAllowedActions(order: OrderProjection, context: ActionConte
   }
   if (
     order.fulfillmentMode === 'DELIVERY'
-    && (operator || merchantActor)
+    && (operator || merchantActor || replacementMerchantActor)
     && (
       order.state === 'PAID'
       || (

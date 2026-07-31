@@ -1044,6 +1044,10 @@ input::placeholder { color: #8b8b82; }
 .seckill-fixed-timers strong { font-size: 15px; }
 .seckill-fixed-timers > svg { align-self: center; justify-self: center; width: 18px; color: var(--gold-dark); }
 .seckill-form-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.seckill-start-time-field { grid-column: span 2; }
+.seckill-quick-start { display: flex; flex-wrap: wrap; gap: 6px; }
+.seckill-quick-start button { min-height: 34px; padding: 0 10px; color: var(--ink-soft); background: var(--surface-muted); border: 1px solid var(--line); border-radius: 4px; font-size: 11px; font-weight: 750; }
+.seckill-quick-start button:hover:not(:disabled) { color: var(--gold-dark); border-color: #d7bf79; }
 .seckill-control-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
 .seckill-control-target, .seckill-control-form { display: grid; align-content: start; gap: 12px; }
 .seckill-control-target input { font-family: var(--font-mono); font-size: 10px; }
@@ -1091,6 +1095,7 @@ input::placeholder { color: #8b8b82; }
 
 @media (max-width: 560px) {
   .seckill-form-grid, .seckill-governance-facts, .seckill-plan-evidence dl, .seckill-winner-review-fields { grid-template-columns: 1fr; }
+  .seckill-start-time-field { grid-column: auto; }
   .seckill-fixed-timers { grid-template-columns: repeat(2, minmax(0, 1fr)) 40px; }
   .seckill-fixed-timers > svg { grid-column: 3; grid-row: 1 / 3; }
   .seckill-session-form > .button { width: 100%; }
@@ -1371,6 +1376,7 @@ input::placeholder { color: #8b8b82; }
 .notification-error div { min-width: 0; }
 .notification-error small { display: block; margin-top: 4px; overflow-wrap: anywhere; font-size: 8px; }
 .notification-notice { padding: 11px 13px; background: var(--success-soft); border: 1px solid #a7cfbb; border-radius: 4px; overflow-wrap: anywhere; }
+.inline-hint-list { display: grid; gap: 4px; margin: 7px 0 0; padding-left: 16px; color: #7a4f00; font-size: 10px; line-height: 1.45; }
 
 @media (max-width: 1180px) {
   .notification-workspace { grid-template-columns: 1fr; }

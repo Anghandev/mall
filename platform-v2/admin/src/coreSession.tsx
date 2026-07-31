@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { CoreApiError, createWalletSession, type CoreSession } from './coreApi';
+import { CoreApiError, clearCachedCoreSessions, createWalletSession, type CoreSession } from './coreApi';
 import { humanizeError } from './display';
 
 type SessionState = {
@@ -21,15 +21,18 @@ export function CoreSessionProvider({ children }: { children: ReactNode }) {
     const provider = window.ethereum;
     if (!provider?.on) return;
     const clearWalletSession = () => {
+      clearCachedCoreSessions();
       setSession(null);
       setStatus('DISCONNECTED');
       setError('钱包账户或链已变更，请重新认证');
     };
     provider.on('accountsChanged', clearWalletSession);
     provider.on('chainChanged', clearWalletSession);
+    provider.on('disconnect', clearWalletSession);
     return () => {
       provider.removeListener?.('accountsChanged', clearWalletSession);
       provider.removeListener?.('chainChanged', clearWalletSession);
+      provider.removeListener?.('disconnect', clearWalletSession);
     };
   }, []);
 
@@ -53,6 +56,7 @@ export function CoreSessionProvider({ children }: { children: ReactNode }) {
       }
     },
     disconnect: () => {
+      clearCachedCoreSessions();
       setSession(null);
       setStatus('DISCONNECTED');
       setError(null);

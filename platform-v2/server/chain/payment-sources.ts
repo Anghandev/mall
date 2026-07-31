@@ -1,4 +1,4 @@
-import { AbiCoder, Contract, JsonRpcProvider, getAddress, keccak256, toUtf8Bytes, type InterfaceAbi } from 'ethers';
+import { AbiCoder, Contract, FetchRequest, JsonRpcProvider, getAddress, keccak256, toUtf8Bytes, type InterfaceAbi } from 'ethers';
 import { NPL_ADDRESS, NPL_USDT_PAIR_ADDRESS, USDT_ADDRESS } from '../api/enums.ts';
 import { CoreError } from '../api/errors.ts';
 import {
@@ -14,6 +14,7 @@ import type {
 
 const ZERO_ADDRESS = `0x${'0'.repeat(40)}`;
 const PUBLIC_RPC_REQUEST_INTERVAL_MS = 350;
+const DEFAULT_PUBLIC_RPC_TIMEOUT_MS = 10_000;
 const PAIR_ABI = [
   'function token0() view returns (address)',
   'function token1() view returns (address)',
@@ -51,11 +52,21 @@ export interface PairReserveReader extends ContractReader {
 export class ResilientBscContractReader implements PairReserveReader {
   readonly #providers: readonly { source: 'PRIMARY' | 'FALLBACK'; provider: JsonRpcProvider }[];
   readonly #requestIntervalMs: number;
+  readonly #requestTimeoutMs: number;
   readonly #providerTails = new Map<JsonRpcProvider, Promise<void>>();
   readonly #networkChecks = new Map<JsonRpcProvider, Promise<void>>();
 
-  constructor(primaryRpcUrl?: string, fallbackRpcUrl?: string, providers?: readonly JsonRpcProvider[]) {
+  constructor(
+    primaryRpcUrl?: string,
+    fallbackRpcUrl?: string,
+    providers?: readonly JsonRpcProvider[],
+    requestTimeoutMs = DEFAULT_PUBLIC_RPC_TIMEOUT_MS,
+  ) {
     this.#requestIntervalMs = providers ? 0 : PUBLIC_RPC_REQUEST_INTERVAL_MS;
+    if (!Number.isSafeInteger(requestTimeoutMs) || requestTimeoutMs < 10 || requestTimeoutMs > 60_000) {
+      throw new CoreError('InvalidRequest', 'BSC RPC contract reader timeout is invalid');
+    }
+    this.#requestTimeoutMs = requestTimeoutMs;
     if (providers && providers.length !== 2) {
       throw new CoreError('ExternalBlocked', 'Primary and fallback BSC RPC are required', 503);
     }
@@ -68,11 +79,12 @@ export class ResilientBscContractReader implements PairReserveReader {
         { source: 'FALLBACK', provider: providers[1]! },
       ];
     } else {
-      const urls = [contractRpcUrl(primaryRpcUrl!), contractRpcUrl(fallbackRpcUrl!)];
-      if (urls[0] === urls[1]) throw new CoreError('ExternalBlocked', 'Primary and fallback BSC RPC endpoints must be distinct', 503);
+      const primary = contractRpcUrl(primaryRpcUrl!);
+      const fallback = contractRpcUrl(fallbackRpcUrl!);
+      if (primary === fallback) throw new CoreError('ExternalBlocked', 'Primary and fallback BSC RPC endpoints must be distinct', 503);
       this.#providers = [
-        { source: 'PRIMARY', provider: new JsonRpcProvider(urls[0], 56, { staticNetwork: true }) },
-        { source: 'FALLBACK', provider: new JsonRpcProvider(urls[1], 56, { staticNetwork: true }) },
+        { source: 'PRIMARY', provider: rpcProvider(primary, requestTimeoutMs) },
+        { source: 'FALLBACK', provider: rpcProvider(fallback, requestTimeoutMs) },
       ];
     }
   }
@@ -218,11 +230,17 @@ export class ResilientBscContractReader implements PairReserveReader {
     await previous.catch(() => undefined);
     try {
       if (this.#requestIntervalMs > 0) await delay(this.#requestIntervalMs);
-      return await operation();
+      return await withTimeout(operation(), this.#requestTimeoutMs);
     } finally {
       release?.();
     }
   }
+}
+
+function rpcProvider(url: string, timeoutMs: number) {
+  const request = new FetchRequest(url);
+  request.timeout = timeoutMs;
+  return new JsonRpcProvider(request, 56, { staticNetwork: true });
 }
 
 export class RpcPaymentNplQuoteSource implements PaymentNplQuoteSource {
@@ -430,6 +448,24 @@ function stableJson(value: unknown): string {
 
 function delay(milliseconds: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function withTimeout<Result>(operation: Promise<Result>, timeoutMs: number) {
+  return new Promise<Result>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new CoreError('ExternalBlocked', 'BSC RPC contract request timed out', 503));
+    }, timeoutMs);
+    operation.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
 }
 
 function stableRpcValue(value: unknown) {

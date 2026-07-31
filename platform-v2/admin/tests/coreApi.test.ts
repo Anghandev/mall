@@ -24,10 +24,14 @@ import {
   recordShipment,
   retryAdminPrintJob,
   searchAdminOrders,
+  signTypedDataWithWallet,
   updateAdminLogisticsWarehouse,
 } from '../src/coreApi';
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  sessionStorage.clear();
+});
 
 describe('coordinated fulfillment Core client', () => {
   it('routes production HTTP requests through the /core prefix', () => {
@@ -121,6 +125,161 @@ describe('coordinated fulfillment Core client', () => {
       method: 'personal_sign',
       params: ['SIWE message', signingWallet],
     });
+  });
+
+  it('signs EIP-712 challenges with the wallet required by Core and fills the domain type', async () => {
+    const signer = '0x1111111111111111111111111111111111111111';
+    const walletRequest = vi.fn(async ({ method }: { method: string; params?: readonly unknown[] }) => {
+      if (method === 'eth_accounts') return [signer];
+      if (method === 'eth_requestAccounts') return [signer];
+      if (method === 'eth_signTypedData_v4') return `0x${'12'.repeat(65)}`;
+      throw new Error(`Unexpected wallet method ${method}`);
+    });
+
+    await expect(signTypedDataWithWallet({ request: walletRequest }, signer, {
+      domain: {
+        name: 'Abu24K Core',
+        version: '1',
+        chainId: 56,
+        verifyingContract: '0x2222222222222222222222222222222222222222',
+      },
+      types: {
+        SensitiveAction: [{ name: 'nonce', type: 'uint256' }],
+      },
+      primaryType: 'SensitiveAction',
+      message: { nonce: '1' },
+    })).resolves.toMatch(/^0x/);
+
+    const signCall = walletRequest.mock.calls.find(([input]) => input.method === 'eth_signTypedData_v4');
+    expect(signCall?.[0].params?.[0]).toBe(signer.toLowerCase());
+    expect(JSON.parse(String(signCall?.[0].params?.[1])).types.EIP712Domain).toEqual([
+      { name: 'name', type: 'string' },
+      { name: 'version', type: 'string' },
+      { name: 'chainId', type: 'uint256' },
+      { name: 'verifyingContract', type: 'address' },
+    ]);
+  });
+
+  it('does not ask for EIP-712 signing when the active wallet is not the required signer', async () => {
+    const walletRequest = vi.fn(async ({ method }: { method: string; params?: readonly unknown[] }) => {
+      if (method === 'eth_accounts') return ['0x1111111111111111111111111111111111111111'];
+      if (method === 'eth_requestAccounts') return ['0x1111111111111111111111111111111111111111'];
+      if (method === 'eth_signTypedData_v4') return `0x${'12'.repeat(65)}`;
+      throw new Error(`Unexpected wallet method ${method}`);
+    });
+
+    await expect(signTypedDataWithWallet({ request: walletRequest }, '0x2222222222222222222222222222222222222222', {
+      domain: {
+        name: 'Abu24K Core',
+        version: '1',
+        chainId: 56,
+        verifyingContract: '0x3333333333333333333333333333333333333333',
+      },
+      types: { SensitiveAction: [{ name: 'nonce', type: 'uint256' }] },
+      primaryType: 'SensitiveAction',
+      message: { nonce: '1' },
+    })).rejects.toMatchObject({
+      code: 'InvalidSignature',
+      message: '当前钱包不是二次确认钱包 0x2222…2222。请退出后台，用这个钱包重新登录后再操作，不要在签名过程中切钱包。',
+    });
+    expect(walletRequest).not.toHaveBeenCalledWith(expect.objectContaining({ method: 'eth_requestAccounts' }));
+    expect(walletRequest).not.toHaveBeenCalledWith(expect.objectContaining({ method: 'eth_signTypedData_v4' }));
+  });
+
+  it('reuses a valid cached platform wallet session without another SIWE signature', async () => {
+    const signingWallet = '0x1111111111111111111111111111111111111111';
+    const token = jwtFor(signingWallet);
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith('/v2/auth/nonce')) return jsonResponse({ message: 'SIWE message', nonce: 'nonce-1', issuedAt: '2026-07-16T00:00:00.000Z', expiresAt: '2026-07-16T00:05:00.000Z' }, 201);
+      if (url.endsWith('/v2/auth/verify')) return jsonResponse({ token, walletAddress: signingWallet, roles: ['ADMIN'] });
+      if (url.endsWith('/v2/admin/orders?limit=1')) return jsonResponse({ orders: [], nextCursor: null });
+      return jsonResponse({ error: { code: 'InvalidRequest', message: `unexpected ${url}` } }, 400);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const provider = {
+      request: vi.fn(async ({ method }: { method: string }) => (
+        method === 'eth_requestAccounts' ? [signingWallet] : '0xsignature'
+      )),
+    };
+
+    await createWalletSession(provider);
+    await createWalletSession(provider);
+
+    expect(provider.request.mock.calls.filter(([input]) => input.method === 'personal_sign')).toHaveLength(1);
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith('/v2/auth/nonce'))).toHaveLength(1);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith('/v2/admin/orders?limit=1'))).toBe(true);
+  });
+
+  it('keeps a cached platform wallet session during a temporary validation outage', async () => {
+    const signingWallet = '0x1111111111111111111111111111111111111111';
+    const token = jwtFor(signingWallet);
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith('/v2/auth/nonce')) return jsonResponse({ message: 'SIWE message', nonce: 'nonce-1', issuedAt: '2026-07-16T00:00:00.000Z', expiresAt: '2026-07-16T00:05:00.000Z' }, 201);
+      if (url.endsWith('/v2/auth/verify')) return jsonResponse({ token, walletAddress: signingWallet, roles: ['ADMIN'] });
+      if (url.endsWith('/v2/admin/orders?limit=1')) return jsonResponse({ error: { code: 'ExternalBlocked', message: 'temporary gateway outage' } }, 503);
+      return jsonResponse({ error: { code: 'InvalidRequest', message: `unexpected ${url}` } }, 400);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const provider = {
+      request: vi.fn(async ({ method }: { method: string }) => (
+        method === 'eth_requestAccounts' ? [signingWallet] : '0xsignature'
+      )),
+    };
+
+    await createWalletSession(provider);
+    await createWalletSession(provider);
+
+    expect(provider.request.mock.calls.filter(([input]) => input.method === 'personal_sign')).toHaveLength(1);
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith('/v2/auth/nonce'))).toHaveLength(1);
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith('/v2/admin/orders?limit=1'))).toHaveLength(1);
+  });
+
+  it('clears a cached platform token rejected by Core and signs in once again', async () => {
+    const signingWallet = '0x1111111111111111111111111111111111111111';
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith('/v2/auth/nonce')) return jsonResponse({ message: `SIWE message ${fetchMock.mock.calls.length}`, nonce: 'nonce-1', issuedAt: '2026-07-16T00:00:00.000Z', expiresAt: '2026-07-16T00:05:00.000Z' }, 201);
+      if (url.endsWith('/v2/auth/verify')) return jsonResponse({ token: jwtFor(signingWallet), walletAddress: signingWallet, roles: ['ADMIN'] });
+      if (url.endsWith('/v2/admin/orders?limit=1')) return jsonResponse({ error: { code: 'Unauthorized', message: 'Expired or invalid session token' } }, 401);
+      return jsonResponse({ error: { code: 'InvalidRequest', message: `unexpected ${url}` } }, 400);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const provider = {
+      request: vi.fn(async ({ method }: { method: string }) => (
+        method === 'eth_requestAccounts' ? [signingWallet] : '0xsignature'
+      )),
+    };
+
+    await createWalletSession(provider);
+    await createWalletSession(provider);
+
+    expect(provider.request.mock.calls.filter(([input]) => input.method === 'personal_sign')).toHaveLength(2);
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith('/v2/auth/nonce'))).toHaveLength(2);
+  });
+
+  it('does not trust cached platform roles when Core rejects the cached token with 403', async () => {
+    const signingWallet = '0x1111111111111111111111111111111111111111';
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith('/v2/auth/nonce')) return jsonResponse({ message: `SIWE message ${fetchMock.mock.calls.length}`, nonce: 'nonce-1', issuedAt: '2026-07-16T00:00:00.000Z', expiresAt: '2026-07-16T00:05:00.000Z' }, 201);
+      if (url.endsWith('/v2/auth/verify')) return jsonResponse({ token: jwtFor(signingWallet), walletAddress: signingWallet, roles: ['ADMIN'] });
+      if (url.endsWith('/v2/admin/orders?limit=1')) return jsonResponse({ error: { code: 'Forbidden', message: 'Wallet is not authorized' } }, 403);
+      return jsonResponse({ error: { code: 'InvalidRequest', message: `unexpected ${url}` } }, 400);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const provider = {
+      request: vi.fn(async ({ method }: { method: string }) => (
+        method === 'eth_requestAccounts' ? [signingWallet] : '0xsignature'
+      )),
+    };
+
+    await createWalletSession(provider);
+    await createWalletSession(provider);
+
+    expect(provider.request.mock.calls.filter(([input]) => input.method === 'personal_sign')).toHaveLength(2);
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith('/v2/auth/nonce'))).toHaveLength(2);
   });
 
   it('fails closed when Core verifies a SIWE session for a different wallet', async () => {
@@ -335,6 +494,15 @@ function jsonResponse(body: unknown, status = 200) {
 
 function hash(digit: string) {
   return `0x${digit.repeat(64)}`;
+}
+
+function jwtFor(walletAddress: string) {
+  const encode = (value: object) => Buffer.from(JSON.stringify(value)).toString('base64url');
+  return [
+    encode({ alg: 'none', typ: 'JWT' }),
+    encode({ sub: walletAddress.toLowerCase(), exp: Math.floor(Date.now() / 1_000) + 900 }),
+    'signature',
+  ].join('.');
 }
 
 function fulfillmentOrder(overrides: Record<string, unknown> = {}) {

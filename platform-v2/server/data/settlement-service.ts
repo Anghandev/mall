@@ -364,7 +364,33 @@ export class SettlementService {
     this.#mainnetMicrotestEntitlement = input.mainnetMicrotestEntitlement;
   }
 
-  createIntent(
+  hasPendingTransfer(input: { asset: 'USDT' | 'NPL'; executorWallet: string }) {
+    const executorWallet = normalizedAddress(input.executorWallet, 'settlement executor wallet');
+    return this.#transactions.transaction(async (executor) => {
+      const pending = await executor.query<{ exists: boolean }>(
+        `SELECT EXISTS (
+           SELECT 1
+           FROM core.settlement_requests request
+           JOIN core.settlement_request_items item ON item.request_id = request.request_id
+           JOIN core.orders orders ON orders.order_id = item.order_id
+           LEFT JOIN core.merchants merchant ON merchant.merchant_id = orders.merchant_id
+           WHERE request.state IN ('REQUESTED','RETRYABLE')
+             AND request.executor_wallet = $1
+             AND request.asset = $2
+             AND item.submitted_journal_id IS NULL
+             AND NOT (
+               request.rail = 'MERCHANT_USDT'
+               AND NOT (merchant.status = 'APPROVED' AND merchant.guarantee_status <> 'FROZEN')
+             )
+           LIMIT 1
+         ) AS exists`,
+        [executorWallet, input.asset],
+      );
+      return pending.rows[0]?.exists === true;
+    });
+  }
+
+  async createIntent(
     actor: FulfillmentActor,
     input: { rail: SettlementRail; amount: string; idempotencyKey: string; correlationId?: string },
   ) {
@@ -375,7 +401,7 @@ export class SettlementService {
     validateAmount(input.amount);
     validateIdempotencyKey(input.idempotencyKey);
     const requestHash = hashJson({ wallet, merchantId: actor.merchantId ?? null, ...input });
-    return this.#transactions.transaction(async (executor) => {
+    const result = await this.#transactions.transaction(async (executor) => {
       const existing = await executor.query<IntentRow>(
         `SELECT * FROM core.settlement_intents
          WHERE wallet_address = $1 AND idempotency_key = $2`,
@@ -400,7 +426,13 @@ export class SettlementService {
             this.#mainnetMicrotestEntitlement!,
           );
         }
-        return loadIntentProjection(executor, existing.rows[0]);
+        if (existing.rows[0].state === 'EXPIRED') return { kind: 'expired' as const };
+        if (existing.rows[0].state === 'CANCELLED') return { kind: 'cancelled' as const };
+        if (existing.rows[0].state === 'ISSUED' && settlementIntentExpired(existing.rows[0], this.#clock())) {
+          await expireSettlementIntent(executor, existing.rows[0].intent_id);
+          return { kind: 'expired' as const };
+        }
+        return { kind: 'projection' as const, value: await loadIntentProjection(executor, existing.rows[0]) };
       }
 
       const rail = railDefinition(input.rail);
@@ -519,8 +551,15 @@ export class SettlementService {
         },
         now,
       });
-      return intentProjection(intent, items, digest, now);
+      return { kind: 'projection' as const, value: intentProjection(intent, items, digest, now) };
     });
+    if (result.kind === 'expired') {
+      throw new CoreError('NonceExpired', 'Settlement request intent expired', 401);
+    }
+    if (result.kind === 'cancelled') {
+      throw new CoreError('UnknownState', 'Settlement intent is not active', 409);
+    }
+    return result.value;
   }
 
   async createGovernedIntent(
@@ -806,36 +845,58 @@ export class SettlementService {
     const wallet = normalizedAddress(actor.walletAddress, 'actor wallet');
     if (!isHash(input.intentId)) throw new CoreError('InvalidRequest', 'Settlement intent ID is invalid');
     const snapshot = await this.#transactions.transaction(async (executor) => {
-      const intent = await loadIntent(executor, input.intentId);
-      return { intent, items: await loadIntentItems(executor, input.intentId) };
+      const intent = await loadIntent(executor, input.intentId, true);
+      if (intent.wallet_address !== wallet) {
+        throw new CoreError('Forbidden', 'Settlement intent is bound to another wallet', 403);
+      }
+      if (intent.state === 'CONSUMED') {
+        return { kind: 'consumed' as const, value: await loadRequestProjectionByIntent(executor, intent.intent_id) };
+      }
+      if (intent.state !== 'ISSUED') throw new CoreError('UnknownState', 'Settlement intent is not active', 409);
+      if (settlementIntentExpired(intent, this.#clock())) {
+        await expireSettlementIntent(executor, intent.intent_id);
+        return { kind: 'expired' as const };
+      }
+      return { kind: 'issued' as const, intent, items: await loadIntentItems(executor, input.intentId) };
     });
-    if (snapshot.intent.wallet_address !== wallet) {
-      throw new CoreError('Forbidden', 'Settlement intent is bound to another wallet', 403);
+    if (snapshot.kind === 'consumed') return snapshot.value;
+    if (snapshot.kind === 'expired') {
+      throw new CoreError('NonceExpired', 'Settlement request intent expired', 401);
     }
     const typedIntent = rowIntent(snapshot.intent);
-    const verified = await verifySettlementRequestSignature(
-      typedIntent,
-      input.signature,
-      this.#clock(),
-    );
+    let verified: Awaited<ReturnType<typeof verifySettlementRequestSignature>>;
+    try {
+      verified = await verifySettlementRequestSignature(
+        typedIntent,
+        input.signature,
+        this.#clock(),
+      );
+    } catch (error) {
+      if (error instanceof CoreError && error.code === 'NonceExpired') {
+        await this.#transactions.transaction(async (executor) => {
+          const intent = await loadIntent(executor, input.intentId, true);
+          if (intent.wallet_address === wallet && intent.state === 'ISSUED') {
+            await expireSettlementIntent(executor, intent.intent_id);
+          }
+        });
+      }
+      throw error;
+    }
     if (verified.digest.toLowerCase() !== snapshot.intent.intent_digest) {
       throw new CoreError('InvalidSignature', 'Settlement intent digest does not match the immutable record', 401);
     }
-
-    return this.#transactions.transaction(async (executor) => {
+    const requestResult = await this.#transactions.transaction(async (executor) => {
       await lockSeckillPrizeFundingMutation(executor);
       const intent = await loadIntent(executor, input.intentId, true);
       if (intent.wallet_address !== wallet) throw new CoreError('Forbidden', 'Settlement wallet mismatch', 403);
-      if (intent.state === 'CONSUMED') return loadRequestProjectionByIntent(executor, intent.intent_id);
+      if (intent.state === 'CONSUMED') {
+        return { kind: 'request' as const, value: await loadRequestProjectionByIntent(executor, intent.intent_id) };
+      }
       if (intent.state !== 'ISSUED') throw new CoreError('UnknownState', 'Settlement intent is not active', 409);
       const now = this.#clock();
-      if (new Date(intent.deadline) < now) {
-        await executor.query(
-          `UPDATE core.settlement_intents SET state = 'EXPIRED'
-           WHERE intent_id = $1 AND state = 'ISSUED'`,
-          [intent.intent_id],
-        );
-        throw new CoreError('NonceExpired', 'Settlement request intent expired', 401);
+      if (settlementIntentExpired(intent, now)) {
+        await expireSettlementIntent(executor, intent.intent_id);
+        return { kind: 'expired' as const };
       }
       const items = await loadIntentItems(executor, intent.intent_id);
       assertIntentSnapshot(snapshot, intent, items, verified.digest);
@@ -972,8 +1033,12 @@ export class SettlementService {
         },
         createdAt: now,
       });
-      return loadRequestProjection(executor, requestId);
+      return { kind: 'request' as const, value: await loadRequestProjection(executor, requestId) };
     });
+    if (requestResult.kind === 'expired') {
+      throw new CoreError('NonceExpired', 'Settlement request intent expired', 401);
+    }
+    return requestResult.value;
   }
 
   list(actor: FulfillmentActor) {
@@ -2349,6 +2414,18 @@ function rowIntent(row: IntentRow): SettlementRequestIntent {
     nonce: row.nonce,
     deadline: Math.floor(new Date(row.deadline).getTime() / 1000),
   };
+}
+
+function settlementIntentExpired(row: IntentRow, now: Date) {
+  return rowIntent(row).deadline < Math.floor(now.getTime() / 1000);
+}
+
+async function expireSettlementIntent(executor: SqlExecutor, intentId: string) {
+  await executor.query(
+    `UPDATE core.settlement_intents SET state = 'EXPIRED'
+     WHERE intent_id = $1 AND state = 'ISSUED'`,
+    [intentId],
+  );
 }
 
 async function lockLedgerAccounts(executor: SqlExecutor, accountIds: string[]) {

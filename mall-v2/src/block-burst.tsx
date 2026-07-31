@@ -225,8 +225,7 @@ export function BlockBurstScreen() {
         if (!signal?.aborted) {
           setReadState({
             kind: "error",
-            message:
-              error instanceof Error ? error.message : "爆区块链上读取失败",
+            message: humanizeBlockBurstError(error, "爆区块链上读取失败"),
           });
         }
       }
@@ -257,8 +256,7 @@ export function BlockBurstScreen() {
         if (!signal?.aborted) {
           setWalletSnapshot({
             kind: "error",
-            message:
-              error instanceof Error ? error.message : "NPL 授权或余额读取失败",
+            message: humanizeBlockBurstError(error, "NPL 授权或余额读取失败"),
           });
         }
       }
@@ -375,7 +373,7 @@ export function BlockBurstScreen() {
       } catch (error) {
         setWriteState({
           kind: "error",
-          message: error instanceof Error ? error.message : "爆区块交易失败",
+          message: humanizeBlockBurstError(error, "爆区块交易失败"),
         });
       }
     },
@@ -392,8 +390,7 @@ export function BlockBurstScreen() {
     } catch (error) {
       setWriteState({
         kind: "error",
-        message:
-          error instanceof Error ? error.message : "爆区块钱包连接失败",
+        message: humanizeBlockBurstError(error, "爆区块钱包连接失败"),
       });
     } finally {
       setWalletConnecting(false);
@@ -422,10 +419,7 @@ export function BlockBurstScreen() {
     } catch (error) {
       setWriteState({
         kind: "error",
-        message:
-          error instanceof Error
-            ? `${error.message}。为避免重复打入，本地仍保留该未确认记录。`
-            : "未确认交易核对失败。",
+        message: `${humanizeBlockBurstError(error, "未确认交易核对失败")}。为避免重复打入，本地仍保留该未确认记录。`,
       });
     }
   }, [config, pendingWrite, refresh, refreshWalletSnapshot]);
@@ -1185,6 +1179,37 @@ function BlockBurstActionButton({
   );
 }
 
+
+function humanizeBlockBurstError(error: unknown, fallback: string) {
+  const raw = error instanceof Error ? error.message : String(error ?? "");
+  const message = raw.trim();
+  if (!message) return `${fallback}。请稍后重试。`;
+  if (/user rejected|user denied|rejected the request|denied transaction/i.test(message)) {
+    return "你已取消钱包操作，未发起交易。";
+  }
+  if (/insufficient funds|intrinsic transaction cost|insufficient balance/i.test(message)) {
+    return "钱包余额不足，无法完成这次链上操作。";
+  }
+  if (/allowance|transfer amount exceeds allowance/i.test(message)) {
+    return "NPL 授权额度不足，请重新授权后再试。";
+  }
+  if (/execution reverted|revert|call exception|missing revert data|Internal JSON-RPC error/i.test(message)) {
+    return `${fallback}：链上合约没有接受这次请求，请刷新链上状态后再试。`;
+  }
+  if (/timeout|network|failed to fetch|fetch failed|ECONN|ETIMEDOUT|ENOTFOUND/i.test(message)) {
+    return `${fallback}：链上节点连接不稳定，请稍后重试。`;
+  }
+  if (/HTTP [0-9]{3}|JSON-RPC|rpc|node|provider/i.test(message)) {
+    return `${fallback}：链上节点暂时不可用，请稍后重试。`;
+  }
+  if (looksTechnicalBlockBurstError(message)) return `${fallback}。请刷新页面后重试。`;
+  return /[一-鿿]/.test(message) ? message : `${fallback}。请刷新页面后重试。`;
+}
+
+function looksTechnicalBlockBurstError(message: string) {
+  return /\b(unexpected|invalid|error|exception|reverted|calldata|method|request|response|transaction|receipt|hash|chain|wallet|account|contract|provider|undefined|null)\b/i.test(message);
+}
+
 function BlockBurstWriteStatus({ state }: { state: WriteState }) {
   if (state.kind === "idle") return null;
   const success = state.kind === "success";
@@ -1281,7 +1306,7 @@ function parseChainId(value: unknown, errors: string[]) {
   if (value === undefined || value === null || value === "") return DEFAULT_CHAIN_ID;
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed <= 0) {
-    errors.push("VITE_BLOCK_BURST_CHAIN_ID 必须是正整数。");
+    errors.push("爆区块链 ID 配置无效，请平台检查 BSC 主网配置。");
     return DEFAULT_CHAIN_ID;
   }
   return parsed;
@@ -1446,7 +1471,7 @@ function blockBurstWriteReason(
 ) {
   if (config.errors.length > 0) return "爆区块配置无效，写链入口关闭。";
   if (!config.proxy || !config.rpcUrl) return "生产合约或只读链上节点未配置，写链入口关闭。";
-  if (!config.writesEnabled) return "VITE_BLOCK_BURST_ENABLE_WRITES 未显式开启，商城不发送爆区块交易。";
+  if (!config.writesEnabled) return "平台还没打开爆区块写链开关，当前不会发起钱包交易。";
   if (readState.kind !== "ready") return "链上状态未确认，商城不发送爆区块交易。";
   if (!walletAddress) return "请先连接爆区块钱包后再执行爆区块写链。";
   if (pendingWrite) return "检测到上一次爆区块交易尚未确认，请先点“检查未确认交易”。";

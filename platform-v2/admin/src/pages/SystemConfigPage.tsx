@@ -1,7 +1,7 @@
 import { systemConfigKeys, type SensitiveApproval, type SystemConfigKey, type SystemConfigProjection } from '@abu24k/core-artifacts';
 import { Ban, CheckCircle2, KeyRound, Plus, RefreshCw, Send, Settings2, ShieldCheck } from 'lucide-react';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { CoreApiError } from '../coreApi';
+import { CoreApiError, signTypedDataWithWallet } from '../coreApi';
 import { commonStateLabel, formatUsdtInput, humanizeError, shortAddress, shortId } from '../display';
 import { useCoreSession } from '../coreSession';
 import { createSystemConfigApprovalChallenge, createSystemConfigVersion, fetchSystemConfigVersions, publishSystemConfigVersion } from '../settlementAdminApi';
@@ -95,8 +95,7 @@ export function SystemConfigPage() {
     await run(async () => {
       const { nonce, deadline } = approvalWindow();
       const challenge = await createSystemConfigApprovalChallenge(selectedId, { nonce, deadline }, session.token);
-      const signature = await window.ethereum!.request({ method: 'eth_signTypedData_v4', params: [challenge.signer, JSON.stringify(challenge.typedData)] });
-      if (typeof signature !== 'string' || !signature) throw invalid('钱包未返回二次签名');
+      const signature = await signTypedDataWithWallet(window.ethereum, challenge.signer, challenge.typedData);
       const approval: SensitiveApproval = {
         action: challenge.action, resourceType: challenge.resourceType, resourceId: challenge.resourceId,
         policyVersion: challenge.policyVersion, oldValueHash: challenge.oldValueHash, newValueHash: challenge.newValueHash,

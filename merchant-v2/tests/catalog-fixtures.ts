@@ -97,6 +97,7 @@ export const managedProduct: ManagedCatalogProduct = {
     stockTotal: '20',
     stockAvailable: '17',
     stockReserved: '1',
+    stockSeckillLocked: '0',
     proposedSeckillInventory: '10',
     lifecycleState: 'DRAFT',
   }],

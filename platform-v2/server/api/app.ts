@@ -322,7 +322,7 @@ export interface FulfillmentTargetApiService {
   createDeliveryTarget(actor: FulfillmentActor, input: DeliveryTargetInput): Promise<unknown>;
   createPickupTarget(actor: FulfillmentActor, input: PickupTargetInput): Promise<unknown>;
   createStore(actor: FulfillmentActor, input: StoreInput): Promise<unknown>;
-  listStores(regionCode?: string): Promise<unknown>;
+  listStores(regionCode?: string, productId?: string): Promise<unknown>;
   listMerchantStores(actor: FulfillmentActor): Promise<unknown>;
   updateStore(actor: FulfillmentActor, storeId: string, input: StoreProfileInput): Promise<unknown>;
   activateStore(actor: FulfillmentActor, storeId: string, input: StoreVersionInput): Promise<unknown>;
@@ -1461,10 +1461,11 @@ async function route(
   }
   if (request.method === 'GET' && url.pathname === '/v2/stores') {
     const regionCode = url.searchParams.get('regionCode') ?? undefined;
+    const productId = url.searchParams.get('productId') ?? undefined;
     sendJson(
       response,
       200,
-      { stores: await dependencies.fulfillmentTargetService.listStores(regionCode) },
+      { stores: await dependencies.fulfillmentTargetService.listStores(regionCode, productId) },
       correlationId,
     );
     return;
@@ -3720,6 +3721,7 @@ function fulfillmentOrderPageQuery(url: URL): OrderPageQuery {
       ? { to: dateParameter(url.searchParams.get('to')!, 'to') }
       : {}),
     ...(url.searchParams.get('skuId') ? { skuId: url.searchParams.get('skuId')! } : {}),
+    ...(url.searchParams.get('wallet') ? { wallet: url.searchParams.get('wallet')! } : {}),
     ...(state ? { state: orderStateParameter(state) } : {}),
     ...(url.searchParams.get('fulfillmentMode')
       ? { fulfillmentMode: fulfillmentMode(url.searchParams.get('fulfillmentMode')) }

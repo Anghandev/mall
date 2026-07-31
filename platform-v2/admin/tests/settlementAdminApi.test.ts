@@ -9,6 +9,7 @@ import {
   createPolicyDraft,
   createSystemConfigApprovalChallenge,
   createSystemConfigVersion,
+  createTakeoverFundingChallenge,
   fetchAdminBusinessDashboard,
   fetchAuditEntries,
   fetchCoverageBreakerActions,
@@ -307,6 +308,33 @@ describe('settlement/admin coordinated Core client', () => {
     }));
   });
 
+  it('requires takeover funding challenges to tell the UI which wallet must sign', async () => {
+    const challenge = takeoverFundingChallenge();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(challenge)));
+
+    await expect(createTakeoverFundingChallenge({
+      caseId: 'takeover-1',
+      requiredUsdt: '1000000',
+      nonce: '9',
+      deadline: '1800000000',
+    }, 'jwt')).resolves.toMatchObject({
+      signer: address('4'),
+      plan: { caseId: 'takeover-1' },
+    });
+  });
+
+  it('rejects takeover funding challenges without the required signer wallet', async () => {
+    const { signer: _signer, ...challenge } = takeoverFundingChallenge();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(challenge)));
+
+    await expect(createTakeoverFundingChallenge({
+      caseId: 'takeover-1',
+      requiredUsdt: '1000000',
+      nonce: '9',
+      deadline: '1800000000',
+    }, 'jwt')).rejects.toMatchObject({ code: 'InvalidResponse' });
+  });
+
   it('renders unavailable metrics as null and binds alert acknowledgement to the exact key', async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request) => String(input).endsWith('/acknowledge')
       ? jsonResponse({ alertKey: 'rpc-height', state: 'ACKNOWLEDGED' })
@@ -487,4 +515,27 @@ function systemConfig() { return { configVersionId: 'config-1', configKey: 'RPC'
 function systemConfigChallenge() {
   const message = { action: 'PUBLISH_SYSTEM_CONFIG', resourceType: 'SYSTEM_CONFIG', resourceId: 'config-1', policyVersion: '2', oldValueHash: hash('1'), newValueHash: hash('2'), executorWallet: address('3'), nonce: '9', deadline: '1800000000' };
   return { configVersionId: 'config-1', signer: address('4'), ...message, typedData: { domain: { name: 'Abu24KV2Core', version: '2', chainId: 56, verifyingContract: address('5') }, types: { SensitiveAction: [] }, primaryType: 'SensitiveAction', message }, digest: hash('6') };
+}
+function takeoverFundingChallenge() {
+  const message = { action: 'FUND_TAKEOVER', resourceType: 'TAKEOVER_CASE', resourceId: 'takeover-1', policyVersion: '2', oldValueHash: hash('1'), newValueHash: hash('2'), executorWallet: address('3'), nonce: '9', deadline: '1800000000' };
+  return {
+    plan: {
+      caseId: 'takeover-1',
+      requiredUsdt: '1000000',
+      guaranteeUsedUsdt: '0',
+      frozenReceivablesUsedUsdt: '0',
+      futureProceedsUsedUsdt: '0',
+      platformAdvanceUsdt: '1000000',
+      merchantDebtUsdt: '1000000',
+      oldValueHash: hash('1'),
+      newValueHash: hash('2'),
+    },
+    signer: address('4'),
+    typedData: {
+      domain: { name: 'Abu24KV2Core', version: '2', chainId: 56, verifyingContract: address('5') },
+      types: { SensitiveAction: [] },
+      primaryType: 'SensitiveAction',
+      message,
+    },
+  };
 }

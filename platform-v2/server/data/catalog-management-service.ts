@@ -92,6 +92,7 @@ interface SkuRow {
   stock_total: string | number;
   stock_available: string | number;
   stock_reserved: string | number;
+  stock_seckill_locked: string | number;
   lifecycle_state: string;
   proposed_seckill_inventory: string | number;
 }
@@ -1497,7 +1498,7 @@ async function loadSkus(executor: SqlExecutor, productId: string) {
   const result = await executor.query<SkuRow>(
     `SELECT sku_id, chain_sku_id, product_id, sku_version, attributes,
        list_price_usdt::text, merchant_cost_usdt::text, stock_total,
-       stock_available, stock_reserved, lifecycle_state, proposed_seckill_inventory
+       stock_available, stock_reserved, stock_seckill_locked, lifecycle_state, proposed_seckill_inventory
      FROM core.skus WHERE product_id = $1 ORDER BY sku_id`,
     [productId],
   );
@@ -1547,6 +1548,7 @@ async function productProjection(executor: SqlExecutor, product: ProductRow, act
       stockTotal: String(sku.stock_total),
       stockAvailable: String(sku.stock_available),
       stockReserved: String(sku.stock_reserved),
+      stockSeckillLocked: String(sku.stock_seckill_locked),
       proposedSeckillInventory: String(sku.proposed_seckill_inventory),
       lifecycleState: sku.lifecycle_state,
     })),

@@ -124,6 +124,97 @@ test('receipt worker fails closed when receipt evidence is not BSC chain 56', as
   assert.equal(repository.finalized.length, 0);
 });
 
+test('receipt worker fails closed on RPC timeout even after a recent successful poll', async () => {
+  const decoder = await AbiEventDecoder.load(BUNDLE_PATH, { PaymentRouterV2: ROUTER });
+  const item = candidate('1');
+  const coldSource = new FlakyReceiptSource();
+  coldSource.fail = true;
+  const coldWorker = new PaymentReceiptWorker({
+    source: coldSource,
+    repository: new MemoryReceiptRepository([item]),
+    decoder,
+    routerAddress: ROUTER,
+  });
+
+  await assert.rejects(coldWorker.pollOnce(), /timed out/);
+  assert.equal(coldWorker.status().healthy, false);
+
+  const source = new FlakyReceiptSource();
+  const worker = new PaymentReceiptWorker({
+    source,
+    repository: new MemoryReceiptRepository([item]),
+    decoder,
+    routerAddress: ROUTER,
+  });
+  await worker.pollOnce();
+  assert.equal(worker.status().healthy, true);
+
+  source.fail = true;
+  await assert.rejects(worker.pollOnce(), /timed out/);
+  assert.equal(worker.status().healthy, false);
+});
+
+test('receipt worker records transient RPC failure for already FINAL audit and pauses new payments', async () => {
+  const decoder = await AbiEventDecoder.load(BUNDLE_PATH, { PaymentRouterV2: ROUTER });
+  const finalItem: PaymentReceiptCandidate = {
+    ...candidate('2'),
+    finalityState: 'FINAL',
+    observedBlockNumber: 20,
+    observedBlockHash: block(20),
+  };
+  const source = new FlakyReceiptSource();
+  source.fail = true;
+  const repository = new MemoryReceiptRepository([finalItem]);
+  const worker = new PaymentReceiptWorker({
+    source,
+    repository,
+    decoder,
+    routerAddress: ROUTER,
+  });
+
+  assert.deepEqual(await worker.pollOnce(), {
+    checked: 1,
+    finalized: 0,
+    confirming: 0,
+    reorged: 0,
+    failed: 0,
+    expired: 0,
+    recoveryRequired: 0,
+  });
+  assert.deepEqual(repository.finalAudits, [{ candidate: finalItem, status: 'TRANSIENT_RPC_FAILURE' }]);
+  assert.deepEqual(worker.status(), {
+    healthy: false,
+    checkedAt: worker.status().checkedAt,
+    errorCode: 'ExternalBlocked',
+  });
+});
+
+test('receipt worker cools down already FINAL audit when receipt lookup is unavailable', async () => {
+  const decoder = await AbiEventDecoder.load(BUNDLE_PATH, { PaymentRouterV2: ROUTER });
+  const finalItem: PaymentReceiptCandidate = {
+    ...candidate('3'),
+    finalityState: 'FINAL',
+    observedBlockNumber: 20,
+    observedBlockHash: block(20),
+  };
+  const repository = new MemoryReceiptRepository([finalItem]);
+  const worker = new PaymentReceiptWorker({
+    source: new MemoryReceiptSource(new Map()),
+    repository,
+    decoder,
+    routerAddress: ROUTER,
+  });
+
+  const result = await worker.pollOnce();
+  assert.equal(result.checked, 1);
+  assert.deepEqual(repository.finalAudits, [{ candidate: finalItem, status: 'TRANSIENT_RPC_FAILURE' }]);
+  assert.deepEqual(worker.status(), {
+    healthy: false,
+    checkedAt: worker.status().checkedAt,
+    errorCode: 'ExternalBlocked',
+  });
+});
+
 test('receipt worker returns pre-finality reorgs to pending without projecting payment', async () => {
   const decoder = await AbiEventDecoder.load(BUNDLE_PATH, { PaymentRouterV2: ROUTER });
   const item = candidate('4');
@@ -384,6 +475,23 @@ class MemoryReceiptSource implements PaymentReceiptSource {
   }
 }
 
+class FlakyReceiptSource implements PaymentReceiptSource {
+  fail = false;
+
+  observe() {
+    if (this.fail) {
+      return Promise.reject(new CoreError('ExternalBlocked', 'Payment receipt RPC operation timed out', 503, {
+        timeoutMs: 10_000,
+      }));
+    }
+    return Promise.resolve({ state: 'NOT_FOUND' as const });
+  }
+
+  unresolvedOrderEvidence() {
+    return Promise.reject(new Error('MissingUsedOrderIdEvidence'));
+  }
+}
+
 class MemoryRpcProvider implements PaymentReceiptRpcProvider {
   head: number;
   receipt: RpcReceipt | null;
@@ -432,6 +540,10 @@ class MemoryReceiptRepository implements PaymentReceiptRepository {
   readonly finalized: FinalPaymentReceipt[] = [];
   readonly reorged: Array<{ candidate: PaymentReceiptCandidate; canonicalBlockHash: string }> = [];
   readonly failed: Array<{ candidate: PaymentReceiptCandidate; reasonCode: string }> = [];
+  readonly finalAudits: Array<{
+    candidate: PaymentReceiptCandidate;
+    status: 'VERIFIED' | 'TRANSIENT_RPC_FAILURE';
+  }> = [];
   readonly expired: string[] = [];
   readonly recoveryRequired: string[] = [];
   readonly candidates: PaymentReceiptCandidate[];
@@ -462,6 +574,11 @@ class MemoryReceiptRepository implements PaymentReceiptRepository {
   recordFinal(input: FinalPaymentReceipt) {
     if (this.finalError) return Promise.reject(this.finalError);
     this.finalized.push(input);
+    return Promise.resolve();
+  }
+
+  recordFinalAudit(candidate: PaymentReceiptCandidate, status: 'VERIFIED' | 'TRANSIENT_RPC_FAILURE') {
+    this.finalAudits.push({ candidate, status });
     return Promise.resolve();
   }
 

@@ -118,6 +118,7 @@ function MallShell() {
                 <button type="button" onClick={() => void runtime.retrySubmission()} disabled={runtime.busy || !runtime.session}>
                   {runtime.pendingSubmission.phase === 'PENDING_CORE_SUBMISSION' ? '重试提交付款凭证' : '刷新支付状态'}
                 </button>
+                <Link to="/assets/orders">补交新交易编号</Link>
               </div>
             </section>
           ) : null}
@@ -190,7 +191,7 @@ function useRouteSeckillCurrentSync(
 }
 
 function DetailRoute({ pathname }: { pathname: string }) {
-  const productMatch = /^\/mall\/products\/([^/]+)$/.exec(pathname);
+  const productMatch = /^\/(?:mall\/)?products\/([^/]+)$/.exec(pathname);
   if (productMatch) {
     return <ProductDetailScreen productId={decodeURIComponent(productMatch[1]!)} />;
   }
@@ -218,6 +219,7 @@ function DetailRoute({ pathname }: { pathname: string }) {
 function getActiveRoot(pathname: string) {
   if (pathname.startsWith('/assets')) return '/assets';
   if (pathname.startsWith('/checkout')) return '/mall';
+  if (pathname.startsWith('/products')) return '/mall';
   if (pathname.startsWith('/stores')) return '/stores';
   if (pathname.startsWith('/block-blast')) return '/block-blast';
   if (pathname.startsWith('/mall')) return '/mall';
@@ -236,7 +238,7 @@ export const mallRuntimeBoundary = Object.freeze({
 export const routeEvidence = Object.freeze({
   primary: tabs.map((tab) => tab.path),
   protected: ['/assets/addresses', '/assets/orders', '/assets/activity', '/assets/rewards', '/assets/notifications'],
-  checkout: ['/mall/products/:productId', '/checkout', '/checkout/review'],
+  checkout: ['/products/:productId', '/checkout', '/checkout/review'],
 });
 
 function shortenAddress(address: string) {

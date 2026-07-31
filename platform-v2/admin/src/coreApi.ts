@@ -36,6 +36,7 @@ import {
   type CoreErrorCode,
   type BreakerScope,
   type DeliveryResult,
+  type Eip712TypedData,
   type EvidenceEnvelopeProjection,
   type ForcedReceiptDecisionResult,
   type FulfillmentOrder,
@@ -104,8 +105,8 @@ export type PlatformFulfillmentCommandResult =
 
 export type WalletProvider = {
   request(input: { method: string; params?: readonly unknown[] }): Promise<unknown>;
-  on?(event: 'accountsChanged' | 'chainChanged', listener: () => void): void;
-  removeListener?(event: 'accountsChanged' | 'chainChanged', listener: () => void): void;
+  on?(event: 'accountsChanged' | 'chainChanged' | 'disconnect', listener: () => void): void;
+  removeListener?(event: 'accountsChanged' | 'chainChanged' | 'disconnect', listener: () => void): void;
 };
 
 export class CoreApiError extends Error {
@@ -565,6 +566,8 @@ export async function createWalletSession(provider: WalletProvider): Promise<Cor
   const accounts = await provider.request({ method: 'eth_requestAccounts' });
   const walletAddress = Array.isArray(accounts) && typeof accounts[0] === 'string' ? accounts[0] : '';
   if (!addressPattern.test(walletAddress)) throw invalidResponse('钱包没有返回有效的 BSC 地址。');
+  const cachedSession = loadCachedCoreSession(walletAddress);
+  if (cachedSession && await verifyCachedCoreSession(cachedSession)) return cachedSession;
 
   const challengeBody = await requestJson('/v2/auth/nonce', {
     body: JSON.stringify({ walletAddress }),
@@ -588,7 +591,170 @@ export async function createWalletSession(provider: WalletProvider): Promise<Cor
   if (session.walletAddress.toLowerCase() !== walletAddress.toLowerCase()) {
     throw invalidResponse('登录会话与签名钱包不一致，请切换到同一个钱包。');
   }
+  saveCachedCoreSession(session);
   return session;
+}
+
+export async function signTypedDataWithWallet(
+  provider: WalletProvider | undefined,
+  signerAddress: string,
+  typedData: Eip712TypedData,
+) {
+  if (!provider) {
+    throw new CoreApiError({ code: 'ConfigurationRequired', message: '未检测到可用的钱包', status: 503 });
+  }
+  if (!addressPattern.test(signerAddress)) {
+    throw invalidResponse('系统返回的二次确认钱包地址无效。', 502);
+  }
+  const expected = signerAddress.toLowerCase();
+  let accounts: unknown;
+  try {
+    accounts = await provider.request({ method: 'eth_accounts' });
+  } catch {
+    accounts = undefined;
+  }
+  if (!Array.isArray(accounts) || typeof accounts[0] !== 'string') {
+    accounts = await provider.request({ method: 'eth_requestAccounts' });
+  }
+  const active = Array.isArray(accounts) && typeof accounts[0] === 'string' ? accounts[0].toLowerCase() : '';
+  if (active !== expected) {
+    throw new CoreApiError({
+      code: 'InvalidSignature',
+      message: `当前钱包不是二次确认钱包 ${shortWalletAddress(expected)}。请退出后台，用这个钱包重新登录后再操作，不要在签名过程中切钱包。`,
+      status: 401,
+    });
+  }
+  let signature: unknown;
+  try {
+    signature = await provider.request({
+      method: 'eth_signTypedData_v4',
+      params: [expected, JSON.stringify(withEip712DomainType(typedData))],
+    });
+  } catch {
+    throw new CoreApiError({ code: 'InvalidResponse', message: '钱包拒绝签名或签名请求失败。', status: 400 });
+  }
+  if (typeof signature !== 'string' || !/^0x(?:[0-9a-fA-F]{2})+$/.test(signature)) {
+    throw new CoreApiError({ code: 'InvalidResponse', message: '钱包没有返回有效签名。', status: 400 });
+  }
+  return signature;
+}
+
+export function withEip712DomainType(typedData: Eip712TypedData): Eip712TypedData {
+  if (Object.prototype.hasOwnProperty.call(typedData.types, 'EIP712Domain')) return typedData;
+  return {
+    ...typedData,
+    types: {
+      EIP712Domain: [
+        { name: 'name', type: 'string' },
+        { name: 'version', type: 'string' },
+        { name: 'chainId', type: 'uint256' },
+        { name: 'verifyingContract', type: 'address' },
+      ],
+      ...typedData.types,
+    },
+  };
+}
+
+function shortWalletAddress(address: string) {
+  return `${address.slice(0, 6)}…${address.slice(-4)}`;
+}
+
+const CORE_SESSION_CACHE_PREFIX = 'abu24k:platform:wallet-session';
+
+function coreSessionCacheKey(walletAddress: string) {
+  return [
+    CORE_SESSION_CACHE_PREFIX,
+    artifactVersion,
+    chainIdentity.chainId,
+    walletAddress.toLowerCase(),
+  ].join(':');
+}
+
+function loadCachedCoreSession(walletAddress: string): CoreSession | null {
+  try {
+    const raw = globalThis.sessionStorage?.getItem(coreSessionCacheKey(walletAddress));
+    if (!raw) return null;
+    const value = JSON.parse(raw) as Partial<CoreSession>;
+    if (!isCachedCoreSession(value, walletAddress)) {
+      clearCachedCoreSession(walletAddress);
+      return null;
+    }
+    return parseSession(value);
+  } catch {
+    clearCachedCoreSession(walletAddress);
+    return null;
+  }
+}
+
+function saveCachedCoreSession(session: CoreSession) {
+  try {
+    globalThis.sessionStorage?.setItem(coreSessionCacheKey(session.walletAddress), JSON.stringify(session));
+  } catch {
+    // Session reuse is best-effort; failure must not block login.
+  }
+}
+
+async function verifyCachedCoreSession(session: CoreSession) {
+  try {
+    await requestJson('/v2/admin/orders?limit=1', authenticated(session.token));
+    return true;
+  } catch (error) {
+    if (isCoreSessionAuthFailure(error) || (error instanceof CoreApiError && error.status === 403)) {
+      clearCachedCoreSession(session.walletAddress);
+      return false;
+    }
+    return true;
+  }
+}
+
+function clearCachedCoreSession(walletAddress: string) {
+  try {
+    globalThis.sessionStorage?.removeItem(coreSessionCacheKey(walletAddress));
+  } catch {
+    // ignore unavailable storage
+  }
+}
+
+export function clearCachedCoreSessions() {
+  try {
+    const storage = globalThis.sessionStorage;
+    if (!storage) return;
+    for (let index = storage.length - 1; index >= 0; index -= 1) {
+      const key = storage.key(index);
+      if (key?.startsWith(`${CORE_SESSION_CACHE_PREFIX}:`)) storage.removeItem(key);
+    }
+  } catch {
+    // ignore unavailable storage
+  }
+}
+
+function isCachedCoreSession(value: Partial<CoreSession>, walletAddress: string): value is CoreSession {
+  const payload = typeof value.token === 'string' ? decodeJwtPayload(value.token) : null;
+  return typeof value.token === 'string'
+    && typeof value.walletAddress === 'string'
+    && value.walletAddress.toLowerCase() === walletAddress.toLowerCase()
+    && Array.isArray(value.roles)
+    && value.roles.length > 0
+    && typeof payload?.exp === 'number'
+    && payload.exp > Math.floor(Date.now() / 1_000) + 60
+    && payload?.sub === walletAddress.toLowerCase();
+}
+
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  const [, payload] = token.split('.');
+  if (!payload) return null;
+  try {
+    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
+    const json = globalThis.atob(normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '='));
+    return JSON.parse(json) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function isCoreSessionAuthFailure(error: unknown) {
+  return error instanceof CoreApiError
+    && (error.status === 401 || /Expired or invalid session token|invalid session token|session token/i.test(error.message));
 }
 
 async function requestJson(path: string, init: RequestInit) {
@@ -619,6 +785,9 @@ async function requestJson(path: string, init: RequestInit) {
   if (response.ok) return body;
 
   const error = readCoreError(body);
+  if (response.status === 401 && /Expired or invalid session token|invalid session token|session token/i.test(error?.message ?? '')) {
+    clearCachedCoreSessions();
+  }
   throw new CoreApiError({
     code: error?.code ?? 'InvalidResponse',
     message: error?.message ?? `后台请求失败（${response.status}）`,

@@ -44,6 +44,8 @@ import {
   deliveryOrder,
   deliveryOrderTarget,
   deliveryTarget,
+  pickupOrder,
+  pickupOrderTarget,
   pickupTarget,
   store,
   storeImageAssetIds,
@@ -160,7 +162,7 @@ describe('Mall V2 payment consumer', () => {
     expect(screen.getByRole('heading', { name: '商品详情' })).toBeTruthy();
     expect(screen.getByText('黑金鞋面，轻量缓震结构。')).toBeTruthy();
     expect(screen.getByText(/41码 \/ 秒杀黑金/)).toBeTruthy();
-    expect(screen.getByText(/普通结算禁用/)).toBeTruthy();
+    expect(screen.getByText(/活动规格普通购买暂停，其他普通规格可继续购买/)).toBeTruthy();
     const productVideo = await screen.findByLabelText(`${product.title} 商品视频`);
     expect(productVideo.tagName).toBe('VIDEO');
     expect(productVideo.getAttribute('src')).toBe(publicMediaAccess(product.videoAssetId!).readUrl);
@@ -248,6 +250,39 @@ describe('Mall V2 payment consumer', () => {
     expect(screen.getByText(/测试入口不作为生产入口/)).toBeTruthy();
     for (const label of ['打入 NPL', '领取本金', '领取奖励', '爆区块']) {
       expect(screen.getByRole('button', { name: label }).hasAttribute('disabled')).toBe(true);
+    }
+  });
+
+  it('shows block burst RPC failures in plain Chinese', async () => {
+    vi.stubEnv('VITE_BLOCK_BURST_CHAIN_ID', '56');
+    vi.stubEnv('VITE_BLOCK_BURST_NPL_TOKEN', BLOCK_BURST_NPL);
+    vi.stubEnv('VITE_BLOCK_BURST_PROXY', BLOCK_BURST_PROXY);
+    vi.stubEnv('VITE_BLOCK_BURST_RPC_URL', '/block-burst/rpc');
+    vi.stubEnv('VITE_BLOCK_BURST_ENABLE_WRITES', 'false');
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
+      const body = JSON.parse(String(init?.body ?? '{}')) as { method: string };
+      if (body.method === 'eth_chainId') {
+        return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: '0x38' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, error: { message: 'execution reverted: Pool is paused' } }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+
+    try {
+      renderAt('/block-blast', readyServices());
+
+      expect(await screen.findByRole('heading', { name: '链上读取失败' })).toBeTruthy();
+      expect(screen.getByText(/链上合约没有接受这次请求/)).toBeTruthy();
+      expect(document.body.textContent).not.toMatch(/execution reverted|Pool is paused/i);
+      expect(document.body.textContent).not.toMatch(/VITE_BLOCK_BURST_ENABLE_WRITES/);
+    } finally {
+      fetchSpy.mockRestore();
+      vi.unstubAllEnvs();
     }
   });
 
@@ -606,7 +641,8 @@ describe('Mall V2 payment consumer', () => {
     await user.click(screen.getByRole('button', { name: '连接钱包' }));
     await user.click(screen.getByRole('button', { name: '编辑' }));
     await user.click(screen.getByRole('button', { name: '保存修改' }));
-    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('Buyer address version changed'));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('系统返回异常，请刷新或联系平台处理。'));
+    expect(screen.queryByText(/Buyer address version changed/i)).toBeNull();
     expect(screen.getByRole('heading', { name: '地址同步失败' })).toBeTruthy();
   });
 
@@ -684,6 +720,25 @@ describe('Mall V2 payment consumer', () => {
     expect(services.wallet.inspectApprovals).toHaveBeenCalledTimes(1);
   });
 
+  it('does not open payment review when Core returns a quote for a different checkout selection', async () => {
+    const user = userEvent.setup();
+    const mismatchedQuote = paymentQuote();
+    mismatchedQuote.intent.fulfillmentTargetHash = `0x${'d'.repeat(64)}`;
+    mismatchedQuote.routerCall.intent.fulfillmentTargetHash = mismatchedQuote.intent.fulfillmentTargetHash;
+    const createOrdinaryQuote = vi.fn<CoreClient['createOrdinaryQuote']>().mockResolvedValue(mismatchedQuote);
+    renderAt('/mall', readyServices({ createOrdinaryQuote }));
+
+    await screen.findByRole('heading', { name: product.title });
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+    await openProductCheckout(user);
+    await user.click(screen.getByRole('button', { name: /42码 \/ 黑金/ }));
+    await prepareDeliveryTarget(user);
+    await user.click(screen.getByRole('button', { name: '生成付款报价' }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain('系统报价和当前选择不一致');
+    expect(screen.queryByRole('heading', { name: '付款明细' })).toBeNull();
+  });
+
   it('keeps checkout usable while account panels continue syncing', async () => {
     const user = userEvent.setup();
     const quote = paymentQuote();
@@ -707,6 +762,23 @@ describe('Mall V2 payment consumer', () => {
 
     await screen.findByRole('heading', { name: '付款明细' });
     expect(createOrdinaryQuote).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not show unknown English checkout errors to buyers', async () => {
+    const user = userEvent.setup();
+    const createOrdinaryQuote = vi.fn<CoreClient['createOrdinaryQuote']>().mockRejectedValue(new Error('Order not found'));
+    renderAt('/mall', readyServices({ createOrdinaryQuote }));
+
+    await screen.findByRole('heading', { name: product.title });
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+    await screen.findByRole('button', { name: /0x1111/ });
+    await openProductCheckout(user);
+    await user.click(screen.getByRole('button', { name: /42码 \/ 黑金/ }));
+    await prepareDeliveryTarget(user);
+    await user.click(screen.getByRole('button', { name: '生成付款报价' }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain('系统返回异常，请刷新或联系平台处理。');
+    expect(screen.queryByText(/Order not found/i)).toBeNull();
   });
 
   it('reuses an unexpired wallet session after refresh instead of requesting another SIWE challenge', async () => {
@@ -873,7 +945,7 @@ describe('Mall V2 payment consumer', () => {
     await user.click(screen.getByRole('button', { name: /42码 \/ 黑金/ }));
     await prepareDeliveryTarget(user);
     await user.click(screen.getByRole('button', { name: '生成付款报价' }));
-    await user.click(screen.getByRole('button', { name: /授权并支付/ }));
+    await user.click(await screen.findByRole('button', { name: /授权并支付/ }));
 
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('当前暂时不能付款'));
     expect(getBootstrap).toHaveBeenCalledTimes(2);
@@ -947,7 +1019,7 @@ describe('Mall V2 payment consumer', () => {
     await user.click(screen.getByRole('button', { name: /42码 \/ 黑金/ }));
     await prepareDeliveryTarget(user);
     await user.click(screen.getByRole('button', { name: '生成付款报价' }));
-    await user.click(screen.getByRole('button', { name: /授权并支付/ }));
+    await user.click(await screen.findByRole('button', { name: /授权并支付/ }));
 
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('网络连接失败，请检查网络后重试。'));
     expect(screen.getByRole('button', { name: '重试提交付款凭证' })).toBeTruthy();
@@ -960,7 +1032,145 @@ describe('Mall V2 payment consumer', () => {
     expect(submitPayment).toHaveBeenCalledTimes(2);
     expect(getPayment).toHaveBeenCalledTimes(1);
     expect(services.wallet.broadcastPayment).toHaveBeenCalledTimes(1);
-    expect(clearSubmission).toHaveBeenCalledTimes(1);
+    expect(clearSubmission).not.toHaveBeenCalled();
+    expect(saveSubmission).toHaveBeenLastCalledWith(pendingRecord(quote.orderId, HASH_3, 'AWAITING_PROJECTION'));
+  });
+
+  it('refreshes buyer login and submits the same tx hash when payment sync token expires', async () => {
+    globalThis.sessionStorage?.clear();
+    const user = userEvent.setup();
+    const quote = paymentQuote();
+    const authenticate = vi.fn<CoreClient['authenticate']>()
+      .mockResolvedValueOnce({ token: 'buyer-session', walletAddress: BUYER, roles: ['BUYER'] })
+      .mockResolvedValueOnce({ token: 'buyer-session-refreshed', walletAddress: BUYER, roles: ['BUYER'] });
+    const submitPayment = vi.fn<CoreClient['submitPayment']>()
+      .mockRejectedValueOnce(new CoreClientError('Unauthorized', 'Expired or invalid session token'))
+      .mockResolvedValue({ orderId: quote.orderId, txHash: HASH_3, state: 'SUBMITTED' });
+    const getPayment = vi.fn<CoreClient['getPayment']>().mockResolvedValue({
+      ...quote,
+      state: 'SUBMITTED',
+      submittedTxHash: HASH_3,
+      finality: null,
+    });
+    const services = readyServices({
+      authenticate,
+      createOrdinaryQuote: vi.fn().mockResolvedValue(quote),
+      submitPayment,
+      getPayment,
+    });
+    services.walletWritesAuthorized = true;
+    renderAt('/mall', services);
+
+    await screen.findByRole('heading', { name: product.title });
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+    await openProductCheckout(user);
+    await user.click(screen.getByRole('button', { name: /42码 \/ 黑金/ }));
+    await prepareDeliveryTarget(user);
+    await user.click(screen.getByRole('button', { name: '生成付款报价' }));
+    await user.click(await screen.findByRole('button', { name: /授权并支付/ }));
+
+    await waitFor(() => expect(submitPayment).toHaveBeenCalledTimes(2));
+    expect(submitPayment.mock.calls[0]).toEqual(['buyer-session', { orderId: quote.orderId, txHash: HASH_3 }]);
+    expect(submitPayment.mock.calls[1]).toEqual(['buyer-session-refreshed', { orderId: quote.orderId, txHash: HASH_3 }]);
+    expect(services.wallet.broadcastPayment).toHaveBeenCalledTimes(1);
+    expect(getPayment).toHaveBeenCalledWith('buyer-session-refreshed', quote.orderId);
+    expect(screen.queryByText(/登录已过期/)).toBeNull();
+  });
+
+  it('keeps payment tracking until Core returns final 15-confirmation payment', async () => {
+    const user = userEvent.setup();
+    const quote = paymentQuote();
+    const finalProjection = {
+      ...quote,
+      state: 'PAID' as const,
+      submittedTxHash: HASH_3,
+      finality: {
+        transactionHash: HASH_3,
+        replacementForTxHash: null,
+        blockNumber: 123456,
+        blockHash: `0x${'4'.repeat(64)}`,
+        confirmations: 15,
+        requiredConfirmations: 15 as const,
+        state: 'FINAL' as const,
+        canonicalBlock: true,
+        receiptStatus: 1 as const,
+        classification: 'ORDINARY' as const,
+      },
+    };
+    const services = readyServices({
+      createOrdinaryQuote: vi.fn().mockResolvedValue(quote),
+      submitPayment: vi.fn().mockResolvedValue({ orderId: quote.orderId, txHash: HASH_3, state: 'SUBMITTED' }),
+      getPayment: vi.fn()
+        .mockResolvedValueOnce({ ...quote, state: 'SUBMITTED' as const, submittedTxHash: HASH_3, finality: null })
+        .mockResolvedValueOnce(finalProjection),
+    });
+    services.walletWritesAuthorized = true;
+    const clearSubmission = vi.spyOn(services.submissionStore, 'clear');
+    renderAt('/mall', services);
+
+    await screen.findByRole('heading', { name: product.title });
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+    await openProductCheckout(user);
+    await user.click(screen.getByRole('button', { name: /42码 \/ 黑金/ }));
+    await prepareDeliveryTarget(user);
+    await user.click(screen.getByRole('button', { name: '生成付款报价' }));
+    await user.click(await screen.findByRole('button', { name: /授权并支付/ }));
+
+    await waitFor(() => expect(screen.getAllByRole('button', { name: '刷新支付状态' }).length).toBeGreaterThan(0));
+    expect(clearSubmission).not.toHaveBeenCalled();
+    await user.click(screen.getAllByRole('button', { name: '刷新支付状态' })[0]!);
+    await waitFor(() => expect(clearSubmission).toHaveBeenCalledTimes(1));
+    expect(screen.getByText('15/15')).toBeTruthy();
+  });
+
+
+  it('clears the previous paid transaction latch when a buyer creates a new quote for the same product', async () => {
+    const user = userEvent.setup();
+    const quote = paymentQuote();
+    const finalProjection = {
+      ...quote,
+      state: 'PAID' as const,
+      submittedTxHash: HASH_3,
+      finality: {
+        transactionHash: HASH_3,
+        replacementForTxHash: null,
+        blockNumber: 123456,
+        blockHash: `0x${'4'.repeat(64)}`,
+        confirmations: 15,
+        requiredConfirmations: 15 as const,
+        state: 'FINAL' as const,
+        canonicalBlock: true,
+        receiptStatus: 1 as const,
+        classification: 'ORDINARY' as const,
+      },
+    };
+    const createOrdinaryQuote = vi.fn<CoreClient['createOrdinaryQuote']>().mockResolvedValue(quote);
+    const submitPayment = vi.fn<CoreClient['submitPayment']>()
+      .mockResolvedValue({ orderId: quote.orderId, txHash: HASH_3, state: 'SUBMITTED' });
+    const services = readyServices({
+      createOrdinaryQuote,
+      submitPayment,
+      getPayment: vi.fn().mockResolvedValue(finalProjection),
+    });
+    services.walletWritesAuthorized = true;
+    renderAt('/mall', services);
+
+    await screen.findByRole('heading', { name: product.title });
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+    await openProductCheckout(user);
+    await user.click(screen.getByRole('button', { name: /42码 \/ 黑金/ }));
+    await prepareDeliveryTarget(user);
+    await user.click(screen.getByRole('button', { name: '生成付款报价' }));
+    await user.click(await screen.findByRole('button', { name: /授权并支付/ }));
+    await waitFor(() => expect(screen.getByText('15/15')).toBeTruthy());
+
+    await user.click(screen.getByLabelText('返回上一页'));
+    await user.click(screen.getByRole('button', { name: '生成付款报价' }));
+    await user.click(await screen.findByRole('button', { name: /授权并支付/ }));
+
+    await waitFor(() => expect(services.wallet.broadcastPayment).toHaveBeenCalledTimes(2));
+    expect(createOrdinaryQuote).toHaveBeenCalledTimes(2);
+    expect(submitPayment).toHaveBeenCalledTimes(2);
   });
 
   it('rehydrates a persisted pending hash and resumes without rebroadcasting', async () => {
@@ -986,6 +1196,51 @@ describe('Mall V2 payment consumer', () => {
     expect(document.body.textContent).not.toContain(HASH_3);
   });
 
+  it('keeps pending payment recovery visible when reconnecting the wallet is cancelled', async () => {
+    const user = userEvent.setup();
+    const quote = paymentQuote();
+    const pending = pendingRecord(quote.orderId, HASH_3);
+    const services = readyServices({
+      getPayment: vi.fn().mockResolvedValue({ ...quote, state: 'SUBMITTED', submittedTxHash: HASH_3, finality: null }),
+    });
+    services.submissionStore.load = (walletAddress) => walletAddress.toLowerCase() === BUYER ? pending : null;
+    services.wallet.connect = vi.fn()
+      .mockResolvedValueOnce(BUYER)
+      .mockRejectedValueOnce(new Error('User rejected wallet connection'));
+    renderAt('/checkout/review', services);
+
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+    await screen.findByText('钱包付款待恢复跟踪');
+    await user.click(screen.getByRole('button', { name: /重新验证或切换钱包/ }));
+
+    await waitFor(() => expect(services.wallet.connect).toHaveBeenCalledTimes(2));
+    expect(screen.getByText('钱包付款待恢复跟踪')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '重试提交付款凭证' })).toBeTruthy();
+  });
+
+  it('fills the latest tx hash, not the replacement field, when using the pending payment recovery shortcut', async () => {
+    const user = userEvent.setup();
+    const quote = paymentQuote();
+    const pending = pendingRecord(quote.orderId, HASH_3);
+    const submitPayment = vi.fn<CoreClient['submitPayment']>().mockResolvedValue({ ...pending, state: 'SUBMITTED' });
+    const services = readyServices({
+      submitPayment,
+      getPayment: vi.fn().mockResolvedValue({ ...quote, state: 'SUBMITTED', submittedTxHash: HASH_3, finality: null }),
+    });
+    services.submissionStore.load = (walletAddress) => walletAddress.toLowerCase() === BUYER ? pending : null;
+    renderAt('/assets/orders', services);
+
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+    await user.click(await screen.findByText('已经付款但订单没同步？'));
+    await user.click(await screen.findByRole('button', { name: '填入当前待恢复订单' }));
+
+    expect((screen.getByLabelText('订单号') as HTMLInputElement).value).toBe(quote.orderId);
+    expect((screen.getByLabelText('最新钱包交易编号') as HTMLInputElement).value).toBe(HASH_3);
+    expect((screen.getByLabelText('原交易编号（加速或替换过才填）') as HTMLInputElement).value).toBe('');
+    await user.click(screen.getByRole('button', { name: '提交给系统确认' }));
+    await waitFor(() => expect(submitPayment).toHaveBeenCalledWith('buyer-session', { orderId: quote.orderId, txHash: HASH_3 }));
+  });
+
   it('keeps a submitted hash until the Core projection is recoverable', async () => {
     const user = userEvent.setup();
     const quote = paymentQuote();
@@ -1009,9 +1264,10 @@ describe('Mall V2 payment consumer', () => {
     await user.click(screen.getByRole('button', { name: /42码 \/ 黑金/ }));
     await prepareDeliveryTarget(user);
     await user.click(screen.getByRole('button', { name: '生成付款报价' }));
-    await user.click(screen.getByRole('button', { name: /授权并支付/ }));
+    await user.click(await screen.findByRole('button', { name: /授权并支付/ }));
 
-    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('projection unavailable'));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('系统返回异常，请刷新或联系平台处理。'));
+    expect(screen.queryByText(/projection unavailable/i)).toBeNull();
     expect(screen.getAllByRole('button', { name: '刷新支付状态' }).length).toBeGreaterThan(0);
     expect(saveSubmission).toHaveBeenLastCalledWith(pendingRecord(quote.orderId, HASH_3, 'AWAITING_PROJECTION'));
     expect(submitPayment).toHaveBeenCalledTimes(1);
@@ -1279,8 +1535,69 @@ describe('Mall V2 payment consumer', () => {
     }));
   });
 
-  it('keeps checkout closed when the confirmed LIVE session mismatches the catalog overlay', async () => {
+  it('blocks stale seckill checkout quotes when the selected activity SKU is sold out', async () => {
+    const createSeckillQuote = vi.fn<CoreClient['createSeckillQuote']>().mockResolvedValue(seckillQuote());
+    const soldOutProduct = {
+      ...product,
+      skus: product.skus.map((sku) => sku.seckill ? {
+        ...sku,
+        seckill: {
+          ...sku.seckill,
+          inventory: { ...sku.seckill.inventory, available: '0' },
+        },
+      } : sku),
+    };
     const user = userEvent.setup();
+    renderAt('/seckill', readyServices({
+      getCurrentSeckillSession: vi.fn().mockResolvedValue(seckillSession()),
+      listCatalog: vi.fn().mockResolvedValue([soldOutProduct]),
+      createSeckillQuote,
+    }));
+
+    await user.click(await screen.findByRole('button', { name: '立即抢购' }));
+    await user.click(screen.getByRole('button', { name: '我已阅读并确认规则' }));
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+
+    const quoteButton = await screen.findByRole('button', { name: '生成秒杀报价' });
+    expect((quoteButton as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText('本场已抢完，请返回秒杀大厅查看下一场。')).toBeTruthy();
+    await user.click(quoteButton);
+    expect(createSeckillQuote).not.toHaveBeenCalled();
+  });
+
+  it('limits seckill checkout quantity by the seckill remaining inventory', async () => {
+    const createSeckillQuote = vi.fn<CoreClient['createSeckillQuote']>().mockResolvedValue(seckillQuote());
+    const limitedProduct = {
+      ...product,
+      skus: product.skus.map((sku) => sku.seckill ? {
+        ...sku,
+        stockAvailable: '67',
+        seckill: {
+          ...sku.seckill,
+          inventory: { ...sku.seckill.inventory, available: '1' },
+        },
+      } : sku),
+    };
+    const user = userEvent.setup();
+    renderAt('/seckill', readyServices({
+      getCurrentSeckillSession: vi.fn().mockResolvedValue(seckillSession({
+        inventory: { total: '100', sold: '99', reserved: '0', available: '1' },
+      })),
+      listCatalog: vi.fn().mockResolvedValue([limitedProduct]),
+      createSeckillQuote,
+    }));
+
+    await user.click(await screen.findByRole('button', { name: '立即抢购' }));
+    await user.click(screen.getByRole('button', { name: '我已阅读并确认规则' }));
+
+    const increase = screen.getByRole('button', { name: '增加数量' }) as HTMLButtonElement;
+    expect(screen.getByLabelText('当前数量').textContent).toContain('1');
+    expect(increase.disabled).toBe(true);
+    await user.click(increase);
+    expect(screen.getByLabelText('当前数量').textContent).toContain('1');
+  });
+
+  it('keeps seckill entry disabled when the confirmed LIVE session mismatches the catalog overlay', async () => {
     const mismatchedProduct = {
       ...product,
       skus: product.skus.map((sku) => sku.seckill ? {
@@ -1293,10 +1610,27 @@ describe('Mall V2 payment consumer', () => {
       listCatalog: vi.fn().mockResolvedValue([mismatchedProduct]),
     }));
 
-    await user.click(await screen.findByRole('button', { name: '立即抢购' }));
-    await user.click(screen.getByRole('button', { name: '我已阅读并确认规则' }));
+    expect(await screen.findByText(/活动进行中/)).toBeTruthy();
+    const configure = await screen.findByRole('button', { name: '立即抢购' });
+    expect((configure as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText('当前商品还没准备好，暂时不能抢')).toBeTruthy();
+    expect(screen.queryByRole('dialog', { name: '进入配置前确认规则' })).toBeNull();
+    expect(screen.queryByRole('heading', { name: '秒杀订单配置' })).toBeNull();
+  });
 
-    expect((await screen.findByRole('alert')).textContent).toContain('overlay 不一致');
+  it('tells buyers to recover the previous payment before entering seckill checkout again', async () => {
+    const services = readyServices({
+      getCurrentSeckillSession: vi.fn().mockResolvedValue(seckillSession()),
+    });
+    services.submissionStore.save(pendingRecord(seckillQuote().orderId, HASH_3));
+    const user = userEvent.setup();
+    renderAt('/seckill', services);
+
+    expect(await screen.findByText(/活动进行中/)).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+    const configure = await screen.findByRole('button', { name: '立即抢购' });
+    expect((configure as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText('你有一笔钱包付款还没提交给系统，请先恢复跟踪或刷新支付状态。')).toBeTruthy();
     expect(screen.queryByRole('heading', { name: '秒杀订单配置' })).toBeNull();
   });
 
@@ -1362,11 +1696,50 @@ describe('Mall V2 payment consumer', () => {
     expect(screen.queryByRole('img', { name: new RegExp(`${store.name} 门店图片`) })).toBeNull();
   });
 
+  it('does not show stale all-merchant stores while loading product pickup stores', async () => {
+    const user = userEvent.setup();
+    const otherMerchantStore = {
+      ...store,
+      storeId: 'store-other-merchant',
+      merchantId: 'merchant-other',
+      name: '其他商家自提店',
+    };
+    let resolveAllStores!: (stores: ReadonlyArray<typeof store>) => void;
+    let resolveProductStores!: (stores: ReadonlyArray<typeof store>) => void;
+    const allStores = new Promise<ReadonlyArray<typeof store>>((resolve) => {
+      resolveAllStores = resolve;
+    });
+    const productStores = new Promise<ReadonlyArray<typeof store>>((resolve) => {
+      resolveProductStores = resolve;
+    });
+    const listStores = vi.fn<CoreClient['listStores']>(async (_regionCode, productId) => (
+      productId ? productStores : allStores
+    ));
+    renderAt('/mall', readyServices({ listStores }));
+
+    await screen.findByRole('heading', { name: product.title });
+    await waitFor(() => expect(listStores).toHaveBeenCalledWith());
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+    await openProductCheckout(user);
+    await user.click(screen.getByRole('button', { name: /42码 \/ 黑金/ }));
+    await user.click(screen.getByRole('button', { name: '到店自提' }));
+
+    await waitFor(() => expect(listStores).toHaveBeenCalledWith(undefined, product.productId));
+    await act(async () => { resolveAllStores([otherMerchantStore]); });
+    expect(screen.queryByRole('heading', { name: otherMerchantStore.name })).toBeNull();
+    expect(screen.queryByRole('button', { name: `选择 ${otherMerchantStore.name}` })).toBeNull();
+
+    await act(async () => { resolveProductStores([store]); });
+    expect(await screen.findByRole('button', { name: `选择 ${store.name}` })).toBeTruthy();
+  });
+
   it('binds a pickup target only through a published Core store snapshot', async () => {
     const user = userEvent.setup();
     const quote = paymentQuote('PICKUP');
     const createPickupTarget = vi.fn<CoreClient['createPickupTarget']>().mockResolvedValue(pickupTarget);
+    const listStores = vi.fn<CoreClient['listStores']>().mockResolvedValue([store]);
     const services = readyServices({
+      listStores,
       createPickupTarget,
       createOrdinaryQuote: vi.fn().mockResolvedValue(quote),
     });
@@ -1377,6 +1750,7 @@ describe('Mall V2 payment consumer', () => {
     await openProductCheckout(user);
     await user.click(screen.getByRole('button', { name: /42码 \/ 黑金/ }));
     await user.click(screen.getByRole('button', { name: '到店自提' }));
+    await waitFor(() => expect(listStores).toHaveBeenCalledWith(undefined, product.productId));
     expect(await screen.findByText(`营业时间：${store.businessHours}`)).toBeTruthy();
     expect(await screen.findAllByRole('img', { name: new RegExp(`${store.name} 门店图片`) })).toHaveLength(storeImageAssetIds.length);
     const nearestSelection = await screen.findByRole('button', { name: `选择 ${store.name}` });
@@ -1394,6 +1768,28 @@ describe('Mall V2 payment consumer', () => {
     expect(within(screen.getByRole('region', { name: '完整自提信息' })).getByText(store.businessHours)).toBeTruthy();
     expect(screen.getByText(/营业时间内到店/)).toBeTruthy();
     expect(screen.getByText('210202')).toBeTruthy();
+  });
+
+  it('does not mark pickup as verified when Core returns a different merchant store snapshot', async () => {
+    const user = userEvent.setup();
+    const wrongMerchantTarget = {
+      ...pickupTarget,
+      store: { ...pickupTarget.store, merchantId: 'merchant-other' },
+    };
+    const createPickupTarget = vi.fn<CoreClient['createPickupTarget']>().mockResolvedValue(wrongMerchantTarget);
+    const listStores = vi.fn<CoreClient['listStores']>().mockResolvedValue([store]);
+    renderAt('/mall', readyServices({ listStores, createPickupTarget }));
+
+    await screen.findByRole('heading', { name: product.title });
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+    await openProductCheckout(user);
+    await user.click(screen.getByRole('button', { name: /42码 \/ 黑金/ }));
+    await user.click(screen.getByRole('button', { name: '到店自提' }));
+    await user.click(await screen.findByRole('button', { name: `选择 ${store.name}` }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain('系统返回的自提门店和当前选择不一致');
+    expect(screen.queryByText(`${store.name} · ${store.address}`)).toBeNull();
+    expect(screen.getByRole('button', { name: '生成付款报价' }).hasAttribute('disabled')).toBe(true);
   });
 
   it('fails closed when Core cannot bind the buyer saved address', async () => {
@@ -1506,8 +1902,9 @@ describe('Mall V2 payment consumer', () => {
     renderAt('/assets/orders', services);
 
     await user.click(screen.getByRole('button', { name: '连接钱包' }));
-    expect(await screen.findByText('已提交')).toBeTruthy();
-    expect(document.body.textContent).not.toContain(deliveryOrder.paymentTxHash!);
+    expect(await screen.findByText('钱包付款')).toBeTruthy();
+    expect(screen.getByTitle(deliveryOrder.paymentTxHash!)).toBeTruthy();
+    expect(screen.getByRole('button', { name: /复制/ })).toBeTruthy();
     expect(screen.getByText('数量').nextElementSibling?.textContent).toBe(deliveryOrder.quantity);
     await user.click(screen.getByRole('button', { name: '加载更多订单' }));
     await screen.findByText('秒杀 · 快递订单');
@@ -1607,6 +2004,196 @@ describe('Mall V2 payment consumer', () => {
     expect(createOrderActionEvidence).toHaveBeenCalledTimes(1);
     expect(requestExchange).toHaveBeenCalledTimes(2);
     expect(requestExchange.mock.calls[0]).toEqual(requestExchange.mock.calls[1]);
+  });
+
+
+  it('lets the buyer generate and see a full pickup code before store verification', async () => {
+    globalThis.localStorage?.clear();
+    const user = userEvent.setup();
+    const registerablePickupOrder = {
+      ...pickupOrder,
+      state: 'PAID' as const,
+      deliveredAt: null,
+      fulfilledAt: null,
+      allowedActions: [
+        { action: 'REGISTER_PICKUP_CREDENTIAL' as const, enabled: true },
+        { action: 'OPEN_TAKEOVER' as const, enabled: false, reasonCode: 'PickupTakeoverDecisionBlocked' as const },
+      ],
+    };
+    const registerPickupCredential = vi.fn<CoreClient['registerPickupCredential']>()
+      .mockImplementation(async (_token, orderId, input) => ({
+        orderId,
+        credentialId: 'pickup:test-credential-full',
+        expiresAt: input.expiresAt,
+      }));
+    const services = readyServices({
+      listOrders: vi.fn().mockResolvedValue({ orders: [registerablePickupOrder], nextCursor: null }),
+      getOrderTarget: vi.fn().mockResolvedValue(pickupOrderTarget),
+      registerPickupCredential,
+    });
+    renderAt('/assets/orders', services);
+
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+    expect((await screen.findAllByText('待自提')).length).toBeGreaterThan(0);
+    await user.click(await screen.findByRole('button', { name: '生成到店核销码' }));
+
+    await waitFor(() => expect(registerPickupCredential).toHaveBeenCalledTimes(1));
+    const request = registerPickupCredential.mock.calls[0]![2];
+    expect(request.code).toMatch(/^[0-9]{6}$/);
+    expect(request.evidenceHash).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(await screen.findByLabelText(`六位核销码 ${request.code}`)).toBeTruthy();
+    expect(screen.getByText('pickup:test-credential-full')).toBeTruthy();
+    expect(screen.getByText(/商家核销不需要你手填/)).toBeTruthy();
+  });
+
+  it('keeps a pending pickup code private until Core confirms registration and retries the same request', async () => {
+    globalThis.localStorage?.clear();
+    const user = userEvent.setup();
+    const registerablePickupOrder = {
+      ...pickupOrder,
+      state: 'PAID' as const,
+      deliveredAt: null,
+      fulfilledAt: null,
+      allowedActions: [
+        { action: 'REGISTER_PICKUP_CREDENTIAL' as const, enabled: true },
+        { action: 'OPEN_TAKEOVER' as const, enabled: false, reasonCode: 'PickupTakeoverDecisionBlocked' as const },
+      ],
+    };
+    const registerPickupCredential = vi.fn<CoreClient['registerPickupCredential']>()
+      .mockRejectedValueOnce(new Error('network unavailable after server write'))
+      .mockImplementation(async (_token, orderId, input) => ({
+        orderId,
+        credentialId: 'pickup:test-credential-after-retry',
+        expiresAt: input.expiresAt,
+      }));
+    const services = readyServices({
+      listOrders: vi.fn().mockResolvedValue({ orders: [registerablePickupOrder], nextCursor: null }),
+      getOrderTarget: vi.fn().mockResolvedValue(pickupOrderTarget),
+      registerPickupCredential,
+    });
+    renderAt('/assets/orders', services);
+
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+    await user.click(await screen.findByRole('button', { name: '生成到店核销码' }));
+
+    await waitFor(() => expect(registerPickupCredential).toHaveBeenCalledTimes(1));
+    const request = registerPickupCredential.mock.calls[0]![2];
+    expect(screen.queryByLabelText(`六位核销码 ${request.code}`)).toBeNull();
+    expect(screen.getByText('还不能给门店核销')).toBeTruthy();
+    expect(screen.getByText(/确认成功前不要给门店核销/)).toBeTruthy();
+    expect(globalThis.localStorage?.getItem(`abu24k:mall:pickup-credentials:56:${BUYER}`)).toContain(request.code);
+    await user.click(screen.getByRole('button', { name: '继续同步核销码' }));
+    await waitFor(() => expect(registerPickupCredential).toHaveBeenCalledTimes(2));
+    expect(registerPickupCredential.mock.calls[1]![2]).toEqual(request);
+    expect(await screen.findByLabelText(`六位核销码 ${request.code}`)).toBeTruthy();
+    expect(screen.getByText('pickup:test-credential-after-retry')).toBeTruthy();
+  });
+
+  it.each([
+    ['NetworkUnavailable', '无法连接商城安全服务'],
+    ['InvalidResponse', '商城安全服务返回了空响应'],
+  ])('keeps the generated pickup code visible when Core returns %s after saving may have happened', async (code, message) => {
+    globalThis.localStorage?.clear();
+    const user = userEvent.setup();
+    const registerablePickupOrder = {
+      ...pickupOrder,
+      state: 'PAID' as const,
+      deliveredAt: null,
+      fulfilledAt: null,
+      allowedActions: [
+        { action: 'REGISTER_PICKUP_CREDENTIAL' as const, enabled: true },
+        { action: 'OPEN_TAKEOVER' as const, enabled: false, reasonCode: 'PickupTakeoverDecisionBlocked' as const },
+      ],
+    };
+    const registerPickupCredential = vi.fn<CoreClient['registerPickupCredential']>()
+      .mockRejectedValue(new CoreClientError(code, message));
+    const services = readyServices({
+      listOrders: vi.fn().mockResolvedValue({ orders: [registerablePickupOrder], nextCursor: null }),
+      getOrderTarget: vi.fn().mockResolvedValue(pickupOrderTarget),
+      registerPickupCredential,
+    });
+    renderAt('/assets/orders', services);
+
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+    await user.click(await screen.findByRole('button', { name: '生成到店核销码' }));
+
+    await waitFor(() => expect(registerPickupCredential).toHaveBeenCalledTimes(1));
+    const request = registerPickupCredential.mock.calls[0]![2];
+    expect(screen.queryByLabelText(`六位核销码 ${request.code}`)).toBeNull();
+    expect(screen.getByText('还不能给门店核销')).toBeTruthy();
+    expect(globalThis.localStorage?.getItem(`abu24k:mall:pickup-credentials:56:${BUYER}`)).toContain(request.code);
+  });
+
+  it('retries pickup code generation after the buyer login token expires', async () => {
+    globalThis.localStorage?.clear();
+    globalThis.sessionStorage?.clear();
+    const user = userEvent.setup();
+    const registerablePickupOrder = {
+      ...pickupOrder,
+      state: 'PAID' as const,
+      deliveredAt: null,
+      fulfilledAt: null,
+      allowedActions: [
+        { action: 'REGISTER_PICKUP_CREDENTIAL' as const, enabled: true },
+        { action: 'OPEN_TAKEOVER' as const, enabled: false, reasonCode: 'PickupTakeoverDecisionBlocked' as const },
+      ],
+    };
+    const authenticate = vi.fn<CoreClient['authenticate']>()
+      .mockResolvedValueOnce({ token: 'buyer-session', walletAddress: BUYER, roles: ['BUYER'] })
+      .mockResolvedValueOnce({ token: 'buyer-session-refreshed', walletAddress: BUYER, roles: ['BUYER'] });
+    const registerPickupCredential = vi.fn<CoreClient['registerPickupCredential']>()
+      .mockRejectedValueOnce(new CoreClientError('Unauthorized', 'Expired or invalid session token'))
+      .mockImplementation(async (token, orderId, input) => ({
+        orderId,
+        credentialId: `pickup:${token}`,
+        expiresAt: input.expiresAt,
+      }));
+    const services = readyServices({
+      authenticate,
+      listOrders: vi.fn().mockResolvedValue({ orders: [registerablePickupOrder], nextCursor: null }),
+      getOrderTarget: vi.fn().mockResolvedValue(pickupOrderTarget),
+      registerPickupCredential,
+    });
+    renderAt('/assets/orders', services);
+
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+    await user.click(await screen.findByRole('button', { name: '生成到店核销码' }));
+
+    await waitFor(() => expect(registerPickupCredential).toHaveBeenCalledTimes(2));
+    expect(registerPickupCredential.mock.calls[0]?.[0]).toBe('buyer-session');
+    expect(registerPickupCredential.mock.calls[1]?.[0]).toBe('buyer-session-refreshed');
+    const request = registerPickupCredential.mock.calls[1]![2];
+    expect(await screen.findByLabelText(`六位核销码 ${request.code}`)).toBeTruthy();
+    expect(screen.getByText('pickup:buyer-session-refreshed')).toBeTruthy();
+    expect(screen.queryByText(/登录已过期/)).toBeNull();
+  });
+
+  it('shows the pickup code failure beside the button instead of failing silently', async () => {
+    globalThis.localStorage?.clear();
+    const user = userEvent.setup();
+    const registerablePickupOrder = {
+      ...pickupOrder,
+      state: 'PAID' as const,
+      deliveredAt: null,
+      fulfilledAt: null,
+      allowedActions: [
+        { action: 'REGISTER_PICKUP_CREDENTIAL' as const, enabled: true },
+        { action: 'OPEN_TAKEOVER' as const, enabled: false, reasonCode: 'PickupTakeoverDecisionBlocked' as const },
+      ],
+    };
+    const services = readyServices({
+      listOrders: vi.fn().mockResolvedValue({ orders: [registerablePickupOrder], nextCursor: null }),
+      getOrderTarget: vi.fn().mockResolvedValue(pickupOrderTarget),
+      registerPickupCredential: vi.fn().mockRejectedValue(
+        new CoreClientError('IdempotencyConflict', 'An active pickup credential already exists'),
+      ),
+    });
+    renderAt('/assets/orders', services);
+
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+    await user.click(await screen.findByRole('button', { name: '生成到店核销码' }));
+
+    expect(await screen.findByText(/这笔订单已经有一个有效核销码/)).toBeTruthy();
   });
 
   it('keeps takeover and pickup verification fail closed when buyer evidence authority is absent', async () => {
@@ -2213,6 +2800,7 @@ function servicesWith(overrides: Partial<CoreClient>): MallServices {
     listStores: vi.fn().mockResolvedValue([]),
     createDeliveryTarget: vi.fn().mockResolvedValue(deliveryTarget),
     createPickupTarget: vi.fn().mockResolvedValue(pickupTarget),
+    registerPickupCredential: vi.fn().mockResolvedValue({ orderId: pickupOrder.orderId, credentialId: 'pickup:test-credential', expiresAt: '2033-05-19T03:00:00.000Z' }),
     listOrders: vi.fn().mockResolvedValue({ orders: [], nextCursor: null }),
     getOrder: vi.fn().mockRejectedValue(new Error('not configured')),
     getOrderTarget: vi.fn().mockRejectedValue(new Error('not configured')),

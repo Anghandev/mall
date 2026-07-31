@@ -851,6 +851,7 @@ describe('settlement-admin.16 Core HTTP consumer', () => {
       limit: 20,
       from: '2026-07-01T00:00:00.000Z',
       to: '2026-07-15T00:00:00.000Z',
+      wallet: merchantWallet,
       skuId: 'sku-delivery',
       state: 'DELIVERED',
       fulfillmentMode: 'DELIVERY',
@@ -880,6 +881,7 @@ describe('settlement-admin.16 Core HTTP consumer', () => {
       limit: '20',
       from: '2026-07-01T00:00:00.000Z',
       to: '2026-07-15T00:00:00.000Z',
+      wallet: merchantWallet.toLowerCase(),
       skuId: 'sku-delivery',
       state: 'DELIVERED',
       fulfillmentMode: 'DELIVERY',
@@ -890,6 +892,46 @@ describe('settlement-admin.16 Core HTTP consumer', () => {
       `https://core.example.test/v2/orders/${pickupOrderId}/fulfillment-target`,
       expect.objectContaining({ headers: expect.objectContaining({ authorization: 'Bearer merchant-session' }) }),
     );
+  });
+
+  it('keeps fulfillment orders readable when one balance amount is malformed', async () => {
+    globalThis.fetch = vi.fn(async () => jsonResponse({
+      orders: [{
+        ...pickupOrder,
+        balances: [{ ...pickupOrder.balances[0], amount: '1.0' }],
+      }],
+      nextCursor: null,
+    })) as typeof fetch;
+
+    const page = await createCoreApi().listFulfillmentOrders('merchant-session');
+
+    expect(page.orders[0]?.orderId).toBe(pickupOrderId);
+    expect(page.orders[0]?.fulfillmentMode).toBe('PICKUP');
+    expect(page.orders[0]?.balances[0]).toMatchObject({
+      asset: 'USDT',
+      state: 'LOCKED',
+      amount: null,
+      amountInvalid: true,
+    });
+  });
+
+  it('keeps fulfillment signed balance amounts readable', async () => {
+    globalThis.fetch = vi.fn(async () => jsonResponse({
+      orders: [{
+        ...pickupOrder,
+        balances: [{ ...pickupOrder.balances[0], amount: '-2000000000000000000' }],
+      }],
+      nextCursor: null,
+    })) as typeof fetch;
+
+    const page = await createCoreApi().listFulfillmentOrders('merchant-session');
+
+    expect(page.orders[0]?.balances[0]).toMatchObject({
+      asset: 'USDT',
+      state: 'LOCKED',
+      amount: '-2000000000000000000',
+    });
+    expect(page.orders[0]?.balances[0]?.amountInvalid).toBeUndefined();
   });
 
   it('submits one atomic manual-shipment batch and validates every authoritative result', async () => {
@@ -1050,7 +1092,7 @@ describe('settlement-admin.16 Core HTTP consumer', () => {
 
     expect(await api.getMerchantFinance('merchant-session')).toMatchObject({
       merchant: { guarantee_status: 'READY' },
-      allowedActions: ['REQUEST_MERCHANT_USDT'],
+      allowedActions: ['REQUEST_MERCHANT_SETTLEMENT'],
       settlementEligibility: { mode: 'FORMAL', expiresAt: null },
     });
     const settlements = await api.listSettlements('merchant-session');
@@ -1084,6 +1126,14 @@ describe('settlement-admin.16 Core HTTP consumer', () => {
       'https://core.example.test/v2/finance/merchant/guarantee-deposits',
       expect.objectContaining({ body: JSON.stringify(depositInput) }),
     );
+  });
+
+  it('keeps merchant finance settlement compatible with the old action name during rollout', async () => {
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ ...merchantFinance, allowedActions: ['REQUEST_MERCHANT_USDT'] })) as typeof fetch;
+
+    await expect(createCoreApi('https://core.example.test').getMerchantFinance('merchant-session'))
+      .resolves.toMatchObject({ allowedActions: ['REQUEST_MERCHANT_USDT'] });
   });
 
   it('fails closed on unknown merchant finance actions and eligibility modes', async () => {

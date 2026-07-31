@@ -9725,6 +9725,16 @@
               "type": "string",
               "pattern": "^[0-9]{6}$"
             }
+          },
+          {
+            "name": "productId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
           }
         ],
         "responses": {
@@ -10264,6 +10274,13 @@
             }
           },
           {
+            "name": "wallet",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/Address"
+            }
+          },
+          {
             "name": "state",
             "in": "query",
             "schema": {
@@ -10456,6 +10473,13 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 256
+            }
+          },
+          {
+            "name": "wallet",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/Address"
             }
           },
           {
@@ -17183,6 +17207,7 @@
           "stockTotal",
           "stockAvailable",
           "stockReserved",
+          "stockSeckillLocked",
           "proposedSeckillInventory",
           "lifecycleState"
         ],
@@ -17214,6 +17239,9 @@
             "$ref": "#/components/schemas/AtomicAmount"
           },
           "stockReserved": {
+            "$ref": "#/components/schemas/AtomicAmount"
+          },
+          "stockSeckillLocked": {
             "$ref": "#/components/schemas/AtomicAmount"
           },
           "proposedSeckillInventory": {
@@ -21076,11 +21104,15 @@
         "additionalProperties": false,
         "required": [
           "plan",
+          "signer",
           "typedData"
         ],
         "properties": {
           "plan": {
             "$ref": "#/components/schemas/TakeoverFundingPlan"
+          },
+          "signer": {
+            "$ref": "#/components/schemas/Address"
           },
           "typedData": {
             "type": "object",
@@ -21569,7 +21601,8 @@
             "type": "array",
             "items": {
               "enum": [
-                "REQUEST_MERCHANT_USDT"
+                "REQUEST_MERCHANT_USDT",
+                "REQUEST_MERCHANT_SETTLEMENT"
               ]
             }
           },

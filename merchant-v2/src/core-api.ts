@@ -144,7 +144,7 @@ const storeStatusSet = new Set<string>(storeStatuses);
 const fulfillmentMethodSet = new Set<string>(fulfillmentMethods);
 const guaranteeStatusSet = new Set<string>(guaranteeStatuses);
 const guaranteeDepositStateSet = new Set<string>(merchantGuaranteeDepositStates);
-const merchantFinanceActionSet = new Set<string>(['REQUEST_MERCHANT_USDT']);
+const merchantFinanceActionSet = new Set<string>(['REQUEST_MERCHANT_USDT', 'REQUEST_MERCHANT_SETTLEMENT']);
 const merchantSettlementEligibilityModeSet = new Set<string>(['FORMAL', 'MAINNET_MICROTEST', 'BLOCKED']);
 const settlementRailSet = new Set<string>(settlementRails);
 const settlementRequestStateSet = new Set<string>(settlementRequestStates);
@@ -196,11 +196,25 @@ export interface FulfillmentOrderListOptions {
   limit?: number;
   from?: string;
   to?: string;
+  wallet?: string;
   skuId?: string;
   state?: OrderProjectionState;
   fulfillmentMode?: FulfillmentMode;
   orderKind?: OrderKind;
 }
+
+export type MerchantFulfillmentBalance = Omit<FulfillmentBalance, 'amount'> & {
+  amount: string | null;
+  amountInvalid?: boolean;
+};
+
+export type MerchantFulfillmentOrder = Omit<FulfillmentOrder, 'balances'> & {
+  balances: readonly MerchantFulfillmentBalance[];
+};
+
+export type MerchantFulfillmentOrderPage = Omit<FulfillmentOrderPage, 'orders'> & {
+  orders: readonly MerchantFulfillmentOrder[];
+};
 
 export interface MerchantTakeoverCaseListOptions {
   state?: TakeoverState;
@@ -390,7 +404,7 @@ export interface CoreApi {
   listMerchantAuditEntries(token: string, options?: MerchantAuditListOptions): Promise<MerchantAuditList>;
   exportMerchantAuditEntries(input: MerchantAuditExportRequest, token: string): Promise<MerchantAuditExport>;
   exportMerchantOrders(input: MerchantOrderExportRequest, token: string): Promise<MerchantOrderExport>;
-  listFulfillmentOrders(token: string, options?: FulfillmentOrderListOptions): Promise<FulfillmentOrderPage>;
+  listFulfillmentOrders(token: string, options?: FulfillmentOrderListOptions): Promise<MerchantFulfillmentOrderPage>;
   listMerchantTakeoverCases(
     token: string,
     options?: MerchantTakeoverCaseListOptions,
@@ -406,7 +420,7 @@ export interface CoreApi {
   ): Promise<EvidenceEnvelopeProjection>;
   createOrderActionEvidence(
     orderId: string,
-    input: { action: 'REQUEST_FORCED_RECEIPT'; reasonCode: string; idempotencyKey: string },
+    input: { action: 'REQUEST_FORCED_RECEIPT' | 'VERIFY_PICKUP'; reasonCode: string; idempotencyKey: string },
     token: string,
   ): Promise<EvidenceEnvelopeProjection>;
   recordShipment(orderId: string, input: ShipmentRequest, token: string): Promise<ShipmentResult>;
@@ -950,6 +964,7 @@ function fulfillmentOrdersPath(options: FulfillmentOrderListOptions) {
   if (options.limit !== undefined) query.set('limit', String(options.limit));
   if (options.from) query.set('from', options.from);
   if (options.to) query.set('to', options.to);
+  if (options.wallet) query.set('wallet', address(options.wallet, 'order wallet filter').toLowerCase());
   if (options.skuId) query.set('skuId', options.skuId);
   if (options.state) query.set('state', options.state);
   if (options.fulfillmentMode) query.set('fulfillmentMode', options.fulfillmentMode);
@@ -1263,6 +1278,7 @@ function parseManagedCatalogSku(input: unknown): ManagedCatalogSku {
     stockTotal: atomicAmount(value.stockTotal, 'managed SKU.stockTotal'),
     stockAvailable: atomicAmount(value.stockAvailable, 'managed SKU.stockAvailable'),
     stockReserved: atomicAmount(value.stockReserved, 'managed SKU.stockReserved'),
+    stockSeckillLocked: atomicAmount(value.stockSeckillLocked, 'managed SKU.stockSeckillLocked'),
     proposedSeckillInventory: atomicAmount(
       value.proposedSeckillInventory,
       'managed SKU.proposedSeckillInventory',
@@ -1784,7 +1800,7 @@ function parseAllowedAction(input: unknown): AllowedAction {
   };
 }
 
-function parseFulfillmentOrder(input: unknown): FulfillmentOrder {
+function parseFulfillmentOrder(input: unknown): MerchantFulfillmentOrder {
   const value = record(input, 'fulfillment order');
   return {
     orderId: bytes32(value.orderId, 'order.orderId'),
@@ -1893,12 +1909,14 @@ function parseLogisticsProjection(input: unknown): LogisticsProjection {
   };
 }
 
-function parseFulfillmentBalance(input: unknown): FulfillmentBalance {
+function parseFulfillmentBalance(input: unknown): MerchantFulfillmentBalance {
   const value = record(input, 'fulfillment balance');
+  const amount = safeSignedAtomicAmount(value.amount);
   return {
     asset: enumValue(value.asset, fulfillmentAssetSet, 'balance.asset'),
     state: enumValue(value.state, balanceStateSet, 'balance.state'),
-    amount: atomicAmount(value.amount, 'balance.amount'),
+    amount,
+    ...(amount === null ? { amountInvalid: true } : {}),
   };
 }
 
@@ -2172,7 +2190,7 @@ function parseEvidenceEnvelope(
 function parseActionEvidenceEnvelope(
   input: unknown,
   expectedOrderId: string,
-  expectedAction: 'REQUEST_FORCED_RECEIPT',
+  expectedAction: 'REQUEST_FORCED_RECEIPT' | 'VERIFY_PICKUP',
   expectedReasonCode: string,
 ): EvidenceEnvelopeProjection {
   const value = record(input, 'action evidence');
@@ -3248,6 +3266,10 @@ function atomicAmount(input: unknown, name: string) {
   const value = string(input, name);
   if (!/^(0|[1-9][0-9]*)$/.test(value)) invalid(`${name} must be a canonical integer string`);
   return value;
+}
+
+function safeSignedAtomicAmount(input: unknown) {
+  return typeof input === 'string' && /^(0|-?[1-9][0-9]*)$/.test(input) ? input : null;
 }
 
 function signedAtomicAmount(input: unknown, name: string) {

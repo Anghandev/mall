@@ -1318,6 +1318,7 @@ export interface TakeoverFundingPlan {
 
 export interface TakeoverFundingChallenge {
   plan: TakeoverFundingPlan;
+  signer: Address;
   typedData: Eip712TypedData;
 }
 
@@ -1401,7 +1402,7 @@ export interface MerchantFinanceProjection {
   guaranteeDeposits: readonly MerchantGuaranteeDeposit[];
   debt: MerchantDebt | null;
   takeovers: readonly MerchantTakeover[];
-  allowedActions: readonly 'REQUEST_MERCHANT_USDT'[];
+  allowedActions: readonly ('REQUEST_MERCHANT_USDT' | 'REQUEST_MERCHANT_SETTLEMENT')[];
   settlementEligibility: MerchantSettlementEligibility;
 }
 
@@ -2169,6 +2170,7 @@ export interface ManagedCatalogSku {
   stockTotal: AtomicAmount;
   stockAvailable: AtomicAmount;
   stockReserved: AtomicAmount;
+  stockSeckillLocked: AtomicAmount;
   proposedSeckillInventory: AtomicAmount;
   lifecycleState: CatalogProductLifecycleState;
 }

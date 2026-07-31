@@ -12,7 +12,7 @@ const errorCodeLabels: Record<string, string> = {
   ConfigurationRequired: '系统配置未完成',
   DecisionBlocked: '暂时不能操作',
   IdempotencyConflict: '操作状态已变化',
-  InvalidSignature: '签名钱包不匹配',
+  InvalidSignature: '签名没有通过',
 };
 
 export function formatUsdt(amount: string | null | undefined) { return formatTokenAmount(amount, 'USDT'); }
@@ -113,12 +113,39 @@ export function humanizeError(error: unknown) {
 }
 function specificErrorLabel(message: string) {
   if (/Merchant is not eligible for publication/i.test(message)) return '商家还不能上架';
+  if (/Expired or invalid session token|invalid session token|session token/i.test(message)) return '登录已过期';
+  if (/SIWE challenge rate limit exceeded|SIWE[^。]*rate limit/i.test(message)) return '钱包登录太频繁';
   return null;
 }
 export function translateErrorMessage(message: string) {
   const cleaned = message.replace(/^\s*(InvalidRequest|InvalidResponse|Forbidden|ExternalBlocked|ConfigurationRequired|DecisionBlocked)\s*[:：]?\s*/i, '').replace(/\s*[（(][0-9a-f]{8}-[0-9a-f-]{27,}[）)]$/i, '').trim();
   if (!cleaned) return '请检查填写内容后重试。';
-  if (/Merchant is not eligible for publication/i.test(cleaned)) return '该商家当前不满足商品发布条件。请先到商家中心确认：商家已通过审核、门店已激活，然后再上架。';
+  if (/SIWE challenge rate limit exceeded|SIWE[^。]*rate limit/i.test(cleaned)) return '钱包登录请求太频繁，请等一会儿再试。不要反复刷新或重复点连接钱包。';
+  if (/Expired or invalid session token|invalid session token|session token/i.test(cleaned)) return '登录已过期，请重新连接钱包。';
+  if (/PAYMENT_RECEIPT_WORKER_UNHEALTHY/i.test(cleaned)) return '付款回执确认服务异常，系统暂时不允许创建新付款或新秒杀。';
+  if (/RUNTIME_SNAPSHOT_EXPIRED|fresh verified runtime readiness snapshot/i.test(cleaned)) return '系统运行检查过期，付款确认服务恢复前不能创建新付款或新秒杀。';
+  if (/RPC_DIVERGENCE/i.test(cleaned)) return '链上 RPC 返回不一致，系统暂时不允许创建新付款或新秒杀。';
+  if (/PAYMENT_CONFIGURATION_REQUIRED/i.test(cleaned)) return '支付运行配置未完成，系统暂时不允许创建新付款或新秒杀。';
+  if (/New payment quotes are blocked by unresolved payment policy/i.test(cleaned)) return '付款资金规则还没发布完整，系统暂时不允许创建新付款或新秒杀。';
+  if (/New payment quotes are blocked by unavailable payment infrastructure/i.test(cleaned)) return '付款链路的外部服务还没准备好，系统暂时不允许创建新付款或新秒杀。';
+  if (/New payment quote is paused/i.test(cleaned)) return '支付开关处于暂停状态，先恢复支付开关后才能创建新秒杀。';
+  if (/Merchant is not eligible for publication/i.test(cleaned)) return '商家暂不满足上架条件，请先完成入驻审核或经营条件。';
+  if (/Merchant settlement is frozen/i.test(cleaned)) return '商家结算已被系统冻结；如果商家已入驻且未被冻结，请刷新后重试，仍不行让平台检查服务端经营门槛。';
+  if (/Product, merchant or inventory is unavailable/i.test(cleaned)) return '商品、商家或库存当前不可用。请刷新商品和库存状态后重试。';
+  if (/Seckill product or merchant is unavailable|Merchant is not eligible for a seckill session/i.test(cleaned)) return '当前商品或商家暂时不能开秒杀。请确认商品已上架、商家已通过且没有被冻结。';
+  if (/Activity inventory cannot be locked|Activity inventory exceeds|Active ordinary quote prevents activity inventory lock/i.test(cleaned)) return '活动库存锁定失败。请刷新商品库存，确认可售库存和秒杀提报库存足够后重试。';
+  if (/Seckill rules require a policyVersion/i.test(cleaned)) return '秒杀规则还没绑定资金规则版本。去“规则治理”页读取当前资金规则版本，不要自己编。';
+  if (/Seckill rules hash does not match policyVersion/i.test(cleaned)) return '秒杀规则正文和资金规则版本对不上。请先在“规则治理”发布匹配的资金规则，再回内容中心重新保存并发布。';
+  if (/Session requires the latest published policyVersion/i.test(cleaned)) return '创建秒杀只能用最新版已发布资金规则。请重新读取最新版规则后再创建。';
+  if (/Session rules hash does not match its policyVersion/i.test(cleaned)) return '秒杀规则内容和当前资金规则版本对不上。请回内容中心重新保存并发布秒杀规则。';
+  if (/Published seckill rules are unavailable for this policy/i.test(cleaned)) return '这版资金规则没有可用的已发布秒杀规则。请先发布秒杀规则，再创建活动。';
+  if (/Published policy does not contain the frozen seckill timers/i.test(cleaned)) return '当前资金规则里的秒杀计时参数不符合固定规则，不能创建活动。';
+  if (/Seckill approval expired before EOA execution/i.test(cleaned)) return '这条秒杀二次确认已经过期，请取消旧动作后重新创建或重新确认。';
+  if (/Session product and SKU must be active/i.test(cleaned)) return '商品或规格还没有上架，先把商品审核通过并上架后再开秒杀。';
+  if (/Session start must be a future ISO timestamp/i.test(cleaned)) return '开始时间必须选未来时间，请点快捷时间或重新选择。';
+  if (/Fresh wallet coverage evidence is unavailable|Canonical coverage evidence is unavailable/i.test(cleaned)) return '资金覆盖检查还没拿到最新结果，系统暂时不能继续打款或开高风险动作；请稍等后刷新。';
+  if (/BSC RPC contract request timed out|Payment receipt RPC operation timed out/i.test(cleaned)) return '链上节点响应超时，系统正在保护资金状态。请稍等后重试，不要连续重复提交。';
+  if (/canonical integer string|canonical atomic amount|balance\.amount|amount must/i.test(cleaned)) return '系统返回的金额格式异常，请刷新或联系平台处理。';
   if (/Merchant license evidence is incomplete/i.test(cleaned)) return '该商家还没有上传证照。如果已经线下确认资料，请刷新后重新审核。';
   if (/Current store state does not allow this operation|store state does not allow/i.test(cleaned)) return '当前门店状态已经不需要或不能执行这个操作，请刷新门店列表后再看可用按钮。';
   if (/Current product state does not allow this operation|product state does not allow/i.test(cleaned)) return '当前商品状态暂不允许这个操作，请刷新商品列表后按页面显示的按钮处理。';
@@ -141,8 +168,14 @@ export function translateErrorMessage(message: string) {
   if (/does not match (the )?(coordinated|generated)|generated type|Core returned|Core response|Core API|non-JSON|unreachable|request failed|gateway is unavailable/i.test(cleaned)) return '系统服务暂时无法连接，请刷新或稍后重试。';
   if (/must be an integer between 0 and 10000|bps/i.test(cleaned)) return '比例请填写 0 到 100 之间的数字。';
   if (/must contain 8-128 characters/i.test(cleaned)) return '系统提交编号异常，请刷新页面后重试。';
-  if (/Secondary signer mismatch/i.test(cleaned)) return '签名钱包不匹配，请切换到页面要求的钱包后重试。';
+  if (/Secondary signer mismatch/i.test(cleaned)) return '这次钱包签名没有通过系统校验，请重新点一次签名。';
   if (/unavailable|unreachable|connection failed/i.test(cleaned)) return '系统服务暂时无法连接，请稍后重试。';
   if (/Forbidden/i.test(cleaned)) return '当前钱包没有权限执行这个操作。';
+  if (looksLikeTechnicalEnglish(cleaned)) return '系统返回异常，请刷新或联系平台处理。';
   return cleaned;
+}
+
+function looksLikeTechnicalEnglish(message: string) {
+  return /\b(Order|Wallet|Unexpected|Invalid|Forbidden|Unauthorized|Expired|SIWE|Core|must|not|found|failed|unavailable|canonical|amount|token|session|request|response|error)\b/i.test(message)
+    || (!/[\u4e00-\u9fff]/.test(message) && /[A-Za-z]{3,}/.test(message));
 }

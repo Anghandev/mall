@@ -187,7 +187,8 @@ export class SeckillOperationsService {
       const actions = await executor.query<SeckillActionRow>(
         'SELECT * FROM core.seckill_governance_actions ORDER BY created_at DESC, action_id DESC LIMIT 100',
       );
-      return Object.freeze(await Promise.all(actions.rows.map((row) => actionProjection(executor, row))));
+      const now = this.#clock();
+      return Object.freeze(await Promise.all(actions.rows.map((row) => actionProjection(executor, row, now))));
     });
   }
 
@@ -195,7 +196,7 @@ export class SeckillOperationsService {
     assertHash(actionId, 'seckill action ID');
     return this.#transactions.transaction(async (executor) => {
       await requireCurrentRole(executor, actor, ['ADMIN', 'OPERATOR', 'AUDITOR']);
-      return actionProjection(executor, await loadAction(executor, actionId.toLowerCase()));
+      return actionProjection(executor, await loadAction(executor, actionId.toLowerCase()), this.#clock());
     });
   }
 
@@ -239,7 +240,7 @@ export class SeckillOperationsService {
       const wallet = await requireCurrentRole(executor, actor, ['ADMIN', 'OPERATOR']);
       const requestHash = hashJson({ wallet, ...parsed });
       const existing = await idempotentAction(executor, wallet, parsed.idempotencyKey, requestHash);
-      if (existing) return actionProjection(executor, existing);
+      if (existing) return actionProjection(executor, existing, this.#clock());
       const policy = await requireSessionPolicy(executor, parsed.policyVersion, parsed.rulesContentHash);
       const catalog = await requireSessionCatalog(
         executor,
@@ -341,6 +342,7 @@ export class SeckillOperationsService {
         `UPDATE core.skus SET stock_available = stock_available - $2,
            stock_seckill_locked = stock_seckill_locked + $2
          WHERE sku_id = $1 AND lifecycle_state = 'ACTIVE' AND stock_available >= $2
+           AND stock_seckill_locked + $2 <= proposed_seckill_inventory
          RETURNING sku_id`,
         [parsed.skuId, parsed.inventory],
       );
@@ -356,7 +358,7 @@ export class SeckillOperationsService {
         payload: snapshot,
         now,
       });
-      return actionProjection(executor, await loadAction(executor, actionId));
+      return actionProjection(executor, await loadAction(executor, actionId), this.#clock());
     });
   }
 
@@ -372,7 +374,7 @@ export class SeckillOperationsService {
       const wallet = await requireCurrentRole(executor, actor, ['ADMIN']);
       const requestHash = hashJson({ wallet, sessionId: sessionId.toLowerCase(), reasonCode });
       const existing = await idempotentAction(executor, wallet, input.idempotencyKey, requestHash);
-      if (existing) return actionProjection(executor, existing);
+      if (existing) return actionProjection(executor, existing, this.#clock());
       const session = await executor.query<{
         session_id: string; policy_version: string | number; phase: string;
         starts_at: Date; main_deadline: Date; relay_deadline: Date;
@@ -426,7 +428,7 @@ export class SeckillOperationsService {
       const sessionId = input.sessionId.toLowerCase();
       const requestHash = hashJson({ wallet, sessionId, action: 'RESUME_PURCHASES' });
       const existing = await idempotentAction(executor, wallet, input.idempotencyKey, requestHash);
-      if (existing) return actionProjection(executor, existing);
+      if (existing) return actionProjection(executor, existing, this.#clock());
       const closed = await executor.query<{ policy_version: string | number; phase: string }>(
         'SELECT policy_version, phase FROM core.seckill_sessions WHERE session_id = $1 FOR UPDATE',
         [sessionId],
@@ -474,7 +476,7 @@ export class SeckillOperationsService {
       const normalizedSessionId = sessionId.toLowerCase();
       const requestHash = hashJson({ wallet, sessionId: normalizedSessionId, amountUsdt: amount.toString() });
       const existing = await idempotentAction(executor, wallet, input.idempotencyKey, requestHash);
-      if (existing) return actionProjection(executor, existing);
+      if (existing) return actionProjection(executor, existing, this.#clock());
       const coverageSnapshot = await requireFullCoverage(executor);
       await requirePostInjectionCoverage(
         executor,
@@ -535,7 +537,7 @@ export class SeckillOperationsService {
           this.#clock(),
         ],
       );
-      return actionProjection(executor, await loadAction(executor, actionId));
+      return actionProjection(executor, await loadAction(executor, actionId), this.#clock());
     });
   }
 
@@ -902,7 +904,7 @@ export class SeckillOperationsService {
           action.secondary_signer === this.#secondarySigner
           && String(action.approval_nonce) === nonce.toString()
           && action.secondary_signature_hash === signatureHash
-        ) return actionProjection(executor, action);
+        ) return actionProjection(executor, action, this.#clock());
         throw new CoreError('IdempotencyConflict', 'Seckill action approval no longer matches the draft', 409);
       }
       const intent = actionIntent(action, nonce, deadline);
@@ -944,7 +946,7 @@ export class SeckillOperationsService {
           deadline: deadline.toString(),
         },
       });
-      return actionProjection(executor, await loadAction(executor, action.action_id));
+      return actionProjection(executor, await loadAction(executor, action.action_id), this.#clock());
     });
   }
 
@@ -954,7 +956,7 @@ export class SeckillOperationsService {
       const wallet = await requireCurrentRole(executor, actor, ['ADMIN']);
       const action = await lockedAction(executor, actionId.toLowerCase());
       if (action.state === 'PENDING_EXECUTION' || ['SUBMITTED', 'MINED', 'FINAL'].includes(action.state)) {
-        return actionProjection(executor, action);
+        return actionProjection(executor, action, this.#clock());
       }
       if (action.state !== 'SECONDARY_SIGNED') {
         throw new CoreError('InvalidRequest', 'Seckill action is not secondary-signed', 409);
@@ -979,7 +981,7 @@ export class SeckillOperationsService {
         payload: { actionKind: action.action_kind, sessionId: action.session_id, calldataHash: action.calldata_hash },
         now,
       });
-      return actionProjection(executor, await loadAction(executor, action.action_id));
+      return actionProjection(executor, await loadAction(executor, action.action_id), this.#clock());
     });
   }
 
@@ -1014,7 +1016,7 @@ export class SeckillOperationsService {
         payload: { actionKind: action.action_kind, sessionId: action.session_id },
         now,
       });
-      return actionProjection(executor, await loadAction(executor, action.action_id));
+      return actionProjection(executor, await loadAction(executor, action.action_id), this.#clock());
     });
   }
 
@@ -1080,7 +1082,7 @@ export class SeckillOperationsService {
       payload: { actionKind: input.actionKind, sessionId: input.sessionId, evidenceHash: input.evidenceHash },
       now,
     });
-    return actionProjection(executor, await loadAction(executor, actionId));
+    return actionProjection(executor, await loadAction(executor, actionId), this.#clock());
   }
 }
 
@@ -1220,6 +1222,7 @@ async function requireSessionCatalog(
     list_price_usdt: string;
     stock_available: string | number;
     total_stock_available: string | number;
+    stock_seckill_locked: string | number;
     proposed_seckill_inventory: string | number;
     guarantee_evidence_hash: string | null;
     guarantee_balance_usdt: string | null;
@@ -1231,7 +1234,7 @@ async function requireSessionCatalog(
        product.lifecycle_state AS product_state, product.default_freight_usdt::text,
        sku.sku_version,
        sku.chain_sku_id, sku.lifecycle_state AS sku_state,
-       sku.list_price_usdt::text, sku.stock_available, sku.proposed_seckill_inventory,
+       sku.list_price_usdt::text, sku.stock_available, sku.stock_seckill_locked, sku.proposed_seckill_inventory,
        (SELECT sum(all_skus.stock_available) FROM core.skus all_skus
          WHERE all_skus.product_id = product.product_id
            AND all_skus.lifecycle_state <> 'DELISTED') AS total_stock_available,
@@ -1253,10 +1256,17 @@ async function requireSessionCatalog(
   if (row.product_state !== 'ACTIVE' || row.sku_state !== 'ACTIVE') {
     throw new CoreError('InvalidRequest', 'Session product and SKU must be active', 409);
   }
-  if (inventory > Number(row.proposed_seckill_inventory)) {
+  const requestedInventory = BigInt(inventory);
+  const stockAvailable = BigInt(row.stock_available);
+  const stockSeckillLocked = BigInt(row.stock_seckill_locked);
+  const proposedSeckillInventory = BigInt(row.proposed_seckill_inventory);
+  if (requestedInventory > proposedSeckillInventory) {
     throw new CoreError('InventoryUnavailable', 'Activity inventory exceeds the merchant proposal', 409);
   }
-  if (inventory > Number(row.stock_available)) {
+  if (stockSeckillLocked + requestedInventory > proposedSeckillInventory) {
+    throw new CoreError('InventoryUnavailable', 'Activity inventory exceeds the remaining merchant proposal', 409);
+  }
+  if (requestedInventory > stockAvailable) {
     throw new CoreError('InventoryUnavailable', 'Activity inventory exceeds available stock', 409);
   }
   return row;
@@ -1436,7 +1446,7 @@ function serializableIntent(intent: SensitiveActionIntent) {
   };
 }
 
-async function actionProjection(executor: SqlExecutor, row: SeckillActionRow) {
+async function actionProjection(executor: SqlExecutor, row: SeckillActionRow, now = new Date()) {
   const plan = row.action_kind === 'OPEN_SESSION'
     ? (await executor.query<PlanRow>('SELECT * FROM core.seckill_session_plans WHERE action_id = $1', [row.action_id])).rows[0]
     : undefined;
@@ -1499,13 +1509,16 @@ async function actionProjection(executor: SqlExecutor, row: SeckillActionRow) {
       finalJournalId: injection.final_journal_id,
       reversalJournalId: injection.reversal_journal_id,
     } : null,
-    allowedActions: allowedActions(row),
+    allowedActions: allowedActions(row, now),
   });
 }
 
-function allowedActions(row: SeckillActionRow) {
+function allowedActions(row: SeckillActionRow, now: Date) {
   if (row.state === 'DRAFT') return ['APPROVE_SECONDARY', 'CANCEL'];
-  if (row.state === 'SECONDARY_SIGNED') return ['EXECUTE', 'CANCEL'];
+  if (row.state === 'SECONDARY_SIGNED') {
+    if (!row.approval_deadline || row.approval_deadline <= now) return ['CANCEL'];
+    return ['EXECUTE', 'CANCEL'];
+  }
   return [];
 }
 

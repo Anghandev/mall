@@ -134,6 +134,7 @@ export type DeterministicEoaSettlementExecutorErrorCode =
   (typeof deterministicEoaSettlementExecutorErrorCodes)[number];
 
 interface SettlementTransferService {
+  hasPendingTransfer(input: { asset: 'USDT' | 'NPL'; executorWallet: string }): Promise<boolean>;
   createTransfer(
     actor: { walletAddress: string; roles: readonly ['OPERATOR'] },
     input: {
@@ -155,12 +156,14 @@ const defaultSettlementWorkerLogger: SettlementWorkerLogger = {
     console.error(message, context);
   },
 };
+const SETTLED_CANONICALITY_AUDIT_INTERVAL_MS = 30 * 60_000;
 
 export class SettlementTransferScheduler {
   readonly #service: SettlementTransferService;
   readonly #platformWallet: string;
   readonly #targets: readonly {
     asset: 'USDT' | 'NPL';
+    executorWallet: string;
     gasCap: string;
     attest(): Promise<EoaRuntimeEvidence>;
   }[];
@@ -174,6 +177,7 @@ export class SettlementTransferScheduler {
     platformWallet: string;
     targets: readonly {
       asset: 'USDT' | 'NPL';
+      executorWallet: string;
       gasCap: string;
       attest(): Promise<EoaRuntimeEvidence>;
     }[];
@@ -184,7 +188,7 @@ export class SettlementTransferScheduler {
     this.#logger = input.logger ?? defaultSettlementWorkerLogger;
     this.#targets = input.targets.map((target) => {
       positiveInteger(target.gasCap, 'settlement gas cap');
-      return target;
+      return { ...target, executorWallet: address(target.executorWallet, 'settlement executor wallet') };
     });
   }
 
@@ -192,6 +196,10 @@ export class SettlementTransferScheduler {
     let created = 0;
     for (const target of this.#targets) {
       try {
+        if (!await this.#service.hasPendingTransfer({
+          asset: target.asset,
+          executorWallet: target.executorWallet,
+        })) continue;
         const runtime = await target.attest();
         await this.#service.createTransfer(
           { walletAddress: this.#platformWallet, roles: ['OPERATOR'] },
@@ -468,6 +476,7 @@ export class SettlementWorker {
   }
 
   async reconcileSettledCanonicalityOnce() {
+    const auditBefore = new Date(this.#clock().getTime() - SETTLED_CANONICALITY_AUDIT_INTERVAL_MS);
     const candidate = await this.#transactions.transaction(async (executor) => {
       await lockSeckillPrizeFundingMutation(executor);
       const result = await executor.query<{
@@ -500,6 +509,7 @@ export class SettlementWorker {
              AND finality.block_number IS NOT NULL AND finality.block_hash IS NOT NULL
              AND transfer.artifact_version = $1
              AND intent.artifact_version = $1
+             AND finality.updated_at <= $2
            UNION ALL
            SELECT transfer.transfer_id, attempt.attempt_id, finality.transaction_id,
              finality.block_number::text, finality.block_hash,
@@ -520,6 +530,7 @@ export class SettlementWorker {
              AND finality.block_number IS NOT NULL AND finality.block_hash IS NOT NULL
              AND transfer.artifact_version = $1
              AND intent.artifact_version = $1
+             AND finality.updated_at <= $2
              AND EXISTS (
                SELECT 1 FROM core.durable_jobs job
                WHERE job.job_type = 'RECONCILE'
@@ -528,7 +539,7 @@ export class SettlementWorker {
              )
          ) candidate
          ORDER BY candidate.updated_at, candidate.transfer_id LIMIT 1`,
-        [CORE_ARTIFACT_VERSION],
+        [CORE_ARTIFACT_VERSION, auditBefore],
       );
       const row = result.rows[0];
       if (!row) return undefined;

@@ -25,6 +25,7 @@ import {
   type AdminBusinessDashboard,
   type AuditStreamName,
   type AuditListResponse,
+  type CmsPublicItem,
   type CmsVersionCreateRequest,
   type CmsVersionProjection,
   type CoverageBreakerActionProjection,
@@ -249,6 +250,15 @@ export async function fetchCmsVersion(versionId: string, token: string, signal?:
   return body;
 }
 
+export async function fetchPublishedCms(token?: string, signal?: AbortSignal): Promise<readonly CmsPublicItem[]> {
+  const body = await requestCoreJson('/v2/cms/public', {
+    ...(token ? { headers: { authorization: `Bearer ${token}` } } : {}),
+    ...(signal ? { signal } : {}),
+  });
+  if (!Array.isArray(body) || !body.every(isCmsPublicItem)) throw invalid('Published CMS list does not match the coordinated generated type');
+  return Object.freeze([...body]);
+}
+
 export async function createCmsVersion(input: CmsVersionCreateRequest, token: string): Promise<CmsVersionProjection> {
   const body = await authenticatedWrite('/v2/admin/cms/versions', 'POST', input, token);
   if (!isCmsVersion(body)) throw invalid('Created CMS version does not match the coordinated generated type');
@@ -450,7 +460,7 @@ function isTakeoverFundingDetail(value: unknown): value is TakeoverFundingDetail
 }
 
 function isTakeoverFundingChallenge(value: unknown): value is TakeoverFundingChallenge {
-  return isRecord(value) && isRecord(value.plan) && isTypedData(value.typedData)
+  return isRecord(value) && isRecord(value.plan) && addressPattern.test(String(value.signer)) && isTypedData(value.typedData)
     && typeof value.plan.caseId === 'string' && amountPattern.test(String(value.plan.requiredUsdt));
 }
 
@@ -497,6 +507,20 @@ function isCmsVersion(value: unknown): value is CmsVersionProjection {
     && typeof value.published === 'boolean'
     && addressPattern.test(String(value.createdBy))
     && isDateTime(value.createdAt);
+}
+
+function isCmsPublicItem(value: unknown): value is CmsPublicItem {
+  return isRecord(value)
+    && nonEmpty(value, ['entryId', 'versionId', 'slug', 'placement', 'locale'])
+    && Number.isSafeInteger(value.version)
+    && cmsContentTypes.includes(value.contentType as never)
+    && isRecord(value.content)
+    && isRecord(value.audience)
+    && bytes32Pattern.test(String(value.contentHash))
+    && (value.policyVersion === null || amountPattern.test(String(value.policyVersion)))
+    && (value.startsAt === null || isDateTime(value.startsAt))
+    && (value.endsAt === null || isDateTime(value.endsAt))
+    && (value.frequencyCap === null || Number.isSafeInteger(value.frequencyCap));
 }
 
 function isSystemConfig(value: unknown): value is SystemConfigProjection {

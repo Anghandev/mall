@@ -24,7 +24,7 @@ import type {
   MediaReadAccessProjection,
   MerchantConcessionAllocation,
   MerchantConcessionPreview,
-  MerchantStore,
+  MerchantManagedStore,
   ProductSlotInput,
   ProductSlotProjection,
 } from '@abu24k/core-artifacts';
@@ -52,7 +52,7 @@ type WorkspaceState =
   | {
       phase: 'ready';
       merchantId: string;
-      stores: readonly MerchantStore[];
+      stores: readonly MerchantManagedStore[];
       categories: readonly CatalogCategory[];
       tags: readonly CatalogTag[];
     };
@@ -102,7 +102,7 @@ const lifecycleLabels: Record<CatalogProductLifecycleState, string> = {
   DRAFT: '草稿未送审',
   REVIEW: '平台审核中',
   SCHEDULED: '待排期上架',
-  ACTIVE: '秒杀大厅进行中',
+  ACTIVE: '已上架 / 可售',
   SOLD_OUT: '已售罄',
   HIDDEN: '平台隐藏',
   DELISTED: '已下架',
@@ -134,6 +134,7 @@ export function ProductPage() {
   const [slot, setSlot] = useState<SlotState>({ phase: 'idle' });
   const [draft, setDraft] = useState<ProductDraft>(() => emptyDraft());
   const [preview, setPreview] = useState<MerchantConcessionPreview>();
+  const [draftDirty, setDraftDirty] = useState(false);
   const [mediaAccess, setMediaAccess] = useState<Record<string, MediaReadAccessProjection>>({});
   const [busy, setBusy] = useState<string>();
   const [feedback, setFeedback] = useState<CommandFeedback>();
@@ -149,12 +150,12 @@ export function ProductPage() {
     try {
       const [finance, stores, categories, tags] = await Promise.all([
         api.getMerchantFinance(session.token),
-        api.listMerchantStores(),
+        api.listManagedMerchantStores(session.token),
         api.listCatalogCategories(),
         api.listCatalogTags(),
       ]);
       const merchantId = finance.merchant.merchant_id;
-      const ownedStores = stores.filter((store) => store.merchantId === merchantId);
+      const ownedStores = stores.filter((store) => store.merchantId === merchantId && store.status === 'ACTIVE');
       setWorkspace({ phase: 'ready', merchantId, stores: ownedStores, categories, tags });
       setSelectedStoreId((current) => ownedStores.some((store) => store.storeId === current)
         ? current
@@ -179,6 +180,7 @@ export function ProductPage() {
       const value = await api.getMerchantProductSlot(selectedStoreId, session.token);
       setSlot({ phase: 'ready', value });
       setDraft(productDraft(value.product));
+      setDraftDirty(false);
       setPreview(undefined);
       setDelistReason('');
     } catch (error) {
@@ -222,6 +224,7 @@ export function ProductPage() {
 
   const edit = useCallback((update: (current: ProductDraft) => ProductDraft) => {
     setDraft(update);
+    setDraftDirty(true);
     setPreview(undefined);
     setFeedback(undefined);
   }, []);
@@ -268,6 +271,7 @@ export function ProductPage() {
       const value = await api.getMerchantProductSlot(selectedStoreId, session.token);
       setSlot({ phase: 'ready', value });
       setDraft(productDraft(value.product));
+      setDraftDirty(false);
       setPreview(undefined);
       setFeedback({
         tone: 'success',
@@ -284,6 +288,10 @@ export function ProductPage() {
 
   async function createPreview() {
     if (!session || !product || !can('CREATE_CONCESSION_PREVIEW')) return;
+    if (draftDirty) {
+      setFeedback({ tone: 'error', message: '你刚改了商品资料，请先点“保存草稿”。保存后再检查让利和应收。' });
+      return;
+    }
     const concessionBps = parseConcessionPercent(draft.merchantConcessionBps);
     const payload = { productId: product.productId, productVersion: product.version, concessionBps };
     const scope = `preview-${product.productId}`;
@@ -309,7 +317,7 @@ export function ProductPage() {
 
   async function submitReview() {
     if (!session || !product || !preview || !can('SUBMIT_REVIEW')) return;
-    const readiness = productReviewReadiness(draft, Boolean(preview));
+    const readiness = productReviewReadiness(draft, Boolean(preview), draftDirty);
     if (!readiness.ready) {
       setFeedback({ tone: 'error', message: readiness.items.find((item) => !item.done)?.help ?? '请先补齐商品资料。' });
       return;
@@ -327,6 +335,7 @@ export function ProductPage() {
       const value = await api.getMerchantProductSlot(selectedStoreId, session.token);
       setSlot({ phase: 'ready', value });
       setDraft(productDraft(value.product));
+      setDraftDirty(false);
       setPreview(undefined);
       setFeedback({ tone: 'success', message: `商品已送审，当前状态：${lifecycleLabels[submitted.lifecycleState]}。` });
     } catch (error) {
@@ -417,7 +426,8 @@ export function ProductPage() {
   const selectedStore = workspace.phase === 'ready'
     ? workspace.stores.find((store) => store.storeId === selectedStoreId)
     : undefined;
-  const reviewReadiness = productReviewReadiness(draft, Boolean(preview));
+  const reviewReadiness = productReviewReadiness(draft, Boolean(preview), draftDirty);
+  const canCreatePreview = can('CREATE_CONCESSION_PREVIEW') && !draftDirty && !busy;
   const canSubmitReview = can('SUBMIT_REVIEW') && Boolean(preview) && reviewReadiness.ready && !busy;
   return (
     <div className="page-stack">
@@ -624,7 +634,7 @@ export function ProductPage() {
             ) : null}
             <div className="command-grid">
               <button className="button primary" disabled={!canEdit} onClick={() => void saveDraft()} type="button"><Save aria-hidden="true" size={16} /> {busy === 'save' ? '保存中…' : '保存草稿'}</button>
-              <button className="button secondary" disabled={!can('CREATE_CONCESSION_PREVIEW') || Boolean(busy)} onClick={() => void createPreview()} type="button"><Eye aria-hidden="true" size={16} /> {busy === 'preview' ? '检查中…' : '检查让利和应收'}</button>
+              <button className="button secondary" disabled={!canCreatePreview} onClick={() => void createPreview()} type="button" title={draftDirty ? '请先保存草稿' : undefined}><Eye aria-hidden="true" size={16} /> {busy === 'preview' ? '检查中…' : '检查让利和应收'}</button>
               <button className="button secondary" disabled={!canSubmitReview} onClick={() => void submitReview()} type="button" title={canSubmitReview ? undefined : reviewReadiness.items.find((item) => !item.done)?.help}><Send aria-hidden="true" size={16} /> {busy === 'review' ? '送审中…' : '提交平台审核'}</button>
               {product?.lifecycleState === 'SOLD_OUT' && can('SAVE_DRAFT') ? (
                 <button className="button secondary" disabled={Boolean(busy)} onClick={() => edit(() => emptyDraft())} type="button"><PackagePlus aria-hidden="true" size={16} /> 准备替代商品</button>
@@ -993,7 +1003,7 @@ function objectDraftText(value: unknown, preferredTextKey: string) {
   return JSON.stringify(value ?? {}, null, 2);
 }
 
-function productReviewReadiness(draft: ProductDraft, hasPreview: boolean) {
+function productReviewReadiness(draft: ProductDraft, hasPreview: boolean, draftDirty = false) {
   const hasSkuPriceAndStock = draft.skus.length > 0 && draft.skus.every((sku) => {
     const priceOk = isPositiveUsdtInput(sku.listPriceUsdt);
     const stock = Number(sku.stockTotal);
@@ -1004,6 +1014,7 @@ function productReviewReadiness(draft: ProductDraft, hasPreview: boolean) {
     { label: '商品标题', done: draft.title.trim().length > 0, help: '请先填写商品标题。' },
     { label: '商品主图 1 到 5 张', done: draft.mainImageAssetIds.length >= 1 && draft.mainImageAssetIds.length <= 5, help: '请先上传 1 到 5 张商品主图，然后保存草稿。' },
     { label: '价格和库存', done: hasSkuPriceAndStock, help: '请检查商品售价、总库存和秒杀库存。' },
+    { label: '商品草稿已保存', done: !draftDirty, help: '请先保存草稿，再检查让利和应收。' },
     { label: '让利和应收检查', done: hasPreview, help: '请先点击“检查让利和应收”。' },
   ];
   return { ready: items.every((item) => item.done), items };

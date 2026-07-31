@@ -53,11 +53,8 @@ type CreateDraft = {
   city: string;
   district: string;
   regionCode: string;
-};
-
-const defaultStoreCoordinate = {
-  longitude: 121.6147,
-  latitude: 38.9140,
+  longitude: string;
+  latitude: string;
 };
 
 const emptyCreateDraft: CreateDraft = {
@@ -69,6 +66,8 @@ const emptyCreateDraft: CreateDraft = {
   city: '',
   district: '',
   regionCode: '',
+  longitude: '',
+  latitude: '',
 };
 
 const actionLabels: Record<MerchantStoreAction, string> = {
@@ -202,8 +201,8 @@ export function StoresPage() {
       city: createDraft.city.trim(),
       district: createDraft.district.trim(),
       regionCode: createDraft.regionCode.trim(),
-      longitude: defaultStoreCoordinate.longitude,
-      latitude: defaultStoreCoordinate.latitude,
+      longitude: Number(createDraft.longitude.trim()),
+      latitude: Number(createDraft.latitude.trim()),
     };
     const scope = 'create-store';
     const input: CreateMerchantStoreRequest = { ...value, idempotencyKey: commandKey(scope, value) };
@@ -377,11 +376,13 @@ export function StoresPage() {
             <div className="field"><label htmlFor="create-city">市</label><input id="create-city" maxLength={64} onChange={(event) => setCreateDraft((current) => ({ ...current, city: event.target.value }))} required value={createDraft.city} /></div>
             <div className="field"><label htmlFor="create-district">区县</label><input id="create-district" maxLength={64} onChange={(event) => setCreateDraft((current) => ({ ...current, district: event.target.value }))} required value={createDraft.district} /></div>
             <div className="field"><label htmlFor="create-region-code">地区代码（6 位）</label><input id="create-region-code" inputMode="numeric" maxLength={6} onChange={(event) => setCreateDraft((current) => ({ ...current, regionCode: event.target.value }))} pattern="[0-9]{6}" required value={createDraft.regionCode} /><FieldHelp>不知道就找平台要，不要随便填。</FieldHelp></div>
+            <div className="field"><label htmlFor="create-longitude">经度</label><input id="create-longitude" inputMode="decimal" onChange={(event) => setCreateDraft((current) => ({ ...current, longitude: event.target.value }))} placeholder="例如 121.6147" required value={createDraft.longitude} /><FieldHelp>从地图复制门店真实经度，不能乱填。</FieldHelp></div>
+            <div className="field"><label htmlFor="create-latitude">纬度</label><input id="create-latitude" inputMode="decimal" onChange={(event) => setCreateDraft((current) => ({ ...current, latitude: event.target.value }))} placeholder="例如 38.9140" required value={createDraft.latitude} /><FieldHelp>从地图复制门店真实纬度。</FieldHelp></div>
           </div>
           <div className="field"><label htmlFor="create-address">详细地址</label><input id="create-address" maxLength={300} minLength={5} onChange={(event) => setCreateDraft((current) => ({ ...current, address: event.target.value }))} required value={createDraft.address} /></div>
-          <div className="signature-note"><Crosshair aria-hidden="true" size={17} />系统会自动绑定定位，商家不用填经纬度。创建后地址不能直接改，搬店请新建门店。</div>
+          <div className="signature-note"><Crosshair aria-hidden="true" size={17} />经纬度会写进门店证据，请从地图复制真实位置。创建后地址不能直接改，搬店请新建门店。</div>
           {storeFeedback ? <p className={`command-notice ${storeFeedback.tone}`} role={storeFeedback.tone === 'error' ? 'alert' : 'status'}>{storeFeedback.message}</p> : null}
-          {!createFormValid ? <p className="field-help" role="status">请先补齐名称、电话、营业时间、省市区、6 位地区代码和详细地址，按钮才会亮。</p> : null}
+          {!createFormValid ? <p className="field-help" role="status">请先补齐名称、电话、营业时间、省市区、6 位地区代码、详细地址和真实经纬度，按钮才会亮。</p> : null}
           <button className="button primary" disabled={!createFormValid || Boolean(storeBusy)} type="submit">{storeBusy === 'create' ? '创建中…' : '创建草稿'}</button>
         </form>
       ) : null}
@@ -529,7 +530,15 @@ function validManualRegion(draft: CreateDraft) {
   return draft.address.trim().length >= 5
     && draft.address.length <= 300
     && [draft.province, draft.city, draft.district].every((value) => value.trim().length >= 1 && value.length <= 64)
-    && /^[0-9]{6}$/.test(draft.regionCode.trim());
+    && /^[0-9]{6}$/.test(draft.regionCode.trim())
+    && validCoordinate(draft.longitude, -180, 180)
+    && validCoordinate(draft.latitude, -90, 90);
+}
+
+function validCoordinate(value: string, min: number, max: number) {
+  if (!/^-?(?:0|[1-9][0-9]*)(?:\.[0-9]{1,8})?$/.test(value.trim())) return false;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= min && parsed <= max;
 }
 
 function validImage(file: File) {

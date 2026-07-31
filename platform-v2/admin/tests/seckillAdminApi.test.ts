@@ -55,8 +55,8 @@ describe('seckill admin coordinated Core client', () => {
 
   it('rejects mismatched artifacts and non-final realtime events', () => {
     const sessionId = hash('a');
-    expect(() => parseRealtimeEvent({ ...realtimeEvent(sessionId), artifactVersion: 'stale' }, sessionId)).toThrow(/coordinated protocol/);
-    expect(() => parseRealtimeEvent({ ...realtimeEvent(sessionId), finality: 'MINED' }, sessionId)).toThrow(/coordinated protocol/);
+    expect(() => parseRealtimeEvent({ ...realtimeEvent(sessionId), artifactVersion: 'stale' }, sessionId)).toThrow(/秒杀实时消息和当前场次不匹配/);
+    expect(() => parseRealtimeEvent({ ...realtimeEvent(sessionId), finality: 'MINED' }, sessionId)).toThrow(/秒杀实时消息和当前场次不匹配/);
   });
 
   it('rejects mutable timer projections and a premature FINAL governance action', async () => {
@@ -84,7 +84,7 @@ describe('seckill admin coordinated Core client', () => {
 
     expect(onEvent).toHaveBeenCalledTimes(1);
     expect(onError).toHaveBeenCalledWith(expect.objectContaining({ code: 'InvalidResponse' }));
-    expect(socket.closedWith).toEqual([4403, 'Protocol violation']);
+    expect(socket.closedWith).toEqual([4403, '秒杀实时协议异常']);
   });
 
   it('strictly reads governance action list and detail with bearer authorization', async () => {

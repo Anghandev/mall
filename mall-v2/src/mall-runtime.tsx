@@ -33,6 +33,7 @@ import type {
   PaymentProjection,
   PaymentQuoteResponse,
   PaymentSubmissionRequest,
+  PickupTarget,
   RealtimeEventEnvelope,
   SeckillQuoteResponse,
   SettlementListProjection,
@@ -50,6 +51,7 @@ import {
   type CoreClient,
   type FulfillmentEvidenceContentType,
   type PublishedSeckillSessionProjection,
+  type QuoteSelection,
   type WalletSession,
 } from './core-client';
 import { productBaseline } from './bootstrap';
@@ -64,6 +66,15 @@ import { createBrowserWalletGateway, type ApprovalStatus, type WalletGateway } f
 type SignedQuote = PaymentQuoteResponse | SeckillQuoteResponse;
 type LoadState = 'loading' | 'ready' | 'empty' | 'error';
 type CheckoutBusyKind = 'PICKUP_TARGET' | 'QUOTE' | 'PAYMENT';
+
+export interface PickupCredentialView {
+  code: string;
+  idempotencyKey?: string;
+  evidenceHash?: string;
+  credentialId?: string;
+  expiresAt: string;
+  phase?: 'REGISTERING' | 'REGISTERED';
+}
 
 export type BuyerAddressDraft = Omit<BuyerAddressWriteRequest, 'expectedVersion' | 'idempotencyKey'>;
 
@@ -111,6 +122,7 @@ export interface MallRuntimeValue {
   taxonomyState: LoadState;
   stores: readonly MerchantStore[];
   storesState: LoadState;
+  storesScope: { readonly productId: string | null };
   checkoutTarget: CheckoutTarget | null;
   seckillSession: PublishedSeckillSessionProjection | null;
   seckillSessionState: LoadState;
@@ -124,6 +136,8 @@ export interface MallRuntimeValue {
   ordersNextCursor: FulfillmentOrderCursor | null;
   orderActions: Readonly<Record<string, readonly AllowedAction[]>>;
   orderTargets: Readonly<Record<string, FulfillmentTarget>>;
+  pickupCredentials: Readonly<Record<string, PickupCredentialView>>;
+  pickupCredentialErrors: Readonly<Record<string, string>>;
   orderCapabilityErrors: Readonly<Record<string, string>>;
   takeoverTimelines: Readonly<Record<string, BuyerTakeoverTimeline>>;
   takeoverTimelineErrors: Readonly<Record<string, string>>;
@@ -170,8 +184,9 @@ export interface MallRuntimeValue {
   resolvePublicMedia(assetId: string, forceRefresh?: boolean): Promise<MediaReadAccessProjection>;
   reloadSeckill(): Promise<void>;
   selectSeckillSession(): boolean;
-  reloadStores(regionCode?: string): Promise<void>;
+  reloadStores(regionCode?: string, productId?: string): Promise<void>;
   createPickupTarget(storeId: string): Promise<void>;
+  createPickupCredential(orderId: string): Promise<void>;
   reloadOrders(): Promise<void>;
   loadMoreOrders(): Promise<void>;
   submitBuyerAction(
@@ -201,6 +216,7 @@ export interface MallRuntimeValue {
   requestSeckillQuote(sessionId: string): Promise<boolean>;
   broadcastPayment(acknowledgeUnlimitedApproval: boolean, acknowledgeSeckillFallback: boolean): Promise<void>;
   retrySubmission(): Promise<void>;
+  recoverPaymentSubmission(orderId: string, txHash: string, replacementForTxHash?: string): Promise<void>;
   refreshPayment(): Promise<void>;
   revokeApproval(index: number): Promise<void>;
   clearError(): void;
@@ -223,6 +239,8 @@ export function MallRuntimeProvider({
   const [taxonomyState, setTaxonomyState] = useState<LoadState>('loading');
   const [stores, setStores] = useState<readonly MerchantStore[]>([]);
   const [storesState, setStoresState] = useState<LoadState>('loading');
+  const [storesScope, setStoresScope] = useState<{ readonly productId: string | null }>({ productId: null });
+  const storeListRequestId = useRef(0);
   const [checkoutTarget, setCheckoutTarget] = useState<CheckoutTarget | null>(null);
   const [seckillSession, setSeckillSession] = useState<PublishedSeckillSessionProjection | null>(null);
   const [seckillSessionState, setSeckillSessionState] = useState<LoadState>('loading');
@@ -236,6 +254,8 @@ export function MallRuntimeProvider({
   const [ordersNextCursor, setOrdersNextCursor] = useState<FulfillmentOrderCursor | null>(null);
   const [orderActions, setOrderActions] = useState<Readonly<Record<string, readonly AllowedAction[]>>>({});
   const [orderTargets, setOrderTargets] = useState<Readonly<Record<string, FulfillmentTarget>>>({});
+  const [pickupCredentials, setPickupCredentials] = useState<Readonly<Record<string, PickupCredentialView>>>({});
+  const [pickupCredentialErrors, setPickupCredentialErrors] = useState<Readonly<Record<string, string>>>({});
   const [orderCapabilityErrors, setOrderCapabilityErrors] = useState<Readonly<Record<string, string>>>({});
   const [takeoverTimelines, setTakeoverTimelines] = useState<Readonly<Record<string, BuyerTakeoverTimeline>>>({});
   const [takeoverTimelineErrors, setTakeoverTimelineErrors] = useState<Readonly<Record<string, string>>>({});
@@ -390,19 +410,44 @@ export function MallRuntimeProvider({
 
   useEffect(() => {
     let active = true;
+    const requestId = ++storeListRequestId.current;
     void services.core.listStores()
       .then((nextStores) => {
-        if (!active) return;
+        if (!active || requestId !== storeListRequestId.current) return;
         setStores(nextStores);
+        setStoresScope({ productId: null });
         setStoresState(nextStores.length > 0 ? 'ready' : 'empty');
       })
       .catch(() => {
-        if (!active) return;
+        if (!active || requestId !== storeListRequestId.current) return;
         setStores([]);
+        setStoresScope({ productId: null });
         setStoresState('error');
       });
     return () => { active = false; };
   }, [services]);
+
+  useEffect(() => {
+    if (!selectedProduct || fulfillmentMode !== 'PICKUP') return;
+    let active = true;
+    const requestId = ++storeListRequestId.current;
+    setStores([]);
+    setStoresState('loading');
+    void services.core.listStores(undefined, selectedProduct.productId)
+      .then((nextStores) => {
+        if (!active || requestId !== storeListRequestId.current) return;
+        setStores(nextStores);
+        setStoresScope({ productId: selectedProduct.productId });
+        setStoresState(nextStores.length > 0 ? 'ready' : 'empty');
+      })
+      .catch(() => {
+        if (!active || requestId !== storeListRequestId.current) return;
+        setStores([]);
+        setStoresScope({ productId: selectedProduct.productId });
+        setStoresState('error');
+      });
+    return () => { active = false; };
+  }, [fulfillmentMode, selectedProduct?.productId, services]);
 
   const value = useMemo<MallRuntimeValue>(() => ({
     bootstrap,
@@ -413,6 +458,7 @@ export function MallRuntimeProvider({
     taxonomyState,
     stores,
     storesState,
+    storesScope,
     checkoutTarget,
     seckillSession,
     seckillSessionState,
@@ -426,6 +472,8 @@ export function MallRuntimeProvider({
     ordersNextCursor,
     orderActions,
     orderTargets,
+    pickupCredentials,
+    pickupCredentialErrors,
     orderCapabilityErrors,
     takeoverTimelines,
     takeoverTimelineErrors,
@@ -472,7 +520,6 @@ export function MallRuntimeProvider({
       let postLoginSession: WalletSession | null = null;
       await run(async () => {
         const connectionAttempt = ++walletConnectionAttempt.current;
-        resetAuthenticatedState();
         const walletAddress = await services.wallet.connect();
         const cachedSession = loadCachedWalletSession(walletAddress);
         const signMessage = (message: string) => services.wallet.signMessage(message);
@@ -492,10 +539,12 @@ export function MallRuntimeProvider({
           saveCachedWalletSession(nextSession);
           products = await services.core.listCatalog(nextSession.token);
         }
+        resetAuthenticatedState();
         const recovered = services.submissionStore.load(nextSession.walletAddress);
         setPendingSubmission(recovered);
         setSubmittedTxHash(recovered?.txHash ?? null);
         setSession(nextSession);
+        setPickupCredentials(loadCachedPickupCredentials(nextSession.walletAddress));
         setCatalog(products);
         setCatalogState(products.length > 0 ? 'ready' : 'empty');
         postLoginAttempt = connectionAttempt;
@@ -561,14 +610,19 @@ export function MallRuntimeProvider({
       return true;
     },
 
-    async reloadStores(regionCode) {
+    async reloadStores(regionCode, productId) {
+      const requestId = ++storeListRequestId.current;
       setStoresState('loading');
       await run(async () => {
-        const nextStores = await services.core.listStores(regionCode);
+        const nextStores = await services.core.listStores(regionCode, productId);
+        if (requestId !== storeListRequestId.current) return;
         setStores(nextStores);
+        setStoresScope({ productId: productId ?? null });
         setStoresState(nextStores.length > 0 ? 'ready' : 'empty');
       }, () => {
+        if (requestId !== storeListRequestId.current) return;
         setStores([]);
+        setStoresScope({ productId: productId ?? null });
         setStoresState('error');
       });
     },
@@ -578,12 +632,16 @@ export function MallRuntimeProvider({
       try {
         await run(async () => {
           const activeSession = requireSession();
+          if (selectedProduct && storesScope.productId !== selectedProduct.productId) {
+            throw new CoreClientError('InvalidRequest', '请先读取当前商品的自提门店');
+          }
           const store = stores.find((item) => item.storeId === storeId && item.status === 'ACTIVE');
           if (!store) throw new CoreClientError('InvalidRequest', '请选择当前可用门店');
           const target = await services.core.createPickupTarget(activeSession.token, {
             idempotencyKey: services.createIdempotencyKey(),
             storeId: store.storeId,
           });
+          assertPickupTargetMatchesStore(target, store);
           setCheckoutTarget({
             fulfillmentMode: target.fulfillmentMode,
             fulfillmentTargetHash: target.targetHash,
@@ -595,6 +653,79 @@ export function MallRuntimeProvider({
         });
       } finally {
         setCheckoutBusy(null);
+      }
+    },
+
+
+    async createPickupCredential(orderId) {
+      setBusy(true);
+      setError(null);
+      const credentialKey = pickupCredentialOrderKey(orderId);
+      setPickupCredentialErrors((current) => omitRecordKey(current, credentialKey));
+      let activeSession = requireSession();
+      let order = orders.find((item) => item.orderId === orderId);
+      try {
+        activeSession = await ensureFreshBuyerSession(activeSession);
+        order = orders.find((item) => item.orderId === orderId);
+        if (!order || order.buyerWallet.toLowerCase() !== activeSession.walletAddress.toLowerCase()) {
+          throw new CoreClientError('Forbidden', '订单与当前买家钱包不一致');
+        }
+        if (order.fulfillmentMode !== 'PICKUP' || order.state !== 'PAID') {
+          throw new CoreClientError('UnknownState', '只有已付款的自提订单才能生成核销码');
+        }
+        const allowed = orderActions[orderId]?.find((item) => item.action === 'REGISTER_PICKUP_CREDENTIAL');
+        const currentCredential = pickupCredentials[credentialKey];
+        const canRetryRegistering = currentCredential?.phase === 'REGISTERING'
+          && currentCredential.idempotencyKey
+          && currentCredential.evidenceHash;
+        if (!allowed?.enabled && !canRetryRegistering) {
+          throw new CoreClientError('Forbidden', '系统当前不允许生成新的自提核销码');
+        }
+        const request = canRetryRegistering
+          ? {
+              idempotencyKey: currentCredential.idempotencyKey!,
+              evidenceHash: currentCredential.evidenceHash!,
+              code: currentCredential.code,
+              expiresAt: currentCredential.expiresAt,
+            }
+          : {
+              idempotencyKey: services.createIdempotencyKey(),
+              evidenceHash: randomBytes32(),
+              code: randomPickupCode(),
+              expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+            };
+        const registeringCredential: PickupCredentialView = { ...request, phase: 'REGISTERING' };
+        saveCachedPickupCredential(activeSession.walletAddress, order.orderId, registeringCredential);
+        setPickupCredentials((current) => ({ ...current, [credentialKey]: registeringCredential }));
+        let result: Awaited<ReturnType<CoreClient['registerPickupCredential']>>;
+        try {
+          result = await services.core.registerPickupCredential(activeSession.token, order.orderId, request);
+        } catch (reason) {
+          if (!isWalletSessionAuthFailure(reason)) throw reason;
+          clearCachedWalletSession(activeSession.walletAddress);
+          activeSession = await refreshBuyerSession(activeSession.walletAddress);
+          result = await services.core.registerPickupCredential(activeSession.token, order.orderId, request);
+        }
+        const credential: PickupCredentialView = {
+          code: request.code,
+          credentialId: result.credentialId,
+          expiresAt: result.expiresAt,
+          phase: 'REGISTERED',
+        };
+        saveCachedPickupCredential(activeSession.walletAddress, order.orderId, credential);
+        setPickupCredentials((current) => ({ ...current, [credentialKey]: credential }));
+        setPickupCredentialErrors((current) => omitRecordKey(current, credentialKey));
+        await loadOrderBundle(activeSession);
+      } catch (reason) {
+        if (order && isDefinitivePickupCredentialRejection(reason)) {
+          removeCachedPickupCredential(activeSession.walletAddress, order.orderId);
+          setPickupCredentials((current) => omitRecordKey(current, credentialKey));
+        }
+        const message = errorMessage(reason);
+        setError(message);
+        setPickupCredentialErrors((current) => ({ ...current, [credentialKey]: pickupCredentialErrorMessage(reason, message) }));
+      } finally {
+        setBusy(false);
       }
     },
 
@@ -913,8 +1044,16 @@ export function MallRuntimeProvider({
       if (pendingSubmission) return setError('当前付款凭证尚未提交给系统，请先恢复跟踪');
       const product = catalog.find((item) => item.productId === productId);
       setSelectedProductId(product?.productId ?? null);
-      setSelectedSkuId(null);
+      setSelectedSkuId(product ? firstOrdinaryPurchasableSkuId(product) : null);
       setSelectedSeckillSessionId(null);
+      if (checkoutTarget?.fulfillmentMode === 'PICKUP') setCheckoutTarget(null);
+      const nextFulfillmentMode = product?.fulfillmentModes.includes(fulfillmentMode)
+        ? fulfillmentMode
+        : product?.fulfillmentModes[0];
+      if (nextFulfillmentMode === 'PICKUP') {
+        setStores([]);
+        setStoresState('loading');
+      }
       if (product && !product.fulfillmentModes.includes(fulfillmentMode)) {
         setFulfillmentModeState(product.fulfillmentModes[0]!);
         setCheckoutTarget(null);
@@ -948,6 +1087,10 @@ export function MallRuntimeProvider({
         return setError('该商品未发布当前履约方式');
       }
       setFulfillmentModeState(mode);
+      if (mode === 'PICKUP') {
+        setStores([]);
+        setStoresState('loading');
+      }
       if (checkoutTarget?.fulfillmentMode !== mode) setCheckoutTarget(null);
       clearPaymentState();
     },
@@ -957,10 +1100,14 @@ export function MallRuntimeProvider({
       setCheckoutBusy('QUOTE');
       try {
         await run(async () => {
+          const productSnapshot = selectedProduct;
+          const skuSnapshot = selectedSku;
           const selection = await buildSelection();
           const nextQuote = await services.core.createOrdinaryQuote(requireSession().token, selection);
+          assertQuoteMatchesSelection(nextQuote, selection, productSnapshot, skuSnapshot, null);
           setQuote(nextQuote);
           setProjection(null);
+          setSubmittedTxHash(null);
           inspectQuoteApprovals(nextQuote);
           success = true;
         });
@@ -980,10 +1127,28 @@ export function MallRuntimeProvider({
             || seckillSession.phase !== 'LIVE') {
             throw new CoreClientError('InvalidRequest', '秒杀场次选择已失效，请返回大厅重新同步');
           }
+          if (!selectedSku?.seckill) {
+            throw new CoreClientError('InventoryUnavailable', '本场已抢完，请返回秒杀大厅查看下一场。');
+          }
+          const seckillAvailable = minBigInt(
+            BigInt(seckillSession.inventory.available),
+            BigInt(selectedSku.seckill.inventory.available),
+            BigInt(selectedSku.stockAvailable),
+          );
+          if (seckillAvailable === 0n) {
+            throw new CoreClientError('InventoryUnavailable', '本场已抢完，请返回秒杀大厅查看下一场。');
+          }
+          if (seckillAvailable < BigInt(quantity)) {
+            throw new CoreClientError('InventoryUnavailable', '本场剩余库存不足，请减少购买数量。');
+          }
+          const productSnapshot = selectedProduct;
+          const skuSnapshot = selectedSku;
           const selection = await buildSelection();
           const nextQuote = await services.core.createSeckillQuote(requireSession().token, sessionId, selection);
+          assertQuoteMatchesSelection(nextQuote, selection, productSnapshot, skuSnapshot, sessionId);
           setQuote(nextQuote);
           setProjection(null);
+          setSubmittedTxHash(null);
           inspectQuoteApprovals(nextQuote);
           success = true;
         });
@@ -1040,6 +1205,40 @@ export function MallRuntimeProvider({
         }
         if (pendingSubmission.phase === 'PENDING_CORE_SUBMISSION') await submitAndRefresh(pendingSubmission);
         else await refreshAndComplete(pendingSubmission);
+      });
+    },
+
+    async recoverPaymentSubmission(orderId, txHash, replacementForTxHash) {
+      await run(async () => {
+        const activeSession = requireSession();
+        const normalizedOrderId = normalizeBytes32Input(orderId, '订单号');
+        const normalizedTxHash = normalizeBytes32Input(txHash, '钱包交易编号');
+        const typedReplacement = replacementForTxHash?.trim()
+          ? normalizeBytes32Input(replacementForTxHash, '原交易编号')
+          : undefined;
+        const automaticReplacement = pendingSubmission
+          && pendingSubmission.orderId.toLowerCase() === normalizedOrderId
+          && pendingSubmission.txHash.toLowerCase() !== normalizedTxHash
+          ? pendingSubmission.txHash.toLowerCase()
+          : undefined;
+        const normalizedReplacement = typedReplacement ?? automaticReplacement;
+        if (normalizedReplacement && normalizedReplacement === normalizedTxHash) {
+          throw new CoreClientError('InvalidRequest', '新交易编号不能和原交易编号一样');
+        }
+        const submission: PendingSubmission = {
+          artifactVersion: productBaseline.coreArtifacts,
+          chainId: productBaseline.chainId,
+          walletAddress: activeSession.walletAddress.toLowerCase(),
+          phase: 'PENDING_CORE_SUBMISSION',
+          orderId: normalizedOrderId,
+          txHash: normalizedTxHash,
+          ...(normalizedReplacement ? { replacementForTxHash: normalizedReplacement } : {}),
+        };
+        services.submissionStore.save(submission);
+        setSubmittedTxHash(normalizedTxHash);
+        setPendingSubmission(submission);
+        await submitAndRefresh(submission);
+        await loadOrderBundle(activeSession).catch(() => undefined);
       });
     },
 
@@ -1110,6 +1309,8 @@ export function MallRuntimeProvider({
     notifications,
     notificationsState,
     notificationEndpoint,
+    pickupCredentials,
+    pickupCredentialErrors,
     cmsItems,
     cmsState,
     projection,
@@ -1121,6 +1322,7 @@ export function MallRuntimeProvider({
     services,
     session,
     stores,
+    storesScope,
     storesState,
     submittedTxHash,
     tags,
@@ -1205,6 +1407,22 @@ export function MallRuntimeProvider({
     if (selectedSku.seckill && !selectedSeckillSessionId) {
       throw new CoreClientError('SeckillOnlyProduct', '该规格正在活动阶段，普通结算已停用');
     }
+    if (selectedSeckillSessionId) {
+      if (!selectedSku.seckill) {
+        throw new CoreClientError('InventoryUnavailable', '本场已抢完，请返回秒杀大厅查看下一场。');
+      }
+      const seckillAvailable = minBigInt(
+        BigInt(seckillSession?.inventory.available ?? '0'),
+        BigInt(selectedSku.seckill.inventory.available),
+        BigInt(selectedSku.stockAvailable),
+      );
+      if (seckillAvailable === 0n) {
+        throw new CoreClientError('InventoryUnavailable', '本场已抢完，请返回秒杀大厅查看下一场。');
+      }
+      if (seckillAvailable < BigInt(quantity)) {
+        throw new CoreClientError('InventoryUnavailable', '本场剩余库存不足，请减少购买数量。');
+      }
+    }
     if (BigInt(selectedSku.stockAvailable) < BigInt(quantity)) {
       throw new CoreClientError('InventoryUnavailable', '抱歉，该规格商品刚刚已被抢光，请重新选择规格！');
     }
@@ -1235,6 +1453,53 @@ export function MallRuntimeProvider({
       skuId: selectedSku.skuId,
       quantity,
     };
+  }
+
+  function assertQuoteMatchesSelection(
+    nextQuote: SignedQuote,
+    selection: QuoteSelection,
+    productSnapshot: CatalogProduct | null,
+    skuSnapshot: CatalogSku | null,
+    expectedSessionId: string | null,
+  ) {
+    if (!productSnapshot || !skuSnapshot) {
+      throw new CoreClientError('InvalidResponse', '系统报价和当前选择不一致，请重新选择后再试');
+    }
+    const assertIntent = (intent: PaymentQuoteResponse['intent'], label: string) => {
+      if (
+        intent.productId.toLowerCase() !== productSnapshot.chainProductId.toLowerCase()
+        || intent.skuId.toLowerCase() !== skuSnapshot.chainSkuId.toLowerCase()
+        || intent.quantity !== selection.quantity
+        || intent.fulfillmentMode !== selection.fulfillmentMode
+        || intent.fulfillmentTargetHash.toLowerCase() !== selection.fulfillmentTargetHash.toLowerCase()
+        || intent.regionCodeHash.toLowerCase() !== selection.regionCodeHash.toLowerCase()
+      ) {
+        throw new CoreClientError('InvalidResponse', `${label}和当前选择不一致，请重新选择后再试`);
+      }
+    };
+    if ('intent' in nextQuote) {
+      if (expectedSessionId !== null) throw new CoreClientError('InvalidResponse', '系统返回了普通报价，和当前秒杀场次不一致');
+      assertIntent(nextQuote.intent, '系统报价');
+      return;
+    }
+    if (!expectedSessionId || nextQuote.dual.sessionId.toLowerCase() !== expectedSessionId.toLowerCase()) {
+      throw new CoreClientError('InvalidResponse', '秒杀报价和当前场次不一致，请返回秒杀大厅重新进入');
+    }
+    assertIntent(nextQuote.dual.seckill, '秒杀报价');
+    assertIntent(nextQuote.dual.fallback, '普通兜底报价');
+  }
+
+  function assertPickupTargetMatchesStore(target: PickupTarget, store: MerchantStore) {
+    if (
+      target.storeId !== store.storeId
+      || target.store.storeId !== store.storeId
+      || target.store.merchantId !== store.merchantId
+      || target.store.regionCode !== store.regionCode
+      || target.store.status !== 'ACTIVE'
+      || target.regionCode !== store.regionCode
+    ) {
+      throw new CoreClientError('InvalidResponse', '系统返回的自提门店和当前选择不一致，请重新选择门店');
+    }
   }
 
   function quoteIdempotencyKey(fingerprint: string) {
@@ -1293,8 +1558,13 @@ export function MallRuntimeProvider({
         services.core.getOrderTarget(activeSession.token, order.orderId),
         services.core.getBuyerTakeoverTimeline(activeSession.token, order.orderId),
       ]);
-      if (targetResult.status === 'fulfilled') targets[order.orderId] = targetResult.value;
-      else capabilityErrors[order.orderId] = '履约目标暂无数据';
+      if (targetResult.status === 'fulfilled') {
+        if (targetResult.value.fulfillmentMode === order.fulfillmentMode) {
+          targets[order.orderId] = targetResult.value;
+        } else {
+          capabilityErrors[order.orderId] = '订单履约方式和收货信息不一致，请联系平台处理';
+        }
+      } else capabilityErrors[order.orderId] = '履约目标暂无数据';
       if (timelineResult.status === 'fulfilled') timelines[order.orderId] = timelineResult.value;
       else timelineErrors[order.orderId] = errorMessage(timelineResult.reason);
     }));
@@ -1331,6 +1601,24 @@ export function MallRuntimeProvider({
     if (results.some((result) => result.status === 'rejected')) {
       setError('部分账户数据同步失败，可在对应页面重试');
     }
+  }
+
+  async function ensureFreshBuyerSession(activeSession: WalletSession) {
+    const expiry = sessionTokenExpiryMs(activeSession.token);
+    if (expiry === null || expiry > Date.now() + WALLET_SESSION_EXPIRY_SAFETY_MS) return activeSession;
+    clearCachedWalletSession(activeSession.walletAddress);
+    return refreshBuyerSession(activeSession.walletAddress);
+  }
+
+  async function refreshBuyerSession(walletAddress: string) {
+    const nextSession = await services.core.authenticate(walletAddress, (message) => services.wallet.signMessage(message));
+    if (!nextSession.roles.includes('BUYER')) throw new CoreClientError('Forbidden', '当前钱包没有购买权限');
+    if (nextSession.walletAddress.toLowerCase() !== walletAddress.toLowerCase()) {
+      throw new CoreClientError('WalletMismatch', '钱包登录结果与当前钱包不一致');
+    }
+    saveCachedWalletSession(nextSession);
+    setSession(nextSession);
+    return nextSession;
   }
 
   async function loadBuyerAccountBundle(activeSession: WalletSession, isActive: () => boolean = () => true) {
@@ -1528,19 +1816,53 @@ export function MallRuntimeProvider({
   }
 
   async function submitAndRefresh(submission: PendingSubmission) {
-    await services.core.submitPayment(requireSession().token, paymentSubmissionRequest(submission));
+    let activeSession = await sessionForPendingSubmission(submission);
+    const request = paymentSubmissionRequest(submission);
+    try {
+      await services.core.submitPayment(activeSession.token, request);
+    } catch (reason) {
+      if (!isWalletSessionAuthFailure(reason)) throw reason;
+      clearCachedWalletSession(activeSession.walletAddress);
+      activeSession = await refreshBuyerSession(activeSession.walletAddress);
+      await services.core.submitPayment(activeSession.token, request);
+    }
     const awaitingProjection = { ...submission, phase: 'AWAITING_PROJECTION' as const };
     services.submissionStore.save(awaitingProjection);
     setPendingSubmission(awaitingProjection);
-    await refreshAndComplete(awaitingProjection);
+    await refreshAndComplete(awaitingProjection, activeSession);
   }
 
-  async function refreshAndComplete(submission: PendingSubmission) {
-    const nextProjection = await services.core.getPayment(requireSession().token, submission.orderId);
+  async function refreshAndComplete(submission: PendingSubmission, knownSession?: WalletSession) {
+    let activeSession = knownSession ?? await sessionForPendingSubmission(submission);
+    if (submission.walletAddress !== activeSession.walletAddress.toLowerCase()) {
+      throw new CoreClientError('WalletMismatch', '当前钱包与待恢复交易不一致');
+    }
+    let nextProjection: PaymentProjection;
+    try {
+      nextProjection = await services.core.getPayment(activeSession.token, submission.orderId);
+    } catch (reason) {
+      if (!isWalletSessionAuthFailure(reason)) throw reason;
+      clearCachedWalletSession(activeSession.walletAddress);
+      activeSession = await refreshBuyerSession(activeSession.walletAddress);
+      nextProjection = await services.core.getPayment(activeSession.token, submission.orderId);
+    }
     setQuote(nextProjection);
     setProjection(nextProjection);
-    services.submissionStore.clear(submission);
-    setPendingSubmission(null);
+    if (paymentProjectionIsFinal(nextProjection)) {
+      services.submissionStore.clear(submission);
+      setPendingSubmission(null);
+    } else {
+      services.submissionStore.save(submission);
+      setPendingSubmission(submission);
+    }
+  }
+
+  async function sessionForPendingSubmission(submission: PendingSubmission) {
+    const activeSession = await ensureFreshBuyerSession(requireSession());
+    if (submission.walletAddress !== activeSession.walletAddress.toLowerCase()) {
+      throw new CoreClientError('WalletMismatch', '当前钱包与待恢复交易不一致');
+    }
+    return activeSession;
   }
 
   function resetAuthenticatedState() {
@@ -1553,6 +1875,8 @@ export function MallRuntimeProvider({
     setOrdersNextCursor(null);
     setOrderActions({});
     setOrderTargets({});
+    setPickupCredentials({});
+    setPickupCredentialErrors({});
     setOrderCapabilityErrors({});
     setTakeoverTimelines({});
     setTakeoverTimelineErrors({});
@@ -1719,6 +2043,118 @@ export const defaultMallServices: MallServices = Object.freeze({
   supportUrl: import.meta.env.VITE_MALL_SUPPORT_URL ?? null,
 });
 
+
+const PICKUP_CREDENTIAL_CACHE_PREFIX = 'abu24k:mall:pickup-credentials';
+
+function pickupCredentialOrderKey(orderId: string) {
+  return orderId.toLowerCase();
+}
+
+function randomPickupCode() {
+  const random = cryptoRandomUint32();
+  return String(random % 1_000_000).padStart(6, '0');
+}
+
+function randomBytes32() {
+  const bytes = new Uint8Array(32);
+  const cryptoApi = globalThis.crypto;
+  if (!cryptoApi?.getRandomValues) throw new CoreClientError('ExternalBlocked', '当前浏览器不支持安全随机数');
+  cryptoApi.getRandomValues(bytes);
+  return `0x${Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+}
+
+function cryptoRandomUint32() {
+  const values = new Uint32Array(1);
+  const cryptoApi = globalThis.crypto;
+  if (!cryptoApi?.getRandomValues) throw new CoreClientError('ExternalBlocked', '当前浏览器不支持安全随机数');
+  cryptoApi.getRandomValues(values);
+  return values[0] ?? Math.floor(Math.random() * 1_000_000);
+}
+
+function pickupCredentialCacheKey(walletAddress: string) {
+  return [
+    PICKUP_CREDENTIAL_CACHE_PREFIX,
+    productBaseline.chainId,
+    walletAddress.toLowerCase(),
+  ].join(':');
+}
+
+function legacyPickupCredentialCacheKey(walletAddress: string) {
+  return [
+    PICKUP_CREDENTIAL_CACHE_PREFIX,
+    productBaseline.coreArtifacts,
+    productBaseline.chainId,
+    walletAddress.toLowerCase(),
+  ].join(':');
+}
+
+function loadCachedPickupCredentials(walletAddress: string): Readonly<Record<string, PickupCredentialView>> {
+  try {
+    const next = {
+      ...readCachedPickupCredentialsAtKey(legacyPickupCredentialCacheKey(walletAddress)),
+      ...readCachedPickupCredentialsAtKey(pickupCredentialCacheKey(walletAddress)),
+    };
+    if (Object.keys(next).length > 0) {
+      globalThis.localStorage?.setItem(pickupCredentialCacheKey(walletAddress), JSON.stringify(next));
+    }
+    return next;
+  } catch {
+    return {};
+  }
+}
+
+function readCachedPickupCredentialsAtKey(key: string) {
+  const raw = globalThis.localStorage?.getItem(key);
+  if (!raw) return {};
+  const parsed = JSON.parse(raw) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+  const next: Record<string, PickupCredentialView> = {};
+  for (const [orderId, credential] of Object.entries(parsed)) {
+    if (isCachedPickupCredential(credential) && new Date(credential.expiresAt).getTime() > Date.now()) {
+      next[pickupCredentialOrderKey(orderId)] = credential;
+    }
+  }
+  return next;
+}
+
+function saveCachedPickupCredential(walletAddress: string, orderId: string, credential: PickupCredentialView) {
+  try {
+    const current = loadCachedPickupCredentials(walletAddress);
+    globalThis.localStorage?.setItem(
+      pickupCredentialCacheKey(walletAddress),
+      JSON.stringify({ ...current, [pickupCredentialOrderKey(orderId)]: credential }),
+    );
+  } catch {
+    // 页面内状态仍会保留本次同步请求；系统未确认前不会把 6 位码展示给门店核销。
+  }
+}
+
+function removeCachedPickupCredential(walletAddress: string, orderId: string) {
+  try {
+    const key = pickupCredentialOrderKey(orderId);
+    const current = loadCachedPickupCredentials(walletAddress);
+    const next = omitRecordKey(current, key);
+    globalThis.localStorage?.setItem(pickupCredentialCacheKey(walletAddress), JSON.stringify(next));
+  } catch {
+    // 本机缓存删除失败不影响系统拒绝结果。
+  }
+}
+
+function isCachedPickupCredential(value: unknown): value is PickupCredentialView {
+  if (!value || typeof value !== 'object') return false;
+  const credential = value as PickupCredentialView;
+  const phase = credential.phase ?? (credential.credentialId ? 'REGISTERED' : 'REGISTERING');
+  if (typeof credential.code !== 'string' || !/^[0-9]{6}$/.test(credential.code)) return false;
+  if (credential.credentialId !== undefined && typeof credential.credentialId !== 'string') return false;
+  if (typeof credential.expiresAt !== 'string' || !Number.isFinite(new Date(credential.expiresAt).getTime())) return false;
+  if (phase === 'REGISTERED') return typeof credential.credentialId === 'string';
+  if (phase !== 'REGISTERING') return false;
+  return typeof credential.idempotencyKey === 'string'
+    && credential.idempotencyKey.length > 0
+    && typeof credential.evidenceHash === 'string'
+    && /^0x[0-9a-fA-F]{64}$/.test(credential.evidenceHash);
+}
+
 export function validateSupportUrl(value: string | null | undefined) {
   const raw = value?.trim();
   if (!raw) return { url: null, error: '客服入口未配置' } as const;
@@ -1781,23 +2217,87 @@ function errorMessage(reason: unknown) {
   return '操作失败，请稍后重试';
 }
 
+function pickupCredentialErrorMessage(reason: unknown, fallback: string) {
+  if (
+    reason instanceof CoreClientError
+    && (reason.code === 'IdempotencyConflict' || /active pickup credential/i.test(reason.message))
+  ) {
+    return '这笔订单已经有一个有效核销码。本机没有旧码时，请联系平台作废旧码后再生成。';
+  }
+  if (!(reason instanceof CoreClientError)) {
+    return '网络中断，系统还没有确认核销码。请点“继续同步核销码”，确认成功前不要给门店核销。';
+  }
+  if (['NetworkUnavailable', 'InvalidResponse', 'ExternalBlocked', 'RequestFailed'].includes(reason.code)) {
+    return '系统还没有确认核销码。请点“继续同步核销码”，确认成功前不要给门店核销。';
+  }
+  return fallback;
+}
+
+function isDefinitivePickupCredentialRejection(reason: unknown) {
+  if (!(reason instanceof CoreClientError) || isWalletSessionAuthFailure(reason)) return false;
+  return ![
+    'NetworkUnavailable',
+    'InvalidResponse',
+    'ExternalBlocked',
+    'RequestFailed',
+  ].includes(reason.code);
+}
+
+function paymentProjectionIsFinal(projection: PaymentProjection) {
+  return projection.state === 'PAID'
+    && projection.finality?.state === 'FINAL'
+    && projection.finality.confirmations >= projection.finality.requiredConfirmations;
+}
+
+function omitRecordKey<T>(record: Readonly<Record<string, T>>, key: string): Readonly<Record<string, T>> {
+  if (!(key in record)) return record;
+  const { [key]: _removed, ...rest } = record;
+  void _removed;
+  return rest;
+}
+
 function translateMallError(message: string, code?: string) {
   const cleaned = message
     .replace(/^\s*(InvalidRequest|InvalidResponse|Forbidden|ExternalBlocked|ConfigurationRequired|DecisionBlocked)\s*[:：]?\s*/i, '')
     .replace(/\s*[（(][0-9a-f]{8}-[0-9a-f-]{27,}[）)]$/i, '')
     .trim();
-  if (code === 'Forbidden' || /Forbidden/i.test(cleaned)) return '当前钱包没有权限，请切换正确钱包后重试。';
+  if (/Expired or invalid session token|invalid session token|session token/i.test(cleaned)) return '登录已过期，请重新连接钱包。';
+  if (/Merchant is not eligible for publication/i.test(cleaned)) return '商家暂不满足上架条件，请先完成入驻审核或经营条件。';
+  if (/Product, merchant or inventory is unavailable/i.test(cleaned)) return '商品、商家或库存当前不可买。请刷新商品页，确认商品已上架且库存足够。';
+  if (/Seckill product or merchant is unavailable|Merchant is not eligible for a seckill session/i.test(cleaned)) return '当前秒杀商品暂时不可买。请刷新秒杀页查看最新场次。';
+  if (/Fresh wallet coverage evidence is unavailable|Canonical coverage evidence is unavailable/i.test(cleaned)) return '资金覆盖检查还没拿到最新结果，系统暂时不能付款；请稍等后刷新。';
+  if (/BSC RPC contract request timed out|Payment receipt RPC operation timed out/i.test(cleaned)) return '链上节点响应超时，系统正在保护付款状态。请稍等后重试，不要连续重复提交。';
+  if (/自提门店不属于当前商品商家|Pickup store is outside product merchant/i.test(cleaned)) return '这个门店不是当前商品的自提门店，请重新选择门店。';
+  if (/Order pickup-store snapshot is unavailable|pickup-store snapshot/i.test(cleaned)) return '这笔订单的自提门店和商家对不上，请联系平台处理。';
   if (/地址目标|收货地址|address target/i.test(cleaned)) return '收货地址暂时无法确认，请刷新后重试。';
-  if (code === 'DecisionBlocked' || code === 'ExternalBlocked' || code === 'ConfigurationRequired') return '当前暂时不能付款，请稍后再试。';
   if (/Register this wallet in the existing BNM system before checkout|registrationRequired/i.test(cleaned)) return '当前钱包还没有完成积分系统登记，请先完成登记后再下单。';
+  if (code === 'Forbidden' || /Forbidden/i.test(cleaned)) return '当前钱包没有权限，请切换正确钱包后重试。';
+  if (/New payment quotes are blocked by unresolved payment policy/i.test(cleaned)) return '付款资金规则还没准备好，暂时不能下单。';
+  if (/New payment quotes are blocked by unavailable payment infrastructure|fresh verified runtime readiness snapshot/i.test(cleaned)) return '付款确认服务还没准备好，暂时不能下单。';
+  if (/New payment quote is paused/i.test(cleaned)) return '平台支付开关暂停中，暂时不能下单。';
+  if (code === 'DecisionBlocked' || code === 'ExternalBlocked' || code === 'ConfigurationRequired') return '当前暂时不能付款，请稍后再试。';
   if (/Invalid idempotency key|idempotencyKey|idempotency key|Idempotency key/i.test(cleaned)) return '系统提交编号异常，请刷新页面后重试。';
-  if (/must be a canonical atomic amount|canonical atomic amount/i.test(cleaned)) return '金额格式不正确，请填写普通数字金额，例如 2 或 2.00。';
+  if (/canonical integer string|must be a canonical atomic amount|canonical atomic amount|balance\.amount|amount must/i.test(cleaned)) return '系统返回的金额格式异常，请刷新或联系平台处理。';
   if (/Product requires 1-5 verified main images/i.test(cleaned)) return '商品还缺少主图，请商家补齐后再购买。';
   if (/does not match (the )?(coordinated|generated)|generated type|Core returned|Core response|Core API|non-JSON|unreachable|request failed|gateway is unavailable/i.test(cleaned)) return '系统服务暂时无法连接，请刷新或稍后重试。';
   if (/Network|fetch|Failed to fetch|Load failed/i.test(cleaned)) return '网络连接失败，请检查网络后重试。';
   if (/SIWE challenge rate limit exceeded|SIWE[^。]*rate limit/i.test(cleaned)) return '钱包登录请求太频繁，请稍等一会儿再试。刷新页面后 15 分钟内会尽量复用登录状态，不需要反复签名。';
   if (/IdempotencyConflict/i.test(code ?? '') || /current payment/i.test(cleaned)) return '当前付款状态已更新，请刷新订单后重试。';
+  if (looksLikeTechnicalEnglish(cleaned)) return '系统返回异常，请刷新或联系平台处理。';
   return cleaned || '操作失败，请稍后重试。';
+}
+
+function looksLikeTechnicalEnglish(message: string) {
+  return /\b(Order|Wallet|Unexpected|Invalid|Forbidden|Unauthorized|Expired|SIWE|Core|must|not|found|failed|unavailable|canonical|amount|token|session|request|response|error)\b/i.test(message)
+    || (!/[\u4e00-\u9fff]/.test(message) && /[A-Za-z]{3,}/.test(message));
+}
+
+function minBigInt(first: bigint, ...rest: bigint[]) {
+  return rest.reduce((min, value) => value < min ? value : min, first);
+}
+
+function firstOrdinaryPurchasableSkuId(product: CatalogProduct) {
+  return product.skus.find((sku) => !sku.seckill && BigInt(sku.stockAvailable) > 0n)?.skuId ?? null;
 }
 
 const WALLET_SESSION_CACHE_PREFIX = 'abu24k:mall:wallet-session';
@@ -1948,4 +2448,12 @@ function paymentSubmissionRequest(submission: PendingSubmission): PaymentSubmiss
 
 function isBytes32(value: unknown): value is string {
   return typeof value === 'string' && /^0x[0-9a-fA-F]{64}$/.test(value);
+}
+
+function normalizeBytes32Input(value: string, label: string) {
+  const normalized = value.trim().toLowerCase();
+  if (!isBytes32(normalized)) {
+    throw new CoreClientError('InvalidRequest', `${label}必须是 0x 开头的 64 位交易编号`);
+  }
+  return normalized;
 }

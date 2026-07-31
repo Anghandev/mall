@@ -207,9 +207,9 @@ async function putMediaFile(intent: MediaUploadIntentProjection, file: File) {
   try {
     response = await fetch(intent.uploadUrl, { method: 'PUT', headers, body: file });
   } catch {
-    throw new CoreApiError({ code: 'ExternalBlocked', message: 'Merchant license storage is unreachable', status: 503 });
+    throw new CoreApiError({ code: 'ExternalBlocked', message: '商家证照上传服务暂时无法连接，请稍后重试。', status: 503 });
   }
-  if (!response.ok) throw new CoreApiError({ code: 'ExternalBlocked', message: 'Merchant license storage rejected the upload', status: response.status });
+  if (!response.ok) throw new CoreApiError({ code: 'ExternalBlocked', message: '商家证照上传失败，请重新选择文件后再试。', status: response.status });
 }
 
 async function sha256File(file: File) {

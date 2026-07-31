@@ -536,7 +536,7 @@ test('generated settlement and admin DTOs preserve the implemented naming and st
   ]) assert.match(declarations, new RegExp(`export interface ${name}\\b`), name);
   assert.deepEqual(
     openapi.components.schemas.MerchantFinanceProjection.properties.allowedActions.items.enum,
-    ['REQUEST_MERCHANT_USDT'],
+    ['REQUEST_MERCHANT_USDT', 'REQUEST_MERCHANT_SETTLEMENT'],
   );
   assert.deepEqual(
     openapi.components.schemas.MerchantSettlementEligibility.properties.mode.enum,

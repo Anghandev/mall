@@ -2398,13 +2398,13 @@ test('HTTP bootstrap and SIWE flow return correlated JSON and protect order acti
       body: JSON.stringify({ delta: '2', reasonCode: 'RESTOCK', idempotencyKey: 'http-stock-1' }),
     })).status, 201);
     const orderPage = await fetch(
-      `${base}/v2/orders?limit=25&state=PAID&fulfillmentMode=DELIVERY&orderKind=ORDINARY&skuId=sku-1`,
+      `${base}/v2/orders?limit=25&state=PAID&fulfillmentMode=DELIVERY&orderKind=ORDINARY&skuId=sku-1&wallet=${SAFE}`,
       { headers: bearerHeaders },
     );
     assert.equal(orderPage.status, 200);
     assert.deepEqual(
       ((await orderPage.json()) as { orders: Array<{ query: Record<string, unknown> }> }).orders[0]?.query,
-      { limit: 25, state: 'PAID', fulfillmentMode: 'DELIVERY', orderKind: 'ORDINARY', skuId: 'sku-1' },
+      { limit: 25, state: 'PAID', fulfillmentMode: 'DELIVERY', orderKind: 'ORDINARY', skuId: 'sku-1', wallet: SAFE },
     );
     assert.equal((await fetch(`${base}/v2/orders?state=NOT_A_STATE`, {
       headers: bearerHeaders,

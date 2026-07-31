@@ -137,6 +137,32 @@ describe('merchant lifecycle admin API', () => {
     expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({ method: 'PUT', body: expect.any(File) });
     expect(new Headers(fetchMock.mock.calls[1]?.[1]?.headers).get('x-upload')).toBe('sealed');
   });
+
+  it('returns Chinese copy when license storage upload fails', async () => {
+    const uploadUrl = 'https://storage.example/license';
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/v2/media/upload-intents')) {
+        const request = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return jsonResponse({
+          artifactVersion, uploadIntentId: hash('8'), ownerWallet: address('1'), purpose: 'MERCHANT_LICENSE', resourceType: 'MERCHANT',
+          resourceId: 'merchant-1', contentType: request.contentType, sizeBytes: String(request.sizeBytes), contentSha256: request.contentSha256,
+          state: 'UPLOADED', expiresAt: '2099-01-01T00:00:00.000Z', method: 'PUT', uploadUrl, headers: {}, providerReferenceHash: hash('a'), writeOnce: true,
+        }, 201);
+      }
+      if (url === uploadUrl) throw new Error('network down');
+      return jsonResponse({}, 404);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(uploadMerchantLicense(
+      'merchant-1',
+      new File(['verified license'], 'license.pdf', { type: 'application/pdf' }),
+      'license-upload-fail-1',
+      address('1'),
+      'jwt',
+    )).rejects.toThrow('商家证照上传服务暂时无法连接，请稍后重试。');
+  });
 });
 
 function merchantDetail(overrides: Partial<MerchantLifecycleDetail> = {}): MerchantLifecycleDetail {

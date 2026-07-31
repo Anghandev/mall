@@ -515,15 +515,24 @@ export class FulfillmentTargetService {
     });
   }
 
-  listStores(regionCode?: string) {
+  listStores(regionCode?: string, productId?: string) {
     if (regionCode !== undefined && !/^[0-9]{6}$/.test(regionCode)) {
       throw new CoreError('InvalidRequest', 'regionCode must contain six digits');
     }
+    if (productId !== undefined && productId.length === 0) {
+      throw new CoreError('InvalidRequest', 'productId is required');
+    }
     return this.#transactions.transaction(async (executor) => {
       const result = await executor.query<StoreRow>(
-        `SELECT * FROM core.merchant_stores WHERE status = 'ACTIVE'
-         ${regionCode ? 'AND region_code = $1' : ''} ORDER BY name, store_id`,
-        regionCode ? [regionCode] : [],
+        `SELECT store.* FROM core.merchant_stores store
+         WHERE store.status = 'ACTIVE'
+           AND ($1::text IS NULL OR store.region_code = $1)
+           AND ($2::text IS NULL OR store.merchant_id = (
+             SELECT product.merchant_id FROM core.products product
+             WHERE product.product_id = $2 AND product.lifecycle_state = 'ACTIVE'
+           ))
+         ORDER BY store.name, store.store_id`,
+        [regionCode ?? null, productId ?? null],
       );
       return result.rows.map(storeProjection);
     });

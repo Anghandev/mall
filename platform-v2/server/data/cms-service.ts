@@ -264,7 +264,12 @@ export class CmsService {
         'SELECT active_version_id FROM core.current_cms_publications WHERE entry_id = $1',
         [version.entry_id],
       );
-      if (current.rows[0]?.active_version_id === versionId) return this.getVersionInTransaction(executor, versionId);
+      if (current.rows[0]?.active_version_id === versionId) {
+        if (eventType === 'ROLLED_BACK') {
+          throw new CoreError('InvalidRequest', 'CMS rollback target is already the active published version', 409);
+        }
+        return this.getVersionInTransaction(executor, versionId);
+      }
       const now = this.#clock();
       const eventId = `cms-publication:${randomUUID()}`;
       await executor.query(

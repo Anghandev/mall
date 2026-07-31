@@ -38,6 +38,8 @@ import type {
   PaymentQuoteResponse,
   PaymentSubmissionRequest,
   PaymentSubmissionResponse,
+  PickupCredentialRequest,
+  PickupCredentialResult,
   PickupTarget,
   RealtimeEventEnvelope,
   RealtimeEventPage,
@@ -225,9 +227,10 @@ export interface CoreClient {
   listSeckillSessionHistory(cursor?: string, limit?: number): Promise<PublishedSeckillSessionHistoryPage>;
   getSeckillSession(sessionId: string): Promise<PublishedSeckillSessionProjection>;
   listSeckillSessionEvents(sessionId: string, cursor?: string, limit?: number): Promise<RealtimeEventPage>;
-  listStores(regionCode?: string): Promise<readonly MerchantStore[]>;
+  listStores(regionCode?: string, productId?: string): Promise<readonly MerchantStore[]>;
   createDeliveryTarget(token: string, request: CreateDeliveryTargetRequest): Promise<DeliveryTarget>;
   createPickupTarget(token: string, request: CreatePickupTargetRequest): Promise<PickupTarget>;
+  registerPickupCredential(token: string, orderId: string, request: PickupCredentialRequest): Promise<PickupCredentialResult>;
   listOrders(token: string, cursor?: FulfillmentOrderCursor, limit?: number): Promise<FulfillmentOrderPage>;
   getOrder(token: string, orderId: string): Promise<FulfillmentOrder>;
   getOrderTarget(token: string, orderId: string): Promise<FulfillmentTarget>;
@@ -287,6 +290,7 @@ const fulfillmentOperations = Object.freeze({
   stores: operationPath('listMerchantStores', 'get'),
   deliveryTarget: operationPath('createDeliveryTarget', 'post'),
   pickupTarget: operationPath('createPickupTarget', 'post'),
+  pickupCredential: operationPath('registerPickupCredential', 'post'),
   orders: operationPath('listFulfillmentOrders', 'get'),
   order: operationPath('getFulfillmentOrder', 'get'),
   orderTarget: operationPath('getOrderFulfillmentTarget', 'get'),
@@ -627,8 +631,11 @@ export function createCoreClient(input: { baseUrl?: string; fetch?: FetchLike } 
       ), sessionId);
     },
 
-    async listStores(regionCode) {
-      const query = regionCode ? `?regionCode=${encodeURIComponent(regionCode)}` : '';
+    async listStores(regionCode, productId) {
+      const params = new URLSearchParams();
+      if (regionCode) params.set('regionCode', regionCode);
+      if (productId) params.set('productId', productId);
+      const query = params.size > 0 ? `?${params.toString()}` : '';
       const value = await requestJson<unknown>(
         fetcher,
         `${baseUrl}${operations.stores}${query}`,
@@ -640,8 +647,21 @@ export function createCoreClient(input: { baseUrl?: string; fetch?: FetchLike } 
       return postAuthorized<DeliveryTarget>(fetcher, `${baseUrl}${operations.deliveryTarget}`, token, request);
     },
 
-    createPickupTarget(token, request) {
-      return postAuthorized<PickupTarget>(fetcher, `${baseUrl}${operations.pickupTarget}`, token, request);
+    async createPickupTarget(token, request) {
+      const value = await postAuthorized<unknown>(fetcher, `${baseUrl}${operations.pickupTarget}`, token, request);
+      return parsePickupTarget(value, request.storeId);
+    },
+
+    async registerPickupCredential(token, orderId, request) {
+      validatePickupCredentialRequest(request);
+      const normalizedOrderId = bytes32Value(orderId).toLowerCase();
+      const value = await postAuthorized<unknown>(
+        fetcher,
+        `${baseUrl}${orderPath(operations.pickupCredential, normalizedOrderId)}`,
+        token,
+        request,
+      );
+      return parsePickupCredentialResult(value, normalizedOrderId);
     },
 
     async listOrders(token, cursor, limit = 50) {
@@ -671,12 +691,12 @@ export function createCoreClient(input: { baseUrl?: string; fetch?: FetchLike } 
     },
 
     async getOrderTarget(token, orderId) {
-      const value = await requestJson<{ target: FulfillmentTarget }>(
+      const value = await requestJson<{ target: unknown }>(
         fetcher,
         `${baseUrl}${orderPath(operations.orderTarget, orderId)}`,
         { headers: authorizedHeaders(token) },
       );
-      return value.target;
+      return parseFulfillmentTarget(value.target);
     },
 
     async getOrderAllowedActions(token, orderId) {
@@ -1045,19 +1065,60 @@ function parseBuyerShoppingStatement(value: unknown): BuyerShoppingStatement {
   return value as BuyerShoppingStatement;
 }
 
-function parseSavedAddressTarget(value: unknown): DeliveryTarget {
+function parseTargetSummary(value: unknown, expectedMode: 'DELIVERY' | 'PICKUP') {
   const target = objectValue(value);
   stringValue(target.targetId);
   bytes32Value(target.targetHash);
-  if (target.fulfillmentMode !== 'DELIVERY') {
-    throw new CoreClientError('InvalidResponse', '保存地址未生成快递履约目标');
+  if (target.fulfillmentMode !== expectedMode) {
+    throw new CoreClientError(
+      'InvalidResponse',
+      expectedMode === 'DELIVERY' ? '保存地址未生成快递履约目标' : '自提门店未生成自提履约目标',
+    );
   }
   if (!/^[0-9]{6}$/.test(stringValue(target.regionCode))) {
     throw new CoreClientError('InvalidResponse', '履约目标行政区无效');
   }
   bytes32Value(target.regionCodeHash);
   isoValue(target.expiresAt);
+  return target;
+}
+
+function parseSavedAddressTarget(value: unknown): DeliveryTarget {
+  const target = parseTargetSummary(value, 'DELIVERY');
+  assertOnlyKeys(target, [
+    'targetId',
+    'targetHash',
+    'fulfillmentMode',
+    'regionCode',
+    'regionCodeHash',
+    'expiresAt',
+  ], '快递履约目标包含未发布字段');
   return value as unknown as DeliveryTarget;
+}
+
+function parsePickupTarget(value: unknown, requestedStoreId: string): PickupTarget {
+  const target = parseTargetSummary(value, 'PICKUP');
+  assertOnlyKeys(target, [
+    'targetId',
+    'targetHash',
+    'fulfillmentMode',
+    'regionCode',
+    'regionCodeHash',
+    'expiresAt',
+    'storeId',
+    'store',
+  ], '自提履约目标包含未发布字段');
+  if (stringValue(target.storeId) !== requestedStoreId) {
+    throw new CoreClientError('InvalidResponse', '系统返回的自提门店和当前选择不一致');
+  }
+  const store = parseMerchantStore(target.store, '自提门店响应包含未发布字段');
+  if (store.storeId !== target.storeId || store.regionCode !== target.regionCode) {
+    throw new CoreClientError('InvalidResponse', '自提门店快照和履约目标不一致');
+  }
+  if (store.status !== 'ACTIVE') {
+    throw new CoreClientError('InvalidResponse', '系统返回的自提门店不是营业状态');
+  }
+  return value as PickupTarget;
 }
 
 function validateBuyerProfileUpdate(request: BuyerProfileUpdateRequest) {
@@ -1471,50 +1532,52 @@ function parseCatalogProducts(value: unknown): readonly CatalogProduct[] {
 function parsePublicMerchantStores(value: unknown): readonly MerchantStore[] {
   const response = objectValue(value);
   assertOnlyKeys(response, ['stores'], '门店列表响应包含未发布字段');
-  return arrayValue(response.stores).map((item) => {
-    const store = objectValue(item);
-    assertOnlyKeys(store, [
-      'storeId',
-      'merchantId',
-      'name',
-      'regionCode',
-      'longitude',
-      'latitude',
-      'address',
-      'phone',
-      'businessHours',
-      'imageAssetIds',
-      'status',
-      'version',
-    ], '公开门店响应包含未发布字段');
-    stringValue(store.storeId);
-    stringValue(store.merchantId);
-    boundedNonEmptyStringValue(store.name, 100);
-    if (!/^[0-9]{6}$/.test(stringValue(store.regionCode))) {
-      throw new CoreClientError('InvalidResponse', '公开门店行政区无效');
-    }
-    boundedNumberValue(store.longitude, -180, 180);
-    boundedNumberValue(store.latitude, -90, 90);
-    stringValue(store.address);
-    if (!/^[+]?[0-9-]{7,20}$/.test(stringValue(store.phone))) {
-      throw new CoreClientError('InvalidResponse', '公开门店电话无效');
-    }
-    boundedNonEmptyStringValue(store.businessHours, 240);
-    const imageAssetIds = arrayValue(store.imageAssetIds).map(bytes32Value);
-    if (
-      imageAssetIds.length < 1
-      || imageAssetIds.length > 5
-      || new Set(imageAssetIds.map((assetId) => assetId.toLowerCase())).size !== imageAssetIds.length
-    ) {
-      throw new CoreClientError('InvalidResponse', '公开门店图片投影无效');
-    }
-    const status = enumValue(store.status, storeStatuses);
-    if (status !== 'ACTIVE') {
-      throw new CoreClientError('InvalidResponse', '公开门店列表包含非营业门店');
-    }
-    positiveIntegerValue(store.version);
-    return item as MerchantStore;
-  });
+  return arrayValue(response.stores).map((item) => parseMerchantStore(item, '公开门店响应包含未发布字段'));
+}
+
+function parseMerchantStore(value: unknown, unexpectedFieldMessage: string): MerchantStore {
+  const store = objectValue(value);
+  assertOnlyKeys(store, [
+    'storeId',
+    'merchantId',
+    'name',
+    'regionCode',
+    'longitude',
+    'latitude',
+    'address',
+    'phone',
+    'businessHours',
+    'imageAssetIds',
+    'status',
+    'version',
+  ], unexpectedFieldMessage);
+  stringValue(store.storeId);
+  stringValue(store.merchantId);
+  boundedNonEmptyStringValue(store.name, 100);
+  if (!/^[0-9]{6}$/.test(stringValue(store.regionCode))) {
+    throw new CoreClientError('InvalidResponse', '公开门店行政区无效');
+  }
+  boundedNumberValue(store.longitude, -180, 180);
+  boundedNumberValue(store.latitude, -90, 90);
+  stringValue(store.address);
+  if (!/^[+]?[0-9-]{7,20}$/.test(stringValue(store.phone))) {
+    throw new CoreClientError('InvalidResponse', '公开门店电话无效');
+  }
+  boundedNonEmptyStringValue(store.businessHours, 240);
+  const imageAssetIds = arrayValue(store.imageAssetIds).map(bytes32Value);
+  if (
+    imageAssetIds.length < 1
+    || imageAssetIds.length > 5
+    || new Set(imageAssetIds.map((assetId) => assetId.toLowerCase())).size !== imageAssetIds.length
+  ) {
+    throw new CoreClientError('InvalidResponse', '公开门店图片投影无效');
+  }
+  const status = enumValue(store.status, storeStatuses);
+  if (status !== 'ACTIVE') {
+    throw new CoreClientError('InvalidResponse', '公开门店列表包含非营业门店');
+  }
+  positiveIntegerValue(store.version);
+  return value as MerchantStore;
 }
 
 function parseCatalogSeckillOverlay(value: unknown) {
@@ -1715,6 +1778,30 @@ function validateOrderActionEvidenceRequest(request: OrderActionEvidenceRequest)
   }
   mediaAssetIds.forEach(bytes32Value);
   idempotencyValue(request.idempotencyKey);
+}
+
+
+function validatePickupCredentialRequest(request: PickupCredentialRequest) {
+  idempotencyValue(request.idempotencyKey);
+  bytes32Value(request.evidenceHash);
+  if (!/^[0-9]{6}$/.test(request.code)) {
+    throw new CoreClientError('InvalidRequest', '请输入 6 位自提核销码');
+  }
+  isoValue(request.expiresAt);
+}
+
+function parsePickupCredentialResult(value: unknown, orderId: string): PickupCredentialResult {
+  const result = objectValue(value);
+  if (bytes32Value(result.orderId).toLowerCase() !== orderId) {
+    throw new CoreClientError('InvalidResponse', '自提核销码与当前订单不一致');
+  }
+  const credentialId = boundedNonEmptyStringValue(result.credentialId, 128);
+  const expiresAt = isoValue(result.expiresAt);
+  return {
+    orderId,
+    credentialId,
+    expiresAt,
+  };
 }
 
 function parseOrderActionEvidence(
@@ -2035,6 +2122,62 @@ function queryString(values: Readonly<Record<string, string | undefined>>) {
   for (const [key, value] of Object.entries(values)) if (value !== undefined) query.set(key, value);
   const serialized = query.toString();
   return serialized ? `?${serialized}` : '';
+}
+
+function parseFulfillmentTarget(value: unknown): FulfillmentTarget {
+  const target = objectValue(value);
+  const mode = enumValue(target.fulfillmentMode, fulfillmentModes);
+  if (mode === 'DELIVERY') {
+    assertOnlyKeys(target, [
+      'targetId',
+      'targetHash',
+      'fulfillmentMode',
+      'regionCode',
+      'regionCodeHash',
+      'expiresAt',
+      'payload',
+    ], '快递履约目标包含未发布字段');
+    parseTargetSummary(target, 'DELIVERY');
+    const payload = objectValue(target.payload);
+    assertOnlyKeys(payload, [
+      'recipientName',
+      'phone',
+      'address',
+      'longitude',
+      'latitude',
+      'regionCode',
+    ], '快递地址快照包含未发布字段');
+    boundedNonEmptyStringValue(payload.recipientName, 64);
+    if (!/^[+]?[0-9-]{7,20}$/.test(stringValue(payload.phone))) {
+      throw new CoreClientError('InvalidResponse', '快递地址手机号无效');
+    }
+    boundedNonEmptyStringValue(payload.address, 300);
+    if (payload.longitude !== null) boundedNumberValue(payload.longitude, -180, 180);
+    if (payload.latitude !== null) boundedNumberValue(payload.latitude, -90, 90);
+    if (payload.regionCode !== target.regionCode) {
+      throw new CoreClientError('InvalidResponse', '快递地址行政区和履约目标不一致');
+    }
+    return value as FulfillmentTarget;
+  }
+  assertOnlyKeys(target, [
+    'targetId',
+    'targetHash',
+    'fulfillmentMode',
+    'regionCode',
+    'regionCodeHash',
+    'expiresAt',
+    'storeId',
+    'payload',
+  ], '自提履约目标包含未发布字段');
+  parseTargetSummary(target, 'PICKUP');
+  if (typeof target.storeId !== 'string' || target.storeId.length === 0) {
+    throw new CoreClientError('InvalidResponse', '自提履约目标门店编号无效');
+  }
+  const store = parseMerchantStore(target.payload, '自提门店快照包含未发布字段');
+  if (store.storeId !== target.storeId || store.regionCode !== target.regionCode) {
+    throw new CoreClientError('InvalidResponse', '自提门店快照和订单履约目标不一致');
+  }
+  return value as FulfillmentTarget;
 }
 
 function parseFulfillmentOrderPage(value: unknown): FulfillmentOrderPage {

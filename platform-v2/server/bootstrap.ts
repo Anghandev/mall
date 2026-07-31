@@ -474,10 +474,21 @@ export async function createCoreRuntime(env: Readonly<Record<string, string | un
     service: settlementService,
     platformWallet: required(config.governanceWalletAddress, 'PLATFORM_GOVERNANCE_WALLET_ADDRESS'),
     targets: [
-      { asset: 'USDT', gasCap: executorMaxGasLimit.toString(), attest: () => usdtWalletAttestor.attest() },
-      { asset: 'NPL', gasCap: executorMaxGasLimit.toString(), attest: () => nplWalletAttestor.attest() },
       {
         asset: 'USDT',
+        executorWallet: usdtWalletExpectation.walletAddress,
+        gasCap: executorMaxGasLimit.toString(),
+        attest: () => usdtWalletAttestor.attest(),
+      },
+      {
+        asset: 'NPL',
+        executorWallet: nplWalletExpectation.walletAddress,
+        gasCap: executorMaxGasLimit.toString(),
+        attest: () => nplWalletAttestor.attest(),
+      },
+      {
+        asset: 'USDT',
+        executorWallet: operationsWalletExpectation.walletAddress,
         gasCap: executorMaxGasLimit.toString(),
         attest: () => operationsWalletAttestor.attest(),
       },

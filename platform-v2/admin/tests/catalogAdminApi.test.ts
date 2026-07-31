@@ -168,7 +168,7 @@ function product(overrides: Partial<ManagedCatalogProduct> = {}): ManagedCatalog
     artifactVersion, productId: 'product-1', chainProductId: hash('1'), merchantId: 'merchant-1', storeId: 'store-1', supersedesProductId: null,
     version: '1', title: '24K 金章', subtitle: '10g', lifecycleState: 'DRAFT', productPolicyHash: hash('2'), merchantConcessionBps: 2500,
     mainImageAssetIds: [hash('3')], videoAssetId: null, richDetail: {}, defaultFreightUsdt: '1000000', fulfillmentModes: ['DELIVERY'],
-    categoryId: 'category-1', tagIds: ['tag-1'], skus: [{ skuId: 'sku-1', chainSkuId: hash('4'), version: '1', attributes: { weight: '10g' }, listPriceUsdt: '7200000000', merchantBaseReceivableUsdt: '7000000000', stockTotal: '10', stockAvailable: '10', stockReserved: '0', proposedSeckillInventory: '3', lifecycleState: 'DRAFT' }],
+    categoryId: 'category-1', tagIds: ['tag-1'], skus: [{ skuId: 'sku-1', chainSkuId: hash('4'), version: '1', attributes: { weight: '10g' }, listPriceUsdt: '7200000000', merchantBaseReceivableUsdt: '7000000000', stockTotal: '10', stockAvailable: '10', stockReserved: '0', stockSeckillLocked: '0', proposedSeckillInventory: '3', lifecycleState: 'DRAFT' }],
     allowedActions: ['SAVE_DRAFT'], writeLock: null, createdAt: '2026-07-15T00:00:00.000Z', updatedAt: '2026-07-15T00:00:00.000Z', ...overrides,
   };
 }

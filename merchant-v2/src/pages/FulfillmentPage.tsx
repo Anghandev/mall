@@ -4,9 +4,7 @@ import {
   orderProjectionStates,
   type AllowedAction,
   type AllowedActionName,
-  type FulfillmentOrder,
   type FulfillmentOrderCursor,
-  type FulfillmentOrderPage,
   type FulfillmentTarget,
   type MerchantOrderExport,
   type MerchantOrderExportRequest,
@@ -25,9 +23,13 @@ import {
 import { EmptyState, LoadingRows, PageHeader } from '../components/ui';
 import { PickupCodeScanner } from '../components/PickupCodeScanner';
 import { canExecuteOrderAction } from '../core-boundary';
-import { CoreApiError } from '../core-api';
+import {
+  CoreApiError,
+  type MerchantFulfillmentOrder,
+  type MerchantFulfillmentOrderPage,
+} from '../core-api';
 import { readableError, useCoreRuntime } from '../core-runtime';
-import { formatBnm, formatNpl, formatTokenAmount, formatUsdt, translateErrorMessage } from '../display';
+import { formatSignedTokenAmount, translateErrorMessage } from '../display';
 import { useSearchParams } from 'react-router-dom';
 
 type LoadState<T> =
@@ -57,7 +59,6 @@ type FilterDraft = Readonly<{
   orderKind: '' | OrderKind;
 }>;
 
-const bytes32Pattern = /^0x[0-9a-fA-F]{64}$/;
 const pickupCodePattern = /^[0-9]{6}$/;
 const orderKinds = ['ORDINARY', 'SECKILL', 'FALLBACK_RETAIL'] satisfies readonly OrderKind[];
 const emptyFilters: FilterDraft = { from: '', to: '', skuId: '', state: '', orderKind: '' };
@@ -65,14 +66,16 @@ const deliveryColumns = ['订单号', '订单类型', '规格', '数量', '订�
 const pickupColumns = ['订单号', '订单类型', '规格', '数量', '订单状态', '付款确认', '下单时间', '核销门店', '完成时间', '操作'];
 
 export function FulfillmentPage() {
-  const { api, session } = useCoreRuntime();
+  const { api, session, signOut } = useCoreRuntime();
   const [searchParams] = useSearchParams();
   const [tab, setTab] = useState<'delivery' | 'pickup'>(() => (
     searchParams.get('mode') === 'pickup' ? 'pickup' : 'delivery'
   ));
-  const [ordersState, setOrdersState] = useState<LoadState<FulfillmentOrderPage>>({ phase: 'idle' });
+  const [ordersState, setOrdersState] = useState<LoadState<MerchantFulfillmentOrderPage>>({ phase: 'idle' });
+  const [authNotice, setAuthNotice] = useState<string>();
   const [selectedOrderId, setSelectedOrderId] = useState<string>();
   const [targetState, setTargetState] = useState<LoadState<FulfillmentTarget>>({ phase: 'idle' });
+  const [allowedActionOverrides, setAllowedActionOverrides] = useState<Readonly<Record<string, readonly AllowedAction[]>>>({});
   const [commandState, setCommandState] = useState<CommandState>({ phase: 'idle' });
   const [filterDraft, setFilterDraft] = useState<FilterDraft>(emptyFilters);
   const [activeFilters, setActiveFilters] = useState<FilterDraft>(emptyFilters);
@@ -83,7 +86,6 @@ export function FulfillmentPage() {
   const [shipmentNote, setShipmentNote] = useState('');
   const [receiptReasonCode, setReceiptReasonCode] = useState('');
   const [pickupCode, setPickupCode] = useState('');
-  const [pickupEvidenceHash, setPickupEvidenceHash] = useState('');
   const [exportState, setExportState] = useState<ExportState>({ phase: 'idle' });
   const commandKeys = useRef<Partial<Record<CommandKind, string>>>({});
   const exportAttempt = useRef<{ fingerprint: string; key: string } | undefined>(undefined);
@@ -112,10 +114,35 @@ export function FulfillmentPage() {
       if (sessionTokenRef.current === token) setOrdersState({ phase: 'ready', value });
     } catch (error) {
       if (sessionTokenRef.current === token) {
+        if (isExpiredSessionError(error)) {
+          setAuthNotice('登录已过期，请重新连接钱包。');
+          signOut('登录已过期，请重新连接钱包。');
+          return;
+        }
         setOrdersState({ phase: 'error', message: readableError(error) });
       }
     }
-  }, [activeFilters, api, cursorHistory, pageIndex, session, tab]);
+  }, [activeFilters, api, cursorHistory, pageIndex, session, signOut, tab]);
+
+  const loadAllowedActions = useCallback(async (orderId: string, quiet = true) => {
+    if (!session) return undefined;
+    const token = session.token;
+    try {
+      const actions = await api.getOrderAllowedActions(orderId, token);
+      if (sessionTokenRef.current === token) {
+        setAllowedActionOverrides((current) => ({ ...current, [orderId]: actions }));
+      }
+      return actions;
+    } catch (error) {
+      if (sessionTokenRef.current === token && isExpiredSessionError(error)) {
+        setAuthNotice('登录已过期，请重新连接钱包。');
+        signOut('登录已过期，请重新连接钱包。');
+        return undefined;
+      }
+      if (!quiet) setCommandState({ phase: 'error', message: readableError(error) });
+      return undefined;
+    }
+  }, [api, session, signOut]);
 
   const loadTarget = useCallback(async (quiet = false) => {
     if (!session || !selectedOrderId) {
@@ -132,10 +159,19 @@ export function FulfillmentPage() {
       }
     } catch (error) {
       if (selectedOrderRef.current === orderId && sessionTokenRef.current === token) {
+        if (isExpiredSessionError(error)) {
+          setAuthNotice('登录已过期，请重新连接钱包。');
+          signOut('登录已过期，请重新连接钱包。');
+          return;
+        }
         setTargetState({ phase: 'error', message: readableError(error) });
       }
     }
-  }, [api, selectedOrderId, session]);
+  }, [api, selectedOrderId, session, signOut]);
+
+  useEffect(() => {
+    if (session) setAuthNotice(undefined);
+  }, [session]);
 
   useEffect(() => {
     void loadOrders();
@@ -147,7 +183,7 @@ export function FulfillmentPage() {
 
   const orders = ordersState.phase === 'ready' ? ordersState.value.orders : [];
   const selectedOrder = orders.find((order) => order.orderId === selectedOrderId);
-  const allowedActions = selectedOrder?.allowedActions;
+  const allowedActions = selectedOrder ? allowedActionOverrides[selectedOrder.orderId] ?? selectedOrder.allowedActions : undefined;
   const selectedTarget = targetState.phase === 'ready' ? targetState.value : undefined;
   const targetMatchesOrder = Boolean(
     selectedOrder && selectedTarget && selectedOrder.fulfillmentMode === selectedTarget.fulfillmentMode,
@@ -156,6 +192,9 @@ export function FulfillmentPage() {
     () => orders.filter((order) => order.fulfillmentMode === (tab === 'delivery' ? 'DELIVERY' : 'PICKUP')),
     [orders, tab],
   );
+  const hasInvalidBalanceAmount = visibleOrders.some((order) => (
+    order.balances.some((balance) => balance.amountInvalid)
+  ));
   const columns = tab === 'delivery' ? deliveryColumns : pickupColumns;
   const submitting = commandState.phase === 'submitting';
   const canExecute = (action: AllowedActionName) => (
@@ -170,10 +209,9 @@ export function FulfillmentPage() {
     && shipmentNote.trim().length <= 500;
   const receiptValid = receiptReasonCode.trim().length >= 2 && receiptReasonCode.trim().length <= 120;
   const pickupValid = pickupCodePattern.test(pickupCode)
-    && bytes32Pattern.test(pickupEvidenceHash)
     && selectedTarget?.fulfillmentMode === 'PICKUP';
 
-  function selectOrder(order: FulfillmentOrder) {
+  function selectOrder(order: MerchantFulfillmentOrder) {
     selectedOrderRef.current = order.orderId;
     setSelectedOrderId(order.orderId);
     setTargetState({ phase: 'loading' });
@@ -185,7 +223,7 @@ export function FulfillmentPage() {
     setShipmentNote('');
     setReceiptReasonCode('');
     setPickupCode('');
-    setPickupEvidenceHash('');
+    void loadAllowedActions(order.orderId);
   }
 
   function resetOrderContext() {
@@ -274,6 +312,7 @@ export function FulfillmentPage() {
   function submitShipment() {
     if (!session || !selectedOrder || !shipmentAllowed || !shipmentValid) return;
     void runCommand('shipment', async (key) => {
+      await assertActionStillAllowed('RECORD_SHIPMENT');
       const evidence = await api.createOrderTrackingEvidence(selectedOrder.orderId, {
         carrierCode,
         trackingNumber: trackingNumber.trim(),
@@ -296,6 +335,7 @@ export function FulfillmentPage() {
   function submitForcedReceipt() {
     if (!session || !selectedOrder || !receiptAllowed || !receiptValid) return;
     void runCommand('forced-receipt', async (key) => {
+      await assertActionStillAllowed('REQUEST_FORCED_RECEIPT');
       const reasonCode = normalizeReasonCode(receiptReasonCode, 'MERCHANT_RECEIPT_REQUEST');
       const evidence = await api.createOrderActionEvidence(selectedOrder.orderId, {
         action: 'REQUEST_FORCED_RECEIPT',
@@ -320,14 +360,31 @@ export function FulfillmentPage() {
       || selectedTarget?.fulfillmentMode !== 'PICKUP'
     ) return;
     void runCommand('pickup', async (key) => {
+      await assertActionStillAllowed('VERIFY_PICKUP');
+      const evidence = await api.createOrderActionEvidence(selectedOrder.orderId, {
+        action: 'VERIFY_PICKUP',
+        reasonCode: 'MERCHANT_PICKUP_VERIFICATION',
+        idempotencyKey: `${key}-evidence`,
+      }, session.token);
       const result = await api.verifyPickup(selectedOrder.orderId, {
         idempotencyKey: key,
-        evidenceHash: pickupEvidenceHash,
+        evidenceHash: evidence.evidenceHash,
         code: pickupCode,
         storeId: selectedTarget.storeId,
       }, session.token);
       return `门店核销已完成：${result.fulfilledAt}`;
     });
+  }
+
+  async function assertActionStillAllowed(action: AllowedActionName) {
+    if (!selectedOrder) throw new CoreApiError('Forbidden', '请先选择订单。');
+    const latestActions = await loadAllowedActions(selectedOrder.orderId, false);
+    if (!latestActions) {
+      throw new CoreApiError('NetworkUnavailable', '没有读到最新操作权限，请刷新订单后再试。');
+    }
+    if (!canExecuteOrderAction(action, latestActions)) {
+      throw new CoreApiError('Forbidden', '订单状态刚刚更新，这个操作现在不能做，请刷新订单。');
+    }
   }
 
   async function exportOrders() {
@@ -386,6 +443,8 @@ export function FulfillmentPage() {
         </div>
         <div className="section-heading"><div><p className="eyebrow">订单列表</p><h2 id="orders-title">商家履约订单</h2></div><span>{ordersState.phase === 'ready' ? `${visibleOrders.length} 笔` : '读取订单中'}</span></div>
         <p className="section-intro">筛选、订单分类、数量、付款确认和可执行动作都以系统返回为准。商家只处理发货或核销，不改订单金额和状态。</p>
+        {authNotice ? <p className="form-error export-feedback" role="alert">{authNotice}</p> : null}
+        {hasInvalidBalanceAmount ? <p className="form-error export-feedback" role="alert">有一笔金额暂时没法显示；不影响按系统允许按钮发货或核销，金额最终以后台账本为准。</p> : null}
         {exportState.phase === 'success' ? <p className="form-success export-feedback" role="status">{exportState.message}</p> : null}
         {exportState.phase === 'error' ? <p className="form-error export-feedback" role="alert">{exportState.message}</p> : null}
         <form className="filter-bar" aria-label="订单筛选" onSubmit={(event) => { event.preventDefault(); applyFilters(); }}>
@@ -403,7 +462,7 @@ export function FulfillmentPage() {
             <tbody>
               {ordersState.phase === 'loading' ? <tr><td colSpan={columns.length}><LoadingRows count={4} /></td></tr> : null}
               {ordersState.phase === 'error' ? <tr><td colSpan={columns.length}><EmptyState blocked description={ordersState.message} title="订单读取失败" /></td></tr> : null}
-              {ordersState.phase === 'idle' ? <tr><td colSpan={columns.length}><EmptyState blocked description="连接授权商家钱包后读取订单。" title="请先连接商家钱包" /></td></tr> : null}
+              {ordersState.phase === 'idle' ? <tr><td colSpan={columns.length}><EmptyState blocked description={authNotice ?? '连接授权商家钱包后读取订单。'} title={authNotice ? '请重新连接商家钱包' : '请先连接商家钱包'} /></td></tr> : null}
               {ordersState.phase === 'ready' && visibleOrders.length === 0 ? <tr><td colSpan={columns.length}><EmptyState description="当前履约方式和筛选条件下没有订单。" title="暂无匹配订单" /></td></tr> : null}
               {visibleOrders.map((order) => (
                 <OrderRow
@@ -435,7 +494,7 @@ export function FulfillmentPage() {
               <BalancePanel order={selectedOrder} />
             </div>
             {targetState.phase === 'ready' && !targetMatchesOrder ? <p className="form-error" role="alert">订单履约方式与目标快照不一致，所有命令已关闭。</p> : null}
-            <AllowedActionsTable actions={selectedOrder.allowedActions} />
+            <AllowedActionsTable actions={allowedActions ?? selectedOrder.allowedActions} />
           </>
         )}
       </section>
@@ -470,7 +529,7 @@ export function FulfillmentPage() {
             {selectedTarget?.fulfillmentMode === 'PICKUP' ? <details className="technical-details compact"><summary>门店编号</summary><code>{selectedTarget.storeId}</code></details> : null}
             <PickupCodeScanner key={selectedOrder.orderId} disabled={!pickupAllowed || submitting} onCode={(code) => updateCommandInput('pickup', () => setPickupCode(code))} />
             <div className="field"><label htmlFor="pickup-code">六位核销码</label><input autoComplete="one-time-code" disabled={!pickupAllowed || submitting} id="pickup-code" inputMode="numeric" maxLength={6} onChange={(event) => updateCommandInput('pickup', () => setPickupCode(event.target.value.replace(/[^0-9]/g, '')))} pattern="[0-9]{6}" placeholder="000000" value={pickupCode} /><span className="field-help">相机打不开或权限被拒绝时，可直接手工输入。</span></div>
-            <div className="field"><label htmlFor="pickup-evidence-hash">核销凭证编号</label><input autoComplete="off" disabled={!pickupAllowed || submitting} id="pickup-evidence-hash" onChange={(event) => updateCommandInput('pickup', () => setPickupEvidenceHash(event.target.value))} pattern="0x[0-9a-fA-F]{64}" placeholder="系统生成的 0x 凭证编号" value={pickupEvidenceHash} /><span className="field-help">从系统核销凭证复制；没有编号不要手填。</span></div>
+            <p className="panel-note">核销凭证编号由系统自动生成，店员只需要输入或扫描买家出示的六位核销码。</p>
             <button className="button primary wide" disabled={!pickupAllowed || !pickupValid || submitting} type="submit">确认门店核销</button>
             <ActionBlockReason action="VERIFY_PICKUP" actions={allowedActions} enabled={pickupAllowed} />
             <p className="panel-note">订单绑定的门店不能在这里更换，也不能离线提交。</p>
@@ -493,7 +552,7 @@ function OrderRow({
   target,
   onSelect,
 }: {
-  order: FulfillmentOrder;
+  order: MerchantFulfillmentOrder;
   selected: boolean;
   selectionDisabled: boolean;
   target: FulfillmentTarget | undefined;
@@ -528,7 +587,7 @@ function OrderRow({
   );
 }
 
-function OrderSummary({ order }: { order: FulfillmentOrder }) {
+function OrderSummary({ order }: { order: MerchantFulfillmentOrder }) {
   return (
     <>
       <div className="table-wrap compact-table">
@@ -576,7 +635,8 @@ function TargetPanel({ state }: { state: LoadState<FulfillmentTarget> }) {
   );
 }
 
-function BalancePanel({ order }: { order: FulfillmentOrder }) {
+function BalancePanel({ order }: { order: MerchantFulfillmentOrder }) {
+  const hasInvalidAmount = order.balances.some((balance) => balance.amountInvalid);
   return (
     <section className="fulfillment-detail-panel" aria-labelledby="balance-title">
       <div className="section-heading"><div><p className="eyebrow">资金状态</p><h2 id="balance-title">履约资产状态</h2></div></div>
@@ -586,6 +646,7 @@ function BalancePanel({ order }: { order: FulfillmentOrder }) {
           <tbody>{order.balances.map((balance) => <tr key={`${balance.asset}:${balance.state}`}><td>{balance.asset === 'BNM_POINTS' ? 'BNM' : balance.asset}</td><td>{balanceStateLabel(balance.state)}</td><td className="numeric-cell">{formatFulfillmentAmount(balance.amount, balance.asset)}</td></tr>)}</tbody>
         </table>
       </div>
+      {hasInvalidAmount ? <p className="form-error" role="alert">有一笔金额暂时没法显示；不影响按系统允许按钮发货或核销，金额最终以后台账本为准。</p> : null}
       <p className="panel-note">BNM 仅展示锁定/可用积分，不提供链上领取或钱包转账。</p>
     </section>
   );
@@ -612,11 +673,11 @@ function fulfillmentModeLabel(value: string) {
   } as Record<string, string>)[value] ?? value;
 }
 
-function formatFulfillmentAmount(amount: string, asset: string) {
-  if (asset === 'USDT') return formatUsdt(amount);
-  if (asset === 'NPL') return formatNpl(amount);
-  if (asset === 'BNM' || asset === 'BNM_POINTS') return formatBnm(amount);
-  return formatTokenAmount(amount, asset);
+function formatFulfillmentAmount(amount: string | null, asset: string) {
+  if (asset === 'USDT') return formatSignedTokenAmount(amount, 'USDT');
+  if (asset === 'NPL') return formatSignedTokenAmount(amount, 'NPL');
+  if (asset === 'BNM' || asset === 'BNM_POINTS') return formatSignedTokenAmount(amount, 'BNM');
+  return formatSignedTokenAmount(amount, asset);
 }
 
 function shortId(value: string | null | undefined) {
@@ -681,6 +742,11 @@ function reasonLabel(value: string | null | undefined) {
     STATE_NOT_ALLOWED: '当前订单状态不允许',
     FULFILLMENT_MODE_MISMATCH: '履约方式不匹配',
     WAITING_FINALITY: '等待付款最终确认',
+    FinalityPending: '系统还在确认最终状态',
+    ConfigurationRequired: '系统配置未完成',
+    BreakerActive: '系统暂停了这个操作',
+    PickupTakeoverDecisionBlocked: '自提订单暂不能发起接管',
+    MerchantFrozen: '商家已被冻结',
     DEADLINE_NOT_REACHED: '还没到可申请时间',
     DISPUTED: '订单仲裁中',
   } as Record<string, string>)[value] ?? value;
@@ -726,7 +792,7 @@ function ActionBlockReason({
 }) {
   if (enabled) return null;
   const item = actions?.find((candidate) => candidate.action === action);
-  return <p className="panel-note" role="status">暂不能操作：{reasonLabel(item?.reasonCode) || '当前订单状态未授权此操作'}</p>;
+  return <p className="panel-note" role="status">暂不能操作：{reasonLabel(item?.reasonCode) ?? '当前订单状态未授权此操作'}</p>;
 }
 
 function timestamp(value: string | null | undefined) {
@@ -855,4 +921,9 @@ function exportErrorMessage(error: unknown) {
     return `导出状态已变化：${translateErrorMessage(error.message)}`;
   }
   return readableError(error);
+}
+
+function isExpiredSessionError(error: unknown) {
+  return error instanceof CoreApiError
+    && (error.status === 401 || /Expired or invalid session token|invalid session token/i.test(error.message));
 }

@@ -64,14 +64,14 @@ test('primary mobile shell is usable and does not overflow', async ({ page }, te
 
 test('detail routes stay inside the mobile frame', async ({ page }, testInfo) => {
   await mockPublicCore(page);
-  for (const path of [`/mall/mall/products/${product.productId}`, '/mall/assets/addresses', '/mall/assets/orders', '/mall/assets/activity', '/mall/assets/rewards', '/mall/assets/notifications', '/mall/checkout', '/mall/checkout/review']) {
+  for (const path of [`/mall/products/${product.productId}`, '/mall/assets/addresses', '/mall/assets/orders', '/mall/assets/activity', '/mall/assets/rewards', '/mall/assets/notifications', '/mall/checkout', '/mall/checkout/review']) {
     await page.goto(path);
     await expect(page.locator('.app-frame')).toBeVisible();
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     expect(overflow).toBeLessThanOrEqual(0);
     await expectHealthyDocument(page);
     await page.evaluate(() => window.scrollTo(0, 0));
-    if (testInfo.project.name === 'mobile-393' && [`/mall/mall/products/${product.productId}`, '/mall/assets/rewards', '/mall/assets/notifications'].includes(path)) {
+    if (testInfo.project.name === 'mobile-393' && [`/mall/products/${product.productId}`, '/mall/assets/rewards', '/mall/assets/notifications'].includes(path)) {
       await page.screenshot({
         path: `test-results/screenshots/${testInfo.project.name}-${path.split('/').at(-1)}.png`,
         fullPage: true,

@@ -630,6 +630,7 @@ function buildOpenApi() {
     { name: 'from', in: 'query', schema: { type: 'string', format: 'date-time' } },
     { name: 'to', in: 'query', schema: { type: 'string', format: 'date-time' } },
     { name: 'skuId', in: 'query', schema: { type: 'string', minLength: 1, maxLength: 256 } },
+    { name: 'wallet', in: 'query', schema: { $ref: '#/components/schemas/Address' } },
     { name: 'state', in: 'query', schema: { enum: [...orderProjectionStates] } },
     { name: 'fulfillmentMode', in: 'query', schema: { enum: [...fulfillmentModes] } },
     { name: 'orderKind', in: 'query', schema: { enum: ['ORDINARY', 'SECKILL', 'FALLBACK_RETAIL'] } },
@@ -722,6 +723,11 @@ function buildOpenApi() {
             in: 'query',
             required: false,
             schema: { type: 'string', pattern: '^[0-9]{6}$' },
+          }, {
+            name: 'productId',
+            in: 'query',
+            required: false,
+            schema: { type: 'string', minLength: 1, maxLength: 256 },
           }],
           responses: {
             200: response('Active pickup stores', {
@@ -3607,7 +3613,7 @@ function settlementAdminOpenApiSchemas() {
     TakeoverFundingChallengeRequest: object({ caseId: string, requiredUsdt: atomic, nonce: atomic, deadline: atomic }),
     TakeoverFundingRequest: object({ caseId: string, requiredUsdt: atomic, idempotencyKey, approval: ref('SensitiveApproval') }),
     TakeoverFundingPlan: fundingPlan,
-    TakeoverFundingChallenge: object({ plan: ref('TakeoverFundingPlan'), typedData: eip712TypedData }),
+    TakeoverFundingChallenge: object({ plan: ref('TakeoverFundingPlan'), signer: address, typedData: eip712TypedData }),
     TakeoverFundingResult: object({
       caseId: string,
       state: { const: 'FUNDED' },
@@ -3678,7 +3684,7 @@ function settlementAdminOpenApiSchemas() {
       takeovers: { type: 'array', items: ref('MerchantTakeover') },
       allowedActions: {
         type: 'array',
-        items: { enum: ['REQUEST_MERCHANT_USDT'] },
+        items: { enum: ['REQUEST_MERCHANT_USDT', 'REQUEST_MERCHANT_SETTLEMENT'] },
       },
       settlementEligibility: ref('MerchantSettlementEligibility'),
     }),
@@ -4525,7 +4531,7 @@ function catalogManagementOpenApiSchemas() {
       required: [
         'skuId', 'chainSkuId', 'version', 'attributes', 'listPriceUsdt',
         'merchantBaseReceivableUsdt', 'stockTotal', 'stockAvailable',
-        'stockReserved', 'proposedSeckillInventory', 'lifecycleState',
+        'stockReserved', 'stockSeckillLocked', 'proposedSeckillInventory', 'lifecycleState',
       ],
       properties: {
         skuId: resourceId,
@@ -4537,6 +4543,7 @@ function catalogManagementOpenApiSchemas() {
         stockTotal: { $ref: '#/components/schemas/AtomicAmount' },
         stockAvailable: { $ref: '#/components/schemas/AtomicAmount' },
         stockReserved: { $ref: '#/components/schemas/AtomicAmount' },
+        stockSeckillLocked: { $ref: '#/components/schemas/AtomicAmount' },
         proposedSeckillInventory: { $ref: '#/components/schemas/AtomicAmount' },
         lifecycleState: { enum: [...catalogProductLifecycleStates] },
       },
@@ -7451,6 +7458,7 @@ export interface TakeoverFundingPlan {
 
 export interface TakeoverFundingChallenge {
   plan: TakeoverFundingPlan;
+  signer: Address;
   typedData: Eip712TypedData;
 }
 
@@ -7534,7 +7542,7 @@ export interface MerchantFinanceProjection {
   guaranteeDeposits: readonly MerchantGuaranteeDeposit[];
   debt: MerchantDebt | null;
   takeovers: readonly MerchantTakeover[];
-  allowedActions: readonly 'REQUEST_MERCHANT_USDT'[];
+  allowedActions: readonly ('REQUEST_MERCHANT_USDT' | 'REQUEST_MERCHANT_SETTLEMENT')[];
   settlementEligibility: MerchantSettlementEligibility;
 }
 
@@ -8302,6 +8310,7 @@ export interface ManagedCatalogSku {
   stockTotal: AtomicAmount;
   stockAvailable: AtomicAmount;
   stockReserved: AtomicAmount;
+  stockSeckillLocked: AtomicAmount;
   proposedSeckillInventory: AtomicAmount;
   lifecycleState: CatalogProductLifecycleState;
 }

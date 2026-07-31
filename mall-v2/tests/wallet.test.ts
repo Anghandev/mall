@@ -46,6 +46,23 @@ describe('published PaymentRouter wallet call', () => {
     await expect(validatePaymentQuoteForWallet(mismatched, quote.paymentRouterAddress)).rejects.toThrow(/usdtPaymentAmount/);
   });
 
+  it('rejects payment quotes whose approval amounts do not cover the real payment', async () => {
+    const quote = paymentQuote();
+    const underApprovedUsdt = structuredClone(quote);
+    (underApprovedUsdt.approvalRequirements[0] as { requiredAmount: string }).requiredAmount = '1';
+    await expect(validatePaymentQuoteForWallet(underApprovedUsdt, quote.paymentRouterAddress)).rejects.toThrow(/USDT 授权额度/);
+
+    const requestedBelowRequired = structuredClone(quote);
+    (requestedBelowRequired.approvalRequirements[1] as { requestedAllowance: string }).requestedAllowance = '1';
+    await expect(validatePaymentQuoteForWallet(requestedBelowRequired, quote.paymentRouterAddress)).rejects.toThrow(/NPL 授权额度/);
+
+    const dual = seckillQuote();
+    const underApprovedFallback = structuredClone(dual);
+    (underApprovedFallback.dual.fallback as { usdtPaymentAmount: string }).usdtPaymentAmount = '95000000000000000000';
+    (underApprovedFallback.routerCall.intent.fallbackPayment as { usdtPaymentAmount: string }).usdtPaymentAmount = '95000000000000000000';
+    await expect(validatePaymentQuoteForWallet(underApprovedFallback, dual.paymentRouterAddress)).rejects.toThrow(/USDT 授权额度/);
+  });
+
   it('rejects empty or rewritten EIP-712 authorization types before approval', async () => {
     const emptyTypes = structuredClone(paymentQuote());
     (emptyTypes.buyerAuthorization.types as { PaymentAuthorization: unknown[] }).PaymentAuthorization = [];

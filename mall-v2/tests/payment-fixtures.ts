@@ -59,6 +59,8 @@ export function paymentQuote(fulfillmentMode: 'DELIVERY' | 'PICKUP' = 'DELIVERY'
   const buyer = address('1');
   const router = address('9');
   const freightUsdt = fulfillmentMode === 'DELIVERY' ? product.defaultFreightUsdt : '0';
+  const fulfillmentTargetHash = fulfillmentMode === 'DELIVERY' ? hash('4') : hash('6');
+  const regionCodeHash = fulfillmentMode === 'DELIVERY' ? hash('5') : hash('7');
   const intent = {
     orderId: hash('c'),
     policyVersion: 1,
@@ -68,8 +70,8 @@ export function paymentQuote(fulfillmentMode: 'DELIVERY' | 'PICKUP' = 'DELIVERY'
     skuId: product.skus[0]!.chainSkuId,
     quantity: 1,
     fulfillmentMode,
-    fulfillmentTargetHash: hash('1'),
-    regionCodeHash: hash('2'),
+    fulfillmentTargetHash,
+    regionCodeHash,
     productPolicyHash: hash('3'),
     reservationId: hash('4'),
     reservationHash: hash('5'),

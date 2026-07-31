@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import {
   BadgeCheck,
   Banknote,
@@ -7,9 +7,11 @@ import {
   ChevronRight,
   CircleDollarSign,
   Clock3,
+  Copy,
   FileClock,
   FileUp,
   Headphones,
+  KeyRound,
   History,
   ImageOff,
   LockKeyhole,
@@ -71,7 +73,7 @@ import {
   StatusNotice,
 } from './components';
 import type { BuyerEvidenceAction, PublishedSeckillSessionProjection } from './core-client';
-import { useMallRuntime, type MallRuntimeValue } from './mall-runtime';
+import { useMallRuntime, type MallRuntimeValue, type PickupCredentialView } from './mall-runtime';
 
 export function SeckillScreen() {
   const runtime = useMallRuntime();
@@ -98,7 +100,11 @@ export function SeckillScreen() {
   ));
   const productAvailable = Boolean(session && runtime.catalog.some((product) =>
     product.productId === session.product.productId
-      && product.skus.some((sku) => sku.skuId === session.product.skuId)));
+      && product.skus.some((sku) => (
+        sku.skuId === session.product.skuId
+        && sku.seckill?.sessionId.toLowerCase() === session.sessionId.toLowerCase()
+        && sku.seckill.phase === 'LIVE'
+      ))));
   const canConfigure = Boolean(
     session?.phase === 'LIVE'
       && BigInt(session.inventory.available) > 0n
@@ -423,7 +429,7 @@ export function MallScreen() {
             const ordinarySkus = product.skus.filter((sku) => sku.seckill === null);
             const ordinarySkuCount = ordinarySkus.length;
             const activityOnly = Boolean(overlay && ordinarySkuCount === 0);
-            const productPath = activityOnly ? '/seckill' : `/mall/products/${encodeURIComponent(product.productId)}`;
+            const productPath = activityOnly ? '/seckill' : `/products/${encodeURIComponent(product.productId)}`;
             const firstOrdinarySku = ordinarySkus[0] ?? null;
             return (
             <Link
@@ -583,7 +589,11 @@ export function ProductDetailScreen({ productId }: { productId: string }) {
           </section>
 
           {product.skus.some((sku) => sku.seckill) ? (
-          <StatusNotice title="秒杀进行中，普通购买暂停">带秒杀标记的规格不走普通购买；请从秒杀大厅下单。</StatusNotice>
+          <StatusNotice title={ordinarySkus.length === 0 ? '秒杀进行中，普通购买暂停' : '活动规格普通购买暂停'}>
+            {ordinarySkus.length === 0
+              ? '带秒杀标记的规格不走普通购买；请从秒杀大厅下单。'
+              : '活动规格普通购买暂停，其他普通规格可继续购买。'}
+          </StatusNotice>
           ) : null}
 
           <div className="product-detail-buybar">
@@ -619,6 +629,11 @@ export function StoresScreen() {
     (!cityCode || cityCodeFor(store.regionCode) === cityCode)
       && (!districtCode || store.regionCode === districtCode)
   ));
+
+  useEffect(() => {
+    if (!runtime.storesScope.productId || runtime.storesState === 'loading') return;
+    void runtime.reloadStores();
+  }, [runtime.storesScope.productId, runtime.storesState]);
 
   return (
     <div className="screen screen--stores">
@@ -1148,7 +1163,7 @@ function SavedAddressRow({ address }: { address: BuyerSavedAddress }) {
 export function OrdersScreen() {
   const runtime = useMallRuntime();
   const [active, setActive] = useState('全部');
-  const tabs = ['全部', '待付款', '待发货', '待收货', '售后 / 仲裁'];
+  const tabs = ['全部', '待付款', '待发货', '待自提', '待收货', '售后 / 仲裁'];
   const visibleOrders = runtime.orders.filter((order) => orderMatchesTab(order, active));
 
   return (
@@ -1168,6 +1183,7 @@ export function OrdersScreen() {
           </button>
         ))}
       </div>
+      <PaymentRecoveryForm />
 
       {!runtime.session ? (
         <StatusNotice title="需要钱包登录">连接钱包后只读取当前 BUYER 会话可见的订单与允许操作。</StatusNotice>
@@ -1227,6 +1243,70 @@ export function OrdersScreen() {
   );
 }
 
+function PaymentRecoveryForm() {
+  const runtime = useMallRuntime();
+  const [orderId, setOrderId] = useState('');
+  const [txHash, setTxHash] = useState('');
+  const [replacementForTxHash, setReplacementForTxHash] = useState('');
+  const canSubmit = Boolean(runtime.session && orderId.trim() && txHash.trim() && !runtime.busy);
+  const usePending = () => {
+    if (!runtime.pendingSubmission) return;
+    setOrderId(runtime.pendingSubmission.orderId);
+    setTxHash(runtime.pendingSubmission.txHash);
+    setReplacementForTxHash(runtime.pendingSubmission.replacementForTxHash ?? '');
+  };
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!canSubmit) return;
+    void runtime.recoverPaymentSubmission(orderId, txHash, replacementForTxHash || undefined);
+  };
+  return (
+    <details className="payment-recovery">
+      <summary>已经付款但订单没同步？</summary>
+      <form onSubmit={submit}>
+        <p>只在钱包已经显示付款成功，但商城没跟上时使用。没有付款不要填。</p>
+        <label>
+          订单号
+          <input value={orderId} onChange={(event) => setOrderId(event.target.value)} placeholder="0x 开头订单号" autoComplete="off" spellCheck={false} />
+        </label>
+        <label>
+          最新钱包交易编号
+          <input value={txHash} onChange={(event) => setTxHash(event.target.value)} placeholder="钱包里复制的 0x 交易编号" autoComplete="off" spellCheck={false} />
+        </label>
+        <label>
+          原交易编号（加速或替换过才填）
+          <input value={replacementForTxHash} onChange={(event) => setReplacementForTxHash(event.target.value)} placeholder="没加速过可以不填" autoComplete="off" spellCheck={false} />
+        </label>
+        <div className="payment-recovery__actions">
+          {runtime.pendingSubmission ? <button className="button button--secondary" type="button" onClick={usePending} disabled={runtime.busy}>填入当前待恢复订单</button> : null}
+          <button className="button button--primary" type="submit" disabled={!canSubmit}>
+            <RefreshCw aria-hidden="true" size={17} /> {runtime.busy ? '提交中' : '提交给系统确认'}
+          </button>
+        </div>
+      </form>
+    </details>
+  );
+}
+
+function PaymentHashValue({ txHash }: { txHash: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    const write = globalThis.navigator?.clipboard?.writeText(txHash);
+    if (!write) return;
+    void write.then(() => {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    });
+  };
+  return (
+    <span className="payment-hash-value">
+      <code title={txHash}>{shortHash(txHash)}</code>
+      <button type="button" className="text-button" onClick={copy}><Copy aria-hidden="true" size={14} />复制</button>
+      {copied ? <small>已复制</small> : null}
+    </span>
+  );
+}
+
 function OrderListSkeleton() {
   return (
     <div className="order-list" aria-label="正在加载订单">
@@ -1264,7 +1344,7 @@ function OrderRow({
           {order.orderKind === 'SECKILL' ? <span className="status-pill order-kind-badge"><Zap aria-hidden="true" size={13} />秒杀</span> : null}
         </div>
         <div className="order-row__state">
-          <span className="status-pill">{orderStateLabel(order.state)}</span>
+          <span className="status-pill">{orderStateLabel(order.state, order.fulfillmentMode)}</span>
           <span>{finalityLabel(order.finalityStatus)}</span>
         </div>
       </header>
@@ -1280,12 +1360,20 @@ function OrderRow({
         <div><dt>运费 USDT</dt><dd>{formatUsdtAmount(order.exactAmounts.freightUsdt)}</dd></div>
         <div><dt>USDT 实付</dt><dd>{formatUsdtAmount(order.exactAmounts.usdtPaymentAmount)}</dd></div>
         <div><dt>NPL 支付</dt><dd>{formatNplAmount(order.exactAmounts.nplPaymentAmount)}</dd></div>
-        <div className="order-row__tx"><dt>钱包付款</dt><dd>{order.paymentTxHash ? '已提交' : '尚未提交'}</dd></div>
+        <div className="order-row__tx"><dt>钱包付款</dt><dd>{order.paymentTxHash ? <PaymentHashValue txHash={order.paymentTxHash} /> : '尚未提交'}</dd></div>
         <div><dt>付款记录</dt><dd>{order.paidAt ? formatIso(order.paidAt) : '待付款'}</dd></div>
         <div><dt>付款最终确认</dt><dd>{order.paymentFinalizedAt ? formatIso(order.paymentFinalizedAt) : '确认中'}</dd></div>
       </dl>
 
       {target ? <OrderTarget target={target} /> : null}
+      {order.fulfillmentMode === 'PICKUP' ? (
+        <PickupCredentialPanel
+          order={order}
+          credential={runtime.pickupCredentials[order.orderId.toLowerCase()] ?? runtime.pickupCredentials[order.orderId]}
+          credentialError={runtime.pickupCredentialErrors[order.orderId.toLowerCase()] ?? runtime.pickupCredentialErrors[order.orderId]}
+          registerAction={actions.find((action) => action.action === 'REGISTER_PICKUP_CREDENTIAL')}
+        />
+      ) : null}
       <section className="order-row__section" aria-label="物流状态">
         <div className="section-heading section-heading--compact">
           <h3>物流</h3>
@@ -1481,6 +1569,94 @@ function OrderEvidenceForm({
       {submitted ? <p className="evidence-success" role="status">操作已由系统接收，订单状态已重新同步。</p> : null}
     </form>
   );
+}
+
+
+function PickupCredentialPanel({
+  order,
+  credential,
+  credentialError,
+  registerAction,
+}: {
+  order: FulfillmentOrder;
+  credential: PickupCredentialView | undefined;
+  credentialError: string | undefined;
+  registerAction: AllowedAction | undefined;
+}) {
+  const runtime = useMallRuntime();
+  const [copied, setCopied] = useState<string | null>(null);
+  const credentialRegistered = Boolean(credential?.credentialId && credential.phase !== 'REGISTERING');
+  const credentialRegistering = credential?.phase === 'REGISTERING';
+  const registeredCredential = credentialRegistered ? credential : undefined;
+  const registeringCredential = credentialRegistering ? credential : undefined;
+  const canRegister = order.state === 'PAID' && (registerAction?.enabled === true || credentialRegistering);
+  const registerReason = registerAction?.enabled === false
+    ? actionBlockReason(registerAction.reasonCode)
+    : order.state !== 'PAID'
+      ? '订单付款最终确认后才能生成。'
+      : '系统当前没有开放新的核销码。';
+  const copy = (label: string, value: string) => {
+    const write = globalThis.navigator?.clipboard?.writeText(value);
+    if (!write) return;
+    void write.then(() => {
+      setCopied(label);
+      window.setTimeout(() => setCopied(null), 1600);
+    });
+  };
+
+  return (
+    <section className="order-row__section pickup-credential" aria-label="到店核销信息">
+      <div className="section-heading section-heading--compact"><h3>到店核销信息</h3><KeyRound aria-hidden="true" size={17} /></div>
+      {registeredCredential ? (
+        <div className="pickup-credential__card">
+          <span>给门店看的六位核销码</span>
+          <strong className="pickup-credential__code" aria-label={`六位核销码 ${registeredCredential.code}`}>{registeredCredential.code}</strong>
+          <div className="pickup-credential__actions">
+            <button className="button button--secondary" type="button" onClick={() => copy('核销码', registeredCredential.code)}>
+              <Copy aria-hidden="true" size={15} />复制核销码
+            </button>
+          </div>
+          <dl>
+            <div><dt>核销凭证编号</dt><dd><code>{registeredCredential.credentialId}</code></dd></div>
+            <div><dt>有效期</dt><dd>{formatIso(registeredCredential.expiresAt)}</dd></div>
+          </dl>
+          <p>到店时把这 6 位数字给商家。凭证编号只给客服或平台核对，商家核销不需要你手填。</p>
+        </div>
+      ) : registeringCredential ? (
+        <div className="pickup-credential__card pickup-credential__card--pending">
+          <span>核销码正在同步</span>
+          <strong>还不能给门店核销</strong>
+          <p>本机已保存本次生成信息，但系统还没确认成功。请点下面按钮继续同步；成功后才会显示 6 位核销码。</p>
+          <button className="button button--primary" type="button" disabled={runtime.busy} onClick={() => void runtime.createPickupCredential(order.orderId)}>
+            <KeyRound aria-hidden="true" size={17} />{runtime.busy ? '正在同步' : '继续同步核销码'}
+          </button>
+          {credentialError ? <p className="field-error" role="status">{credentialError}</p> : null}
+          <dl>
+            <div><dt>有效期</dt><dd>{formatIso(registeringCredential.expiresAt)}</dd></div>
+          </dl>
+        </div>
+      ) : (
+        <div className="pickup-credential__empty">
+          <p>还没有生成六位核销码。</p>
+          {canRegister ? (
+            <button className="button button--primary" type="button" disabled={runtime.busy} onClick={() => void runtime.createPickupCredential(order.orderId)}>
+              <KeyRound aria-hidden="true" size={17} />{runtime.busy ? '正在生成' : '生成到店核销码'}
+            </button>
+          ) : <p className="field-help">{registerReason}</p>}
+          {credentialError ? <p className="field-error" role="status">{credentialError}</p> : null}
+          {order.state === 'PAID' && !canRegister ? <p className="field-help">如果你已经在别的手机生成过，请用原手机出示；本机没有保存时页面无法找回六位数字。</p> : null}
+        </div>
+      )}
+      {copied ? <p className="evidence-success" role="status">已复制{copied}</p> : null}
+    </section>
+  );
+}
+
+function actionBlockReason(reason?: string) {
+  if (reason === 'FinalityPending') return '系统还在确认付款，稍后刷新再试。';
+  if (reason === 'BreakerActive') return '系统暂时关闭了新核销码生成。';
+  if (reason === 'Forbidden') return '当前钱包没有权限生成。';
+  return '系统当前不允许生成新的核销码。';
 }
 
 function OrderTarget({ target }: { target: FulfillmentTarget }) {
@@ -1982,17 +2158,21 @@ export function CheckoutScreen() {
   const navigate = useNavigate();
   const product = runtime.selectedProduct;
   const sku = runtime.selectedSku;
+  const quantityLimit = checkoutQuantityLimit(runtime);
+  const quantityWithinLimit = Boolean(sku) && BigInt(runtime.quantity) <= quantityLimit;
   const canQuote = Boolean(
     runtime.session
       && runtime.bootstrap?.writesEnabled
       && product
       && sku
+      && quantityWithinLimit
       && product.fulfillmentModes.includes(runtime.fulfillmentMode)
       && (!sku.seckill || Boolean(runtime.selectedSeckillSessionId))
       && runtime.checkoutTarget?.fulfillmentMode === runtime.fulfillmentMode
       && (!runtime.selectedSeckillSessionId
         || (runtime.seckillSession?.sessionId === runtime.selectedSeckillSessionId
-          && runtime.seckillSession.phase === 'LIVE'))
+          && runtime.seckillSession.phase === 'LIVE'
+          && quantityLimit >= BigInt(runtime.quantity)))
       && !runtime.busy,
   );
 
@@ -2002,12 +2182,12 @@ export function CheckoutScreen() {
         eyebrow={runtime.selectedSeckillSessionId ? '秒杀下单' : '普通下单'}
         title={runtime.selectedSeckillSessionId ? '秒杀订单配置' : '订单配置'}
         description="规格、数量与履约方式需完整确认"
-        backTo={runtime.selectedSeckillSessionId ? '/seckill' : product ? `/mall/products/${encodeURIComponent(product.productId)}` : '/mall'}
+        backTo={runtime.selectedSeckillSessionId ? '/seckill' : product ? `/products/${encodeURIComponent(product.productId)}` : '/mall'}
       />
 
       {runtime.selectedSeckillSessionId && runtime.seckillSession ? (
         <StatusNotice title="已绑定权威秒杀场次">
-          {shortHash(runtime.seckillSession.sessionId)} · {formatUsdtAmount(runtime.seckillSession.product.seckillListPriceUsdt)}；是否命中秒杀以奖金付款时间为准。
+          {shortHash(runtime.seckillSession.sessionId)} · {formatUsdtAmount(runtime.seckillSession.product.seckillListPriceUsdt)}；是否命中秒杀以你的钱包付款上链时间为准。
         </StatusNotice>
       ) : null}
 
@@ -2021,7 +2201,7 @@ export function CheckoutScreen() {
       <CheckoutFlow
         fulfillmentReady={Boolean(product?.fulfillmentModes.includes(runtime.fulfillmentMode))}
         quoteReady={Boolean(runtime.quote)}
-        quantityReady={Boolean(sku)}
+        quantityReady={quantityWithinLimit}
         skuReady={Boolean(sku)}
         targetReady={Boolean(runtime.checkoutTarget?.fulfillmentMode === runtime.fulfillmentMode)}
       />
@@ -2121,7 +2301,7 @@ export function CheckoutScreen() {
           <output aria-label="当前数量">{runtime.quantity}</output>
           <button
             type="button"
-            disabled={runtime.busy || Boolean(runtime.pendingSubmission) || !sku || BigInt(runtime.quantity) >= BigInt(sku.stockAvailable)}
+            disabled={runtime.busy || Boolean(runtime.pendingSubmission) || !sku || BigInt(runtime.quantity) >= quantityLimit}
             onClick={() => runtime.setQuantity(runtime.quantity + 1)}
             aria-label="增加数量"
           ><Plus aria-hidden="true" size={18} /></button>
@@ -2197,7 +2377,20 @@ function CheckoutFlow({
 function CheckoutTargetSelector() {
   const runtime = useMallRuntime();
   const addresses = [...runtime.buyerAddresses].sort((left, right) => Number(right.isDefault) - Number(left.isDefault));
-  const pickupStores = runtime.stores;
+  const pickupStoreScopeReady = runtime.fulfillmentMode !== 'PICKUP'
+    || !runtime.selectedProduct
+    || runtime.storesScope.productId === runtime.selectedProduct.productId;
+  const pickupStores = runtime.storesState === 'ready' && pickupStoreScopeReady ? runtime.stores : [];
+
+  useEffect(() => {
+    if (
+      runtime.fulfillmentMode !== 'PICKUP'
+      || !runtime.selectedProduct
+      || runtime.storesScope.productId === runtime.selectedProduct.productId
+      || runtime.storesState === 'loading'
+    ) return;
+    void runtime.reloadStores(undefined, runtime.selectedProduct.productId);
+  }, [runtime.fulfillmentMode, runtime.selectedProduct?.productId, runtime.storesScope.productId, runtime.storesState]);
 
   return (
     <section className="checkout-target" aria-labelledby="checkout-target-title">
@@ -2244,9 +2437,9 @@ function CheckoutTargetSelector() {
         </div>
       ) : (
         <div className="pickup-options">
-          {runtime.storesState === 'loading' ? <StoreListSkeleton /> : null}
-          {runtime.storesState === 'empty' ? <p className="section-copy">当前没有可用自提门店。</p> : null}
-          {runtime.storesState === 'error' ? <p className="field-error">门店列表读取失败，无法创建自提目标。</p> : null}
+          {runtime.storesState === 'loading' || !pickupStoreScopeReady ? <StoreListSkeleton /> : null}
+          {pickupStoreScopeReady && runtime.storesState === 'empty' ? <p className="section-copy">该商家暂无可用自提门店，请选择快递或联系商家。</p> : null}
+          {pickupStoreScopeReady && runtime.storesState === 'error' ? <p className="field-error">门店列表读取失败，无法创建自提目标。</p> : null}
           {pickupStores.map((store) => (
             <article className="pickup-option" key={store.storeId}>
               <StoreMediaGallery store={store} compact />
@@ -2412,7 +2605,7 @@ export function ReviewScreen() {
               <div><strong>付款在活动时间内</strong><span>商品 {formatUsdtAmount(quote.routerCall.intent.seckillPayment.listPriceUsdt)}</span><span>服务费 {formatUsdtAmount(quote.routerCall.intent.seckillPayment.platformServiceFeeUsdt)}</span><span>商家货款 {formatUsdtAmount(quote.routerCall.intent.seckillPayment.custodyProductUsdt)}</span><span>运费 {formatUsdtAmount(quote.routerCall.intent.seckillPayment.freightUsdt)}</span><span>USDT 实付 {formatUsdtAmount(quote.routerCall.intent.seckillPayment.usdtPaymentAmount)}</span><span>NPL {formatNplAmount(quote.routerCall.intent.seckillPayment.nplPaymentAmount)}</span></div>
               <div><strong>付款超过活动截止</strong><span>商品 {formatUsdtAmount(quote.routerCall.intent.fallbackPayment.listPriceUsdt)}</span><span>服务费 {formatUsdtAmount(quote.routerCall.intent.fallbackPayment.platformServiceFeeUsdt)}</span><span>商家货款 {formatUsdtAmount(quote.routerCall.intent.fallbackPayment.custodyProductUsdt)}</span><span>运费 {formatUsdtAmount(quote.routerCall.intent.fallbackPayment.freightUsdt)}</span><span>USDT 实付 {formatUsdtAmount(quote.routerCall.intent.fallbackPayment.usdtPaymentAmount)}</span><span>NPL {formatNplAmount(quote.routerCall.intent.fallbackPayment.nplPaymentAmount)}</span></div>
             </div>
-            <p className="field-help">是否命中秒杀只看奖金付款时间；截止后自动使用普通报价和普通库存预留。</p>
+            <p className="field-help">是否命中秒杀只看你的钱包付款上链时间；截止后自动使用普通报价和普通库存预留。</p>
           </div>
         </details>
       ) : null}
@@ -2555,10 +2748,27 @@ function quoteDisabledReason(runtime: MallRuntimeValue) {
     runtime.seckillSession?.sessionId !== runtime.selectedSeckillSessionId
       || runtime.seckillSession.phase !== 'LIVE'
   )) return '系统当前场次阶段不允许创建秒杀报价';
+  if (runtime.selectedSeckillSessionId && (
+    BigInt(runtime.seckillSession?.inventory.available ?? '0') === 0n
+      || BigInt(runtime.selectedSku.seckill?.inventory.available ?? '0') === 0n
+  )) return '本场已抢完，请返回秒杀大厅查看下一场。';
+  if (runtime.selectedSeckillSessionId && checkoutQuantityLimit(runtime) < BigInt(runtime.quantity)) {
+    return '本场剩余库存不足，请减少购买数量。';
+  }
   if (!runtime.checkoutTarget || runtime.checkoutTarget.fulfillmentMode !== runtime.fulfillmentMode) {
     return runtime.fulfillmentMode === 'DELIVERY' ? '请先选择已保存的收货地址' : '请先选择自提门店';
   }
   return '配置还差一步，请检查规格、履约方式、收货信息和购买数量';
+}
+
+function checkoutQuantityLimit(runtime: MallRuntimeValue) {
+  const sku = runtime.selectedSku;
+  if (!sku) return 0n;
+  const stockAvailable = BigInt(sku.stockAvailable);
+  if (!runtime.selectedSeckillSessionId) return stockAvailable;
+  const sessionAvailable = BigInt(runtime.seckillSession?.inventory.available ?? '0');
+  const skuSeckillAvailable = BigInt(sku.seckill?.inventory.available ?? '0');
+  return [stockAvailable, sessionAvailable, skuSeckillAvailable].reduce((min, value) => value < min ? value : min);
 }
 
 function quoteButtonLabel(runtime: MallRuntimeValue) {
@@ -2701,7 +2911,9 @@ function seckillActionReason(
   if (BigInt(session.inventory.available) === 0n) return '本场库存已抢完';
   if (!productAvailable) return '当前商品还没准备好，暂时不能抢';
   if (!runtime.bootstrap?.writesEnabled) return '平台当前暂停新支付，暂时不能抢';
-  return '秒杀订单不需要配置';
+  if (runtime.pendingSubmission) return '你有一笔钱包付款还没提交给系统，请先恢复跟踪或刷新支付状态。';
+  if (runtime.busy) return '系统正在同步数据，请稍候。';
+  return '确认规则后就能进入下单页。';
 }
 
 function ledgerStateSummaries(runtime: MallRuntimeValue) {
@@ -3089,16 +3301,17 @@ function orderCountText(metric: Readonly<{ status: string; count: string | null 
 function orderMatchesTab(order: FulfillmentOrder, tab: string) {
   if (tab === '全部') return true;
   if (tab === '待付款') return ['QUOTED', 'SUBMITTED'].includes(order.state);
-  if (tab === '待发货') return order.state === 'PAID';
+  if (tab === '待发货') return order.state === 'PAID' && order.fulfillmentMode === 'DELIVERY';
+  if (tab === '待自提') return order.state === 'PAID' && order.fulfillmentMode === 'PICKUP';
   if (tab === '待收货') return ['SHIPPED', 'DELIVERED', 'FULFILLMENT_PENDING'].includes(order.state);
   return ['ARBITRATION', 'TAKEOVER'].includes(order.state);
 }
 
-function orderStateLabel(state: FulfillmentOrder['state']) {
+function orderStateLabel(state: FulfillmentOrder['state'], fulfillmentMode?: FulfillmentOrder['fulfillmentMode']) {
   return ({
     QUOTED: '待付款',
     SUBMITTED: '提交中',
-    PAID: '待发货',
+    PAID: fulfillmentMode === 'PICKUP' ? '待自提' : '待发货',
     SHIPPED: '运输中',
     DELIVERED: '已送达',
     ARBITRATION: '仲裁中',
@@ -3208,8 +3421,10 @@ function paymentStateLabel(state: string | null | undefined) {
   return ({
     QUOTED: '已报价',
     SUBMITTED: '已提交',
+    PAID: '已付款',
     PENDING: '确认中',
     CONFIRMED: '已确认',
+    MINED: '已上链，等待最终确认',
     FINAL: '已完成',
     REPLACED: '交易已替换',
     REORGED: '链上回滚',

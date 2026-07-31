@@ -118,6 +118,7 @@ export class TakeoverFundingService {
       };
       return {
         plan: fundingPlanProjection(plan),
+        signer: governance.secondarySigner,
         typedData: {
           domain: sensitiveActionDomain(governance.verifyingContract),
           types: sensitiveActionTypes,
@@ -418,7 +419,7 @@ export class TakeoverFundingService {
         guaranteeDeposits: deposits.rows,
         debt: debt.rows[0] ?? null,
         takeovers: takeovers.rows,
-        allowedActions: formalEligible ? ['REQUEST_MERCHANT_USDT'] : [],
+        allowedActions: formalEligible ? ['REQUEST_MERCHANT_SETTLEMENT'] : [],
         settlementEligibility: formalEligible
           ? { mode: 'FORMAL', expiresAt: null }
           : { mode: 'BLOCKED', expiresAt: null },

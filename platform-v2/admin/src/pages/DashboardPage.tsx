@@ -16,7 +16,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { useEffect, useState, type FormEvent } from 'react';
-import { CoreApiError } from '../coreApi';
+import { CoreApiError, signTypedDataWithWallet } from '../coreApi';
 import { useCoreSession } from '../coreSession';
 import { commonStateLabel, formatBpsAsPercent, formatNpl, formatUsdt, humanizeError, shortAddress, shortId } from '../display';
 import {
@@ -96,21 +96,7 @@ export function DashboardPage() {
     setResumeNotice('');
     try {
       const challenge = await createCoverageBreakerResumeChallenge({ nonce: resumeNonce, deadline: resumeDeadline }, session.token);
-      if (challenge.signer.toLowerCase() === session.walletAddress.toLowerCase()) {
-        throw new CoreApiError({ code: 'InvalidResponse', message: '系统未提供独立的二次确认钱包', status: 502 });
-      }
-      let signature: unknown;
-      try {
-        signature = await window.ethereum.request({
-          method: 'eth_signTypedData_v4',
-          params: [challenge.signer, JSON.stringify(challenge.typedData)],
-        });
-      } catch {
-        throw new CoreApiError({ code: 'InvalidResponse', message: '二次钱包拒绝签名或签名请求失败', status: 400 });
-      }
-      if (typeof signature !== 'string' || !/^0x(?:[0-9a-fA-F]{2})+$/.test(signature)) {
-        throw new CoreApiError({ code: 'InvalidResponse', message: '二次钱包返回了无效签名', status: 400 });
-      }
+      const signature = await signTypedDataWithWallet(window.ethereum, challenge.signer, challenge.typedData);
       const action = await authorizeCoverageBreakerResume({
         snapshotId: challenge.snapshotId,
         nonce: resumeNonce,
