@@ -971,7 +971,7 @@ describe('Mall V2 payment consumer', () => {
     await user.click(screen.getByRole('button', { name: '刷新支付状态' }));
 
     await waitFor(() => expect(screen.getAllByText('已提交').length).toBeGreaterThan(0));
-    expect(screen.getAllByText('确认中').length).toBeGreaterThan(0);
+    expect(screen.getByText('等待链上最终确认')).toBeTruthy();
     expect(screen.getByText('--/15')).toBeTruthy();
   });
 
@@ -1216,6 +1216,37 @@ describe('Mall V2 payment consumer', () => {
     await waitFor(() => expect(services.wallet.connect).toHaveBeenCalledTimes(2));
     expect(screen.getByText('钱包付款待恢复跟踪')).toBeTruthy();
     expect(screen.getByRole('button', { name: '重试提交付款凭证' })).toBeTruthy();
+  });
+
+  it('clears recovered payment tracking when the order projection is already final paid', async () => {
+    const user = userEvent.setup();
+    const quote = paymentQuote();
+    const pending = pendingRecord(quote.orderId, HASH_3, 'AWAITING_PROJECTION');
+    const paidOrder = {
+      ...deliveryOrder,
+      orderId: quote.orderId,
+      paymentTxHash: HASH_3,
+      state: 'PAID' as const,
+      finalityStatus: 'FINAL' as const,
+      fulfillmentMode: 'DELIVERY' as const,
+      shippedAt: null,
+      deliveredAt: null,
+      fulfilledAt: null,
+      shipments: [],
+      logistics: [],
+    };
+    const services = readyServices({
+      listOrders: vi.fn().mockResolvedValue({ orders: [paidOrder], nextCursor: null }),
+    });
+    services.submissionStore.load = (walletAddress) => walletAddress.toLowerCase() === BUYER ? pending : null;
+    const clearSubmission = vi.spyOn(services.submissionStore, 'clear');
+    renderAt('/assets/orders', services);
+
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+
+    await waitFor(() => expect(clearSubmission).toHaveBeenCalledWith(pending));
+    await waitFor(() => expect(screen.queryByText('钱包付款待恢复跟踪')).toBeNull());
+    expect(screen.getAllByText('待发货').length).toBeGreaterThan(0);
   });
 
   it('fills the latest tx hash, not the replacement field, when using the pending payment recovery shortcut', async () => {

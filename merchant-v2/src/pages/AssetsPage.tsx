@@ -397,10 +397,10 @@ export function AssetsPage() {
                     <td><strong>{railLabel(request.rail)}</strong><small>{assetLabel(request.asset)}</small></td>
                     <td className="mono-value">{formatAssetAmount(request.amount, request.asset)}</td>
                     <td><StatusText state={request.state} /></td>
-                    <td><strong>{request.transfer_ids.length ? '平台处理中' : '等待平台处理'}</strong><details className="technical-details compact"><summary>客服核验编号</summary><small>{request.transfer_ids.map(shortId).join(', ') || '--'}</small></details></td>
+                    <td><strong>{settlementPlatformProgressLabel(request)}</strong><small>{request.transfer_ids.length ? `${request.transfer_ids.length} 笔打款记录` : '暂无打款记录'}</small><details className="technical-details compact"><summary>客服核验编号</summary><small>{request.transfer_ids.map(shortId).join(', ') || '--'}</small></details></td>
                     <td>{request.final_execution_tx_hashes.length
-                      ? <details className="technical-details compact"><summary>{request.final_execution_tx_hashes.length} 笔已到账</summary>{request.final_execution_tx_hashes.map((txHash) => <ExplorerHash hash={txHash} key={txHash} />)}</details>
-                      : '未到账'}</td>
+                      ? <details className="technical-details compact"><summary>{request.final_execution_tx_hashes.length} 笔最终到账</summary>{request.final_execution_tx_hashes.map((txHash) => <ExplorerHash hash={txHash} key={txHash} />)}</details>
+                      : settlementArrivalLabel(request)}</td>
                   </tr>
                 )) : (
                   <tr><td colSpan={6}><EmptyState description="系统还没有该钱包的结算申请。" title="暂无结算记录" /></td></tr>
@@ -862,8 +862,8 @@ function merchantStatusLabel(value: string | null | undefined) {
 
 function guaranteeStatusLabel(value: string | null | undefined) {
   return ({
-    DECISION_BLOCKED: '旧保证金记录，不应阻断经营',
-    BELOW_MINIMUM: '保证金为 0，不应阻断经营',
+    DECISION_BLOCKED: '保证金状态待系统确认',
+    BELOW_MINIMUM: '保证金为 0，等待系统确认',
     READY: '正常',
     FROZEN: '已冻结',
   } as Record<string, string>)[value ?? ''] ?? (value || '--');
@@ -876,7 +876,27 @@ function settlementBlockedReason(finance: MerchantFinanceProjection) {
   if (finance.merchant.guarantee_status === 'FROZEN') {
     return '当前商家已被冻结，系统不允许申请结算。';
   }
-  return `商家已入驻，保证金状态为 ${guaranteeStatusLabel(finance.merchant.guarantee_status)}，但系统没有返回“申请结算”动作。请刷新后重试；如果仍这样，让平台检查线上 Core 是否已经切到最新包。`;
+  return `商家已入驻，当前财务状态为 ${guaranteeStatusLabel(finance.merchant.guarantee_status)}，系统没有返回“申请结算”动作，所以暂不能申请结算。请刷新后重试，仍不行让平台检查系统返回原因。`;
+}
+
+function settlementPlatformProgressLabel(request: SettlementListProjection['requests'][number]) {
+  if (request.state === 'REQUESTED') return request.transfer_ids.length ? '已进入平台处理' : '等待平台处理';
+  if (request.state === 'SUBMITTED') return '已提交链上，等待确认';
+  if (request.state === 'SETTLED') return '链上已确认';
+  if (request.state === 'RETRYABLE') return '失败可重试';
+  if (request.state === 'QUARANTINED') return '已隔离，等待人工对账';
+  if (request.state === 'FAILED_CLOSED') return '已关闭，未到账';
+  return '等待系统更新';
+}
+
+function settlementArrivalLabel(request: SettlementListProjection['requests'][number]) {
+  if (request.state === 'SETTLED') return '系统已结算，等待核验编号';
+  if (request.state === 'SUBMITTED') return '等待链上最终确认';
+  if (request.state === 'REQUESTED') return '等待平台打款';
+  if (request.state === 'RETRYABLE') return '未到账，等待重试';
+  if (request.state === 'QUARANTINED') return '未到账，已隔离对账';
+  if (request.state === 'FAILED_CLOSED') return '未到账，已关闭';
+  return '未到账';
 }
 
 function statusLabel(value: string) {
@@ -892,6 +912,9 @@ function statusLabel(value: string) {
     PENDING: '处理中',
     FAILED: '失败',
     REORGED: '已回滚',
+    RETRYABLE: '等待重试',
+    QUARANTINED: '已隔离',
+    FAILED_CLOSED: '已关闭',
     ORDINARY: '普通订单',
     SECKILL: '秒杀订单',
     FALLBACK_RETAIL: '常规兜底订单',

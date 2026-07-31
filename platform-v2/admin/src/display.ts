@@ -90,10 +90,13 @@ export function commonStateLabel(value: string | null | undefined) {
     READY: '正常',
     REQUESTED: '已申请',
     REVIEW_PENDING: '等待审核',
+    RETRYABLE: '等待重试',
     SCHEDULED: '待开始',
     SECONDARY_SIGNED: '二次确认已通过',
     SETTLED: '已结算',
     SUBMITTED: '已提交',
+    QUARANTINED: '已隔离',
+    FAILED_CLOSED: '已关闭',
   } as Record<string, string>)[value] ?? value;
 }
 export function concessionAmountToBps(concessionAmount: string, baseAmount: string) {

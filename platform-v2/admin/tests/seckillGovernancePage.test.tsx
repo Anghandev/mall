@@ -133,7 +133,10 @@ describe('seckill governance workspace', () => {
       if (url.endsWith('/v2/auth/verify')) return jsonResponse({ token: 'jwt', walletAddress: adminWallet, roles: ['ADMIN'] });
       if (url.endsWith('/v2/bootstrap')) return jsonResponse(coreBootstrap());
       if (url.endsWith('/v2/admin/seckill/actions')) return jsonResponse([]);
-      if (url.endsWith('/v2/admin/catalog/products')) return jsonResponse({ products: [catalogProduct()] });
+      if (url.endsWith('/v2/admin/catalog/products')) return jsonResponse({ products: [
+        catalogProduct(),
+        catalogProduct({ productId: 'product-locked', title: 'test', writeLock: { type: 'ORDER', id: hash('b'), state: 'LOCKED' } }),
+      ] });
       if (url.endsWith('/v2/admin/seckill/sessions')) {
         captured.createBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
         return jsonResponse(createdAction, 201);
@@ -154,6 +157,7 @@ describe('seckill governance workspace', () => {
       expect.stringContaining('/v2/cms/public'),
       expect.objectContaining({ headers: expect.objectContaining({ authorization: 'Bearer jwt' }) }),
     ));
+    expect(await screen.findByText(/test：已有订单、奖池或结算记录未完成/)).toBeTruthy();
     await user.selectOptions(await screen.findByRole('combobox', { name: '选择商品' }), 'product-1');
     expect(screen.getByRole('combobox', { name: '选择规格' })).toHaveProperty('value', 'sku-1');
     expect(screen.getByLabelText(/活动库存/)).toHaveProperty('value', '3');

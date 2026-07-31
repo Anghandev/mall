@@ -728,7 +728,7 @@ function StoreRow({ store }: { store: MerchantStore }) {
         </div>
         <div className="store-row__badges">
           <span className={store.status === 'ACTIVE' ? 'status-pill status-pill--success' : 'status-pill status-pill--muted'}>
-            {store.status === 'ACTIVE' ? '营业中' : store.status}
+            {storeStatusLabel(store.status)}
           </span>
         </div>
       </div>
@@ -1780,7 +1780,7 @@ function SeckillPrizeOutcome({
           <details className="technical-disclosure technical-disclosure--compact"><summary>候选确认位置</summary><div><dt>确认位置</dt><dd>区块 {prize.candidate.blockNumber} · 记录 {prize.candidate.logIndex}</dd></div></details>
         </> : null}
         {prize.review ? <>
-          <div><dt>有效性审核</dt><dd>{prize.review.decision === 'APPROVED' ? '已通过' : '已驳回'} · {prize.review.reasonCode}</dd></div>
+          <div><dt>有效性审核</dt><dd>{prize.review.decision === 'APPROVED' ? '已通过' : '已驳回'} · {seckillPrizeReviewReasonLabel(prize.review.reasonCode)}<details className="technical-disclosure technical-disclosure--compact"><summary>审核原因编号</summary><code>{prize.review.reasonCode}</code></details></dd></div>
           <div><dt>审核钱包</dt><dd>{shortAddress(prize.review.reviewedBy)}</dd></div>
           <div><dt>审核时间</dt><dd><time dateTime={prize.review.reviewedAt}>{prize.review.reviewedAt}</time></dd></div>
         </> : null}
@@ -2627,10 +2627,10 @@ export function ReviewScreen() {
           <div className="section-heading"><h2 id="payment-status-title">支付同步</h2><Radio aria-hidden="true" size={19} /></div>
           <dl>
             <div><dt>报价状态</dt><dd>{paymentStateLabel(runtime.projection?.state ?? quote.state)}</dd></div>
-            <div><dt>钱包付款</dt><dd>{runtime.projection?.submittedTxHash || runtime.submittedTxHash || quote.submittedTxHash ? '已提交' : '未提交'}</dd></div>
+            <div><dt>钱包付款</dt><dd>{paymentSubmissionSyncLabel(runtime, quote)}</dd></div>
             <div><dt>支付分类</dt><dd>{paymentClassificationLabel(runtime.projection?.finality?.classification)}</dd></div>
             <div><dt>确认数</dt><dd>{runtime.projection?.finality ? `${runtime.projection.finality.confirmations}/${runtime.projection.finality.requiredConfirmations}` : '--/15'}</dd></div>
-            <div><dt>最终确认</dt><dd>{paymentStateLabel(runtime.projection?.finality?.state ?? 'PENDING')}</dd></div>
+            <div><dt>最终确认</dt><dd>{paymentFinalitySyncLabel(runtime, quote)}</dd></div>
           </dl>
           <button className="button button--secondary" type="button" onClick={() => void runtime.refreshPayment()} disabled={runtime.busy || !runtime.session}>
             <RefreshCw aria-hidden="true" size={18} /> 刷新支付状态
@@ -2896,6 +2896,14 @@ function seckillPayoutStateLabel(state: NonNullable<SeckillPrizeSettlementProjec
     QUARANTINED: '已隔离',
     FAILED_CLOSED: '已关闭',
   } as const)[state];
+}
+
+function seckillPrizeReviewReasonLabel(value: string) {
+  if (/^ORDER_VALID$/i.test(value)) return '候选订单有效';
+  if (/^ORDER_INVALID$/i.test(value)) return '候选订单无效';
+  if (/APPROV/i.test(value)) return '系统审核通过';
+  if (/REJECT|INVALID|DENY/i.test(value)) return '系统审核不通过';
+  return '已记录审核原因';
 }
 
 function seckillActionReason(
@@ -3402,6 +3410,15 @@ function railForBalance(balance: SettlementBalance): Extract<SettlementRail, 'RE
   return null;
 }
 
+function storeStatusLabel(status: MerchantStore['status']) {
+  return ({
+    DRAFT: '门店资料待完善',
+    ACTIVE: '营业中',
+    SUSPENDED: '暂停服务',
+    CLOSED: '已关闭',
+  } as Record<string, string>)[status] ?? '门店状态异常，请联系客服';
+}
+
 function settlementStateLabel(state: SettlementBalance['state'] | SettlementRequestProjection['state']) {
   return ({
     LOCKED: '锁定中',
@@ -3430,7 +3447,28 @@ function paymentStateLabel(state: string | null | undefined) {
     REORGED: '链上回滚',
     FAILED: '失败',
     EXPIRED: '已过期',
-  } as Record<string, string>)[state] ?? state;
+  } as Record<string, string>)[state] ?? '系统返回新状态，请刷新或联系客服';
+}
+
+function paymentSubmissionSyncLabel(
+  runtime: MallRuntimeValue,
+  quote: NonNullable<MallRuntimeValue['quote']>,
+) {
+  const walletTxSent = Boolean(runtime.projection?.submittedTxHash || runtime.submittedTxHash || quote.submittedTxHash);
+  if (!walletTxSent) return '未发起';
+  if (!runtime.projection) return '钱包已发出，等待系统收到付款凭证';
+  if (runtime.projection.finality?.state === 'FINAL') return '系统已收到并确认';
+  return '系统已收到，等待最终确认';
+}
+
+function paymentFinalitySyncLabel(
+  runtime: MallRuntimeValue,
+  quote: NonNullable<MallRuntimeValue['quote']>,
+) {
+  if (runtime.projection?.finality) return paymentStateLabel(runtime.projection.finality.state);
+  if (runtime.projection) return '等待链上最终确认';
+  if (runtime.submittedTxHash || quote.submittedTxHash) return '系统尚未收到付款凭证';
+  return '未开始';
 }
 
 function paymentClassificationLabel(value: string | null | undefined) {

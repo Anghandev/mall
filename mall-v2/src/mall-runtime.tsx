@@ -288,6 +288,7 @@ export function MallRuntimeProvider({
   const [projection, setProjection] = useState<PaymentProjection | null>(null);
   const [approvals, setApprovals] = useState<readonly ApprovalStatus[]>([]);
   const [pendingSubmission, setPendingSubmission] = useState<PendingSubmission | null>(null);
+  const pendingSubmissionRef = useRef<PendingSubmission | null>(null);
   const [submittedTxHash, setSubmittedTxHash] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [checkoutBusy, setCheckoutBusy] = useState<CheckoutBusyKind | null>(null);
@@ -541,7 +542,7 @@ export function MallRuntimeProvider({
         }
         resetAuthenticatedState();
         const recovered = services.submissionStore.load(nextSession.walletAddress);
-        setPendingSubmission(recovered);
+        rememberPendingSubmission(recovered);
         setSubmittedTxHash(recovered?.txHash ?? null);
         setSession(nextSession);
         setPickupCredentials(loadCachedPickupCredentials(nextSession.walletAddress));
@@ -1188,7 +1189,7 @@ export function MallRuntimeProvider({
           };
           services.submissionStore.save(submission);
           setSubmittedTxHash(txHash);
-          setPendingSubmission(submission);
+          rememberPendingSubmission(submission);
           await submitAndRefresh(submission);
         });
       } finally {
@@ -1236,7 +1237,7 @@ export function MallRuntimeProvider({
         };
         services.submissionStore.save(submission);
         setSubmittedTxHash(normalizedTxHash);
-        setPendingSubmission(submission);
+        rememberPendingSubmission(submission);
         await submitAndRefresh(submission);
         await loadOrderBundle(activeSession).catch(() => undefined);
       });
@@ -1527,7 +1528,7 @@ export function MallRuntimeProvider({
 
   function clearPaymentState() {
     clearQuoteState();
-    setPendingSubmission(null);
+    rememberPendingSubmission(null);
     setSubmittedTxHash(null);
   }
 
@@ -1537,6 +1538,29 @@ export function MallRuntimeProvider({
     setQuote(null);
     setProjection(null);
     setApprovals([]);
+  }
+
+  function rememberPendingSubmission(nextSubmission: PendingSubmission | null) {
+    pendingSubmissionRef.current = nextSubmission;
+    setPendingSubmission(nextSubmission);
+  }
+
+  function clearPendingSubmissionIfResolvedByOrders(nextOrders: readonly FulfillmentOrder[]) {
+    const current = pendingSubmissionRef.current;
+    if (!current) return;
+    const resolved = nextOrders.some((order) => orderProvesPendingSubmissionResolved(order, current));
+    if (!resolved) return;
+    services.submissionStore.clear(current);
+    rememberPendingSubmission(null);
+  }
+
+  function clearPendingSubmissionIfResolvedByStatements(nextStatements: readonly BuyerShoppingStatement[]) {
+    const current = pendingSubmissionRef.current;
+    if (!current) return;
+    const resolved = nextStatements.some((statement) => shoppingStatementProvesPendingSubmissionResolved(statement, current));
+    if (!resolved) return;
+    services.submissionStore.clear(current);
+    rememberPendingSubmission(null);
   }
 
   async function loadOrderBundle(
@@ -1570,6 +1594,7 @@ export function MallRuntimeProvider({
     }));
     if (!isActive()) return;
     const nextOrders = cursor ? mergeOrders(orders, page.orders) : page.orders;
+    clearPendingSubmissionIfResolvedByOrders(nextOrders);
     setOrders(nextOrders);
     setOrdersNextCursor(page.nextCursor);
     setOrderActions(actions);
@@ -1694,6 +1719,7 @@ export function MallRuntimeProvider({
         ? mergeShoppingStatements(shoppingStatements, page.statements)
         : page.statements;
       if (!isActive()) return;
+      clearPendingSubmissionIfResolvedByStatements(nextStatements);
       setShoppingStatements(nextStatements);
       setShoppingStatementsNextCursor(page.nextCursor);
       setShoppingStatementsState(nextStatements.length > 0 ? 'ready' : 'empty');
@@ -1828,7 +1854,7 @@ export function MallRuntimeProvider({
     }
     const awaitingProjection = { ...submission, phase: 'AWAITING_PROJECTION' as const };
     services.submissionStore.save(awaitingProjection);
-    setPendingSubmission(awaitingProjection);
+    rememberPendingSubmission(awaitingProjection);
     await refreshAndComplete(awaitingProjection, activeSession);
   }
 
@@ -1850,10 +1876,10 @@ export function MallRuntimeProvider({
     setProjection(nextProjection);
     if (paymentProjectionIsFinal(nextProjection)) {
       services.submissionStore.clear(submission);
-      setPendingSubmission(null);
+      rememberPendingSubmission(null);
     } else {
       services.submissionStore.save(submission);
-      setPendingSubmission(submission);
+      rememberPendingSubmission(submission);
     }
   }
 
@@ -1898,7 +1924,7 @@ export function MallRuntimeProvider({
     setNotifications([]);
     setNotificationsState('idle');
     setNotificationEndpoint(null);
-    setPendingSubmission(null);
+    rememberPendingSubmission(null);
     setSubmittedTxHash(null);
     clearPaymentState();
   }
@@ -2247,6 +2273,32 @@ function paymentProjectionIsFinal(projection: PaymentProjection) {
   return projection.state === 'PAID'
     && projection.finality?.state === 'FINAL'
     && projection.finality.confirmations >= projection.finality.requiredConfirmations;
+}
+
+function orderProvesPendingSubmissionResolved(order: FulfillmentOrder, submission: PendingSubmission) {
+  return order.orderId.toLowerCase() === submission.orderId.toLowerCase()
+    && order.paymentTxHash?.toLowerCase() === submission.txHash.toLowerCase()
+    && order.finalityStatus === 'FINAL'
+    && orderStateProvesPaymentFinal(order.state);
+}
+
+function shoppingStatementProvesPendingSubmissionResolved(statement: BuyerShoppingStatement, submission: PendingSubmission) {
+  return statement.orderId.toLowerCase() === submission.orderId.toLowerCase()
+    && statement.paymentTxHash.toLowerCase() === submission.txHash.toLowerCase()
+    && orderStateProvesPaymentFinal(statement.orderState)
+    && Number.isFinite(Date.parse(statement.paymentFinalizedAt));
+}
+
+function orderStateProvesPaymentFinal(state: FulfillmentOrder['state'] | BuyerShoppingStatement['orderState']) {
+  return [
+    'PAID',
+    'SHIPPED',
+    'DELIVERED',
+    'ARBITRATION',
+    'TAKEOVER',
+    'FULFILLMENT_PENDING',
+    'FULFILLED',
+  ].includes(state);
 }
 
 function omitRecordKey<T>(record: Readonly<Record<string, T>>, key: string): Readonly<Record<string, T>> {

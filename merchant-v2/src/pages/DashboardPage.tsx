@@ -185,7 +185,7 @@ export function DashboardPage() {
               )}
               <div className="inline-warning">
                 <CircleAlert aria-hidden="true" size={17} />
-                <span>商家状态：{dashboard.merchant.status}，商品和财务操作以系统授权为准。</span>
+                <span>商家状态：{merchantStatusLabel(dashboard.merchant.status)}，能不能上架、结算、发货以页面按钮和系统校验为准。</span>
               </div>
               <Link className="button secondary wide" to="/product">检查单品表单</Link>
             </section>
@@ -194,4 +194,14 @@ export function DashboardPage() {
       ) : null}
     </div>
   );
+}
+
+function merchantStatusLabel(value: string | null | undefined) {
+  return ({
+    APPROVED: '已入驻',
+    PENDING: '待审核',
+    REJECTED: '已拒绝',
+    SUSPENDED: '已暂停',
+    BLACKLISTED: '已拉黑',
+  } as Record<string, string>)[value ?? ''] ?? '状态异常，请刷新或联系平台';
 }

@@ -296,7 +296,8 @@ function TransferDetail({ detail }: { detail: AdminSettlementTransferDetail }) {
       <Fact label="转账编号" value={transfer.transferId} code />
       <Fact label="收款地址 / 金额" value={shortAddress(transfer.recipientAddress)} note={formatSettlementAmount(transfer.amount, transfer.asset)} />
       <Fact label="平台打款账户" value={shortAddress(transfer.executorWallet)} note={`平台处理号 ${transfer.executorNonce}`} />
-      <Fact label="到账记录" value={transfer.executionTxHash ? '已提交' : '未提交'} />
+      <Fact label="链上提交" value={transfer.executionTxHash ? '已提交交易' : '未提交交易'} />
+      <Fact label="到账最终确认" value={transfer.state === 'SETTLED' ? '已到账' : stateLabel(transfer.state)} />
     </dl>
     <FinalityEvidence detail={detail} />
     <details className="technical-details">
@@ -450,6 +451,8 @@ function stateLabel(value: string) {
     FAILED: '失败',
     REORGED: '已回滚',
     QUARANTINED: '已隔离',
+    FAILED_CLOSED: '已关闭',
+    LEASED: '执行中',
     NOT_SUBMITTED: '未提交',
   } as Record<string, string>)[value] ?? value;
 }

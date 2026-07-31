@@ -291,7 +291,7 @@ export function TakeoverPage() {
                 <Fact label="分配编号" value={assignment.assignmentId} mono />
                 <Fact label="替代商家" value={assignment.replacementMerchantId} />
                 <Fact label="接单钱包" value={assignment.replacementWallet} mono />
-                <Fact label="分配原因" value={assignment.reasonCode} />
+                <Fact label="分配原因" value={takeoverAssignmentReasonLabel(assignment.reasonCode)} />
                 <Fact label="分配时间" value={formatDateTime(assignment.assignedAt)} />
                 <Fact label="分配证据" value={assignment.evidenceHash} mono />
                 <Fact label="接管证据" value={selectedCase.evidenceHash} mono />
@@ -393,7 +393,7 @@ function orderStateLabel(value: string) {
     DISPUTED: '仲裁中',
     TAKEOVER: '平台接管',
     CANCELLED: '已取消',
-  } as Record<string, string>)[value] ?? value;
+  } as Record<string, string>)[value] ?? '状态待确认';
 }
 
 function carrierLabel(value: LogisticsCarrierCode) {
@@ -430,7 +430,17 @@ function takeoverReasonLabel(value: string | null | undefined) {
     WAITING_FINALITY: '等待付款最终确认',
     DEADLINE_NOT_REACHED: '还没到可操作时间',
     DISPUTED: '订单仲裁中',
-  } as Record<string, string>)[value] ?? value;
+  } as Record<string, string>)[value] ?? '暂不能发货';
+}
+
+function takeoverAssignmentReasonLabel(reason: string | null | undefined) {
+  const value = reason ?? '';
+  if (/TIMEOUT|OVERDUE|NO_SHIPMENT/i.test(value)) return '原商家超时未发货，平台接管';
+  if (/DISTANCE|NEAR|REGION|CITY|DISTRICT/i.test(value)) return '按距离或服务区域分配';
+  if (/MANUAL|ADMIN|OPERATOR|OPERATIONS/i.test(value)) return '平台人工接管分配';
+  if (/CAPACITY|AVAILABLE|ELIGIBLE/i.test(value)) return '接管商家可履约';
+  if (/FUND|ADVANCE/i.test(value)) return '接管资金已确认后分配';
+  return '平台按接管规则分配';
 }
 
 function assertAssignedToSession(

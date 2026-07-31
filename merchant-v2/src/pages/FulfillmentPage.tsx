@@ -628,7 +628,7 @@ function TargetPanel({ state }: { state: LoadState<FulfillmentTarget> }) {
           <div><dt>门店编号</dt><dd>{shortId(state.value.storeId)}</dd></div>
           <div><dt>地址</dt><dd>{state.value.payload.address}</dd></div>
           <div><dt>行政区</dt><dd>{state.value.payload.regionCode}</dd></div>
-          <div><dt>状态</dt><dd>{state.value.payload.status}</dd></div>
+          <div><dt>状态</dt><dd>{storeStatusLabel(state.value.payload.status)}<small>{state.value.payload.status === 'ACTIVE' ? '可用于当前自提核销' : '不可用于新自提，仅保留历史订单读取'}</small></dd></div>
         </dl>
       ) : null}
     </section>
@@ -911,6 +911,15 @@ async function downloadMerchantOrderExport(result: MerchantOrderExport) {
   anchor.download = result.filename;
   anchor.click();
   URL.revokeObjectURL(url);
+}
+
+function storeStatusLabel(status: string | null | undefined) {
+  return ({
+    DRAFT: '门店资料待完善',
+    ACTIVE: '营业中',
+    SUSPENDED: '暂停服务',
+    CLOSED: '已关闭',
+  } as Record<string, string>)[status ?? ''] ?? '门店状态异常，请刷新或联系平台';
 }
 
 function exportErrorMessage(error: unknown) {

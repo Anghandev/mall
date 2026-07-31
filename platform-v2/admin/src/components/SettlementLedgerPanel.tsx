@@ -1,5 +1,5 @@
 import type { SettlementListProjection } from '@abu24k/core-artifacts';
-import { Ban, CheckCircle2, RefreshCw, WalletCards } from 'lucide-react';
+import { AlertTriangle, Ban, CheckCircle2, ChevronRight, RefreshCw, WalletCards } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { CoreApiError } from '../coreApi';
 import { useCoreSession } from '../coreSession';
@@ -48,7 +48,7 @@ export function SettlementLedgerPanel() {
               {projection.points.map((points) => <article key={`${points.pointsType}:${points.purpose}:${points.state}`}><span>{points.pointsType} 后台积分</span><strong>{formatBnm(points.amount)}</strong><small>{commonStateLabel(points.state)} · 不可链上转账</small></article>)}
             </div> : <div className="empty-inline"><WalletCards aria-hidden="true" /><div><strong>当前钱包没有资产或 BNM 余额</strong><p>系统当前没有可展示余额。</p></div></div>}
             {projection.requests.length ? (
-              <div className="table-scroll"><table className="data-table"><thead><tr><th>申请</th><th>类型 / 资产</th><th>金额</th><th>状态</th><th>到账记录</th></tr></thead><tbody>{projection.requests.map((request) => <tr key={request.request_id}><td><code title={request.request_id}>{shortId(request.request_id)}</code><small>{request.requested_at}</small></td><td><strong>{railLabel(request.rail)}</strong><small>{request.asset}</small></td><td><strong>{formatAssetAmount(request.amount, request.asset)}</strong><small title={request.recipient_address}>{shortAddress(request.recipient_address)}</small></td><td><span className="status-chip status-ready"><CheckCircle2 aria-hidden="true" />{commonStateLabel(request.state)}</span></td><td><strong>{request.final_execution_tx_hashes.length ? '已到账' : '等待到账确认'}</strong><small>{request.final_execution_tx_hashes.length} 笔已确认转账</small>{request.final_execution_tx_hashes.length ? <details className="technical-details compact"><summary>客服核验编号</summary>{request.final_execution_tx_hashes.map((hash) => <code key={hash} title={hash}>{shortId(hash)}</code>)}</details> : null}</td></tr>)}</tbody></table></div>
+              <div className="table-scroll"><table className="data-table"><thead><tr><th>申请</th><th>类型 / 资产</th><th>金额</th><th>状态</th><th>到账记录</th></tr></thead><tbody>{projection.requests.map((request) => <tr key={request.request_id}><td><code title={request.request_id}>{shortId(request.request_id)}</code><small>{request.requested_at}</small></td><td><strong>{railLabel(request.rail)}</strong><small>{request.asset}</small></td><td><strong>{formatAssetAmount(request.amount, request.asset)}</strong><small title={request.recipient_address}>{shortAddress(request.recipient_address)}</small></td><td><SettlementRequestStateChip state={request.state} /></td><td><strong>{request.final_execution_tx_hashes.length ? '已到账' : settlementArrivalLabel(request.state)}</strong><small>{request.final_execution_tx_hashes.length} 笔已确认转账</small>{request.final_execution_tx_hashes.length ? <details className="technical-details compact"><summary>客服核验编号</summary>{request.final_execution_tx_hashes.map((hash) => <code key={hash} title={hash}>{shortId(hash)}</code>)}</details> : null}</td></tr>)}</tbody></table></div>
             ) : <div className="empty-inline"><WalletCards aria-hidden="true" /><div><strong>当前钱包没有结算申请</strong><p>系统当前没有结算申请。</p></div></div>}
           </>
         ) : null}
@@ -72,6 +72,24 @@ function railLabel(value: string) {
     NPL_REWARD: 'NPL 奖励',
     BNM_POINTS: 'BNM 积分',
   } as Record<string, string>)[value] ?? value;
+}
+
+function SettlementRequestStateChip({ state }: { state: string }) {
+  const settled = state === 'SETTLED' || state === 'FINAL';
+  const blocked = state === 'QUARANTINED' || state === 'FAILED_CLOSED';
+  const retryable = state === 'RETRYABLE';
+  const className = settled ? 'status-chip status-ready' : blocked ? 'status-chip status-blocked' : retryable ? 'status-chip status-warning' : 'status-chip';
+  const Icon = settled ? CheckCircle2 : blocked || retryable ? AlertTriangle : ChevronRight;
+  return <span className={className}><Icon aria-hidden="true" />{commonStateLabel(state)}</span>;
+}
+
+function settlementArrivalLabel(state: string) {
+  if (state === 'REQUESTED') return '等待平台处理';
+  if (state === 'SUBMITTED') return '等待链上确认';
+  if (state === 'RETRYABLE') return '未到账，等待重试';
+  if (state === 'QUARANTINED') return '未到账，已隔离对账';
+  if (state === 'FAILED_CLOSED') return '未到账，已关闭';
+  return '等待到账确认';
 }
 
 function assetPurposeLabel(value: string) {

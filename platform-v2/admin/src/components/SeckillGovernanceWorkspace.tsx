@@ -243,7 +243,7 @@ export function SeckillGovernanceWorkspace({ current, onRefresh }: {
       const updated = await operation();
       setActions((items) => [updated, ...items.filter((item) => item.actionId !== updated.actionId)]);
       setSelectedId(updated.actionId); setSelected(updated);
-      setNotice(message.replace('{state}', updated.state));
+      setNotice(message.replace('{state}', stateText(updated.state, updated.confirmations)));
       onRefresh();
     } catch (cause) { setError(asCoreError(cause)); }
     finally { setPendingAction(''); }
@@ -358,7 +358,7 @@ export function SeckillGovernanceWorkspace({ current, onRefresh }: {
         evidenceHash: winnerEvidenceHash,
         idempotencyKey: winnerReviewKey,
       }, session.token);
-      setNotice(`中奖候选审核已提交，系统状态 ${updated.state}；候选订单与钱包保持不可变。`);
+      setNotice(`中奖候选审核已提交，系统状态 ${prizeSettlementStateLabel(updated.state)}；候选订单与钱包保持不可变。`);
       setWinnerReason(''); setWinnerEvidenceHash(''); setWinnerReviewKey(seckillCommandKey('seckill-winner'));
       onRefresh();
     } catch (cause) { setError(asCoreError(cause)); }
@@ -463,7 +463,7 @@ function SessionDraftForm({ input, setInput, rulesVersionId, setRulesVersionId, 
 }) {
   const rulesLoading = rulesLookupState === 'loading' || pending;
   const productOptions = seckillReadyProducts(products);
-  const lockedSkuHints = lockedSeckillSkuHints(products);
+  const hiddenProductHints = hiddenSeckillProductHints(products);
   const selectedProduct = productOptions.find((product) => product.productId === input.productId) ?? null;
   const skuOptions = selectedProduct ? seckillReadySkus(selectedProduct) : [];
   const selectedSku = skuOptions.find((sku) => sku.skuId === input.skuId) ?? null;
@@ -496,8 +496,8 @@ function SessionDraftForm({ input, setInput, rulesVersionId, setRulesVersionId, 
       {productLookupState === 'ready' ? <ShieldCheck aria-hidden="true" /> : <AlertTriangle aria-hidden="true" />}
       <div>
         <strong>{productLookupState === 'loading' ? '正在读取可开秒杀商品' : productLookupState === 'ready' ? '选择商品和规格就行' : productLookupState === 'empty' ? '没有可开秒杀的商品' : productLookupState === 'error' ? '商品列表暂时无法读取' : '等待读取商品'}</strong>
-        <p>{productLookupState === 'ready' ? '这里只显示已上架、有可售库存、已提报秒杀库存的商品和规格；旧草稿锁住的库存会自动扣掉。' : productLookupState === 'empty' ? '先到商品主数据把商品发布上架，并确认规格有可售库存和秒杀库存；如果旧秒杀草稿占着库存，先取消旧动作释放。' : productLookupState === 'error' ? productLookupError : '连接平台钱包后自动读取。'}</p>
-        {lockedSkuHints.length ? <ul className="inline-hint-list">{lockedSkuHints.map((hint) => <li key={`${hint.productId}:${hint.skuId}`}>{hint.text}</li>)}</ul> : null}
+        <p>{productLookupState === 'ready' ? '这里只显示已上架、有可售库存、已提报秒杀库存的商品和规格；被订单、奖池或旧草稿锁住的商品不会放进下拉框。' : productLookupState === 'empty' ? '先到商品主数据把商品发布上架，并确认规格有可售库存和秒杀库存；如果下面显示被订单、奖池或旧草稿锁住，要先完成对应业务或换新测试商品。' : productLookupState === 'error' ? productLookupError : '连接平台钱包后自动读取。'}</p>
+        {hiddenProductHints.length ? <ul className="inline-hint-list">{hiddenProductHints.map((hint) => <li key={hint.key}>{hint.text}</li>)}</ul> : null}
       </div>
     </div>
     <div className="seckill-form-grid">
@@ -542,7 +542,7 @@ function runtimeBlockerLabel(value: string) {
     RUNTIME_SNAPSHOT_EXPIRED: '系统运行检查过期',
     RPC_DIVERGENCE: '链上 RPC 返回不一致',
     PAYMENT_CONFIGURATION_REQUIRED: '支付运行配置未完成',
-  } as Record<string, string>)[value] ?? value;
+  } as Record<string, string>)[value] ?? '系统运行限制';
 }
 
 function cmsRulesBinding(version: CmsVersionProjection): SeckillRulesBinding {
@@ -615,15 +615,67 @@ function seckillReadySkus(product: ManagedCatalogProduct) {
   ));
 }
 
-function lockedSeckillSkuHints(products: readonly ManagedCatalogProduct[]) {
-  return products.flatMap((product) => product.skus
-    .filter((sku) => sku.lifecycleState === 'ACTIVE' && safeAmount(sku.stockSeckillLocked) > 0n && skuInventoryCap(sku) === 0)
-    .map((sku) => ({
-      productId: product.productId,
-      skuId: sku.skuId,
-      text: `${product.title} / ${attributeText(sku.attributes)}：旧秒杀草稿锁着 ${safeAmount(sku.stockSeckillLocked).toString()} 件，先取消旧动作释放。`,
-    })))
-    .slice(0, 3);
+function hiddenSeckillProductHints(products: readonly ManagedCatalogProduct[]) {
+  return products.flatMap((product) => {
+    if (seckillReadyProducts([product]).length) return [];
+    if (product.lifecycleState !== 'ACTIVE') {
+      return [{ key: `${product.productId}:state`, text: `${product.title}：商品还没上架，当前是 ${catalogLifecycleLabel(product.lifecycleState)}。` }];
+    }
+    if (product.writeLock) {
+      return [{ key: `${product.productId}:lock`, text: `${product.title}：${catalogWriteLockLabel(product.writeLock)}，暂不能开新秒杀。` }];
+    }
+    const activeSku = product.skus.find((sku) => sku.lifecycleState === 'ACTIVE') ?? product.skus[0];
+    if (!activeSku) return [{ key: `${product.productId}:sku`, text: `${product.title}：没有可用规格。` }];
+    return [{
+      key: `${product.productId}:${activeSku.skuId}`,
+      text: `${product.title} / ${attributeText(activeSku.attributes)}：${skuSeckillBlockReason(activeSku)}。`,
+    }];
+  }).slice(0, 4);
+}
+
+function catalogLifecycleLabel(value: string) {
+  return ({
+    DRAFT: '草稿',
+    REVIEW: '审核中',
+    SCHEDULED: '待上架',
+    ACTIVE: '已上架',
+    SOLD_OUT: '已售罄',
+    HIDDEN: '已隐藏',
+    DELISTED: '已下架',
+    LOCKED: '已锁定',
+  } as Record<string, string>)[value] ?? '系统新状态';
+}
+
+function catalogWriteLockLabel(lock: ManagedCatalogProduct['writeLock']) {
+  if (!lock) return '无锁定';
+  const reason = /ORDER/i.test(lock.type)
+    ? '已有订单、奖池或结算记录未完成'
+    : /SECKILL/i.test(lock.type)
+      ? '已有秒杀活动占用'
+      : /RESERV|INVENTORY/i.test(lock.type)
+        ? '库存还有未完成预留'
+        : '商品被系统保护';
+  return `${reason}（${lockStateLabel(lock.state)}）`;
+}
+
+function lockStateLabel(value: string) {
+  return ({
+    LOCKED: '锁定中',
+    ACTIVE: '生效中',
+    DISPUTED: '争议中',
+    SCHEDULED: '已排期',
+  } as Record<string, string>)[value] ?? '状态待确认';
+}
+
+function skuSeckillBlockReason(sku: ManagedCatalogSku) {
+  const available = safeAmount(sku.stockAvailable);
+  const proposed = safeAmount(sku.proposedSeckillInventory);
+  const locked = safeAmount(sku.stockSeckillLocked);
+  if (sku.lifecycleState !== 'ACTIVE') return `规格还没上架，当前是 ${catalogLifecycleLabel(sku.lifecycleState)}`;
+  if (available <= 0n) return '可售库存为 0';
+  if (proposed <= 0n) return '没有提报秒杀库存';
+  if (locked >= proposed) return `提报秒杀库存已被旧草稿锁完（${locked.toString()}/${proposed.toString()}）`;
+  return `剩余可开库存为 0（可售 ${available.toString()}，提报 ${proposed.toString()}，旧草稿锁 ${locked.toString()}）`;
 }
 
 function seckillDraftFromSku(sku: ManagedCatalogSku): Pick<SeckillSessionCreateRequest, 'inventory' | 'seckillListPriceUsdt'> {
@@ -778,7 +830,18 @@ function stateText(state: string, confirmations?: number) {
     PENDING_EXECUTION: '等待系统执行',
     SUBMITTED: '已提交链上',
     SUPERSEDED: '已被替换',
-  } as Record<string, string>)[state] ?? state;
+  } as Record<string, string>)[state] ?? '系统返回新状态';
+}
+
+function prizeSettlementStateLabel(state: string) {
+  return ({
+    REVIEW_PENDING: '等待审核',
+    APPROVED: '审核通过',
+    QUARANTINED: '已隔离',
+    ROLLOVER_PENDING: '等待顺延',
+    ROLLED_OVER: '已顺延',
+    PAID: '已发奖',
+  } as Record<string, string>)[state] ?? '系统返回新状态';
 }
 
 function isActionApprovalExpired(action: SeckillGovernanceActionProjection | null) {
