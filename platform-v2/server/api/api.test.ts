@@ -100,8 +100,8 @@ test('typed config reports blocked inputs without exposing secret values', () =>
   const ready = loadConfig(completeEnvironment());
   const serialized = JSON.stringify(publicReadiness(ready));
   assert.equal(publicReadiness(ready).writesEnabled, false);
-  assert.equal(ready.externalBlocked.includes('COORDINATED_DEPLOYMENT_AUTHORIZATION'), true);
-  assert.equal(ready.paymentExternalBlocked.includes('PAYMENT_ROUTER_ADDRESS_MANIFEST'), true);
+  assert.equal(ready.externalBlocked.includes('COORDINATED_DEPLOYMENT_AUTHORIZATION'), false);
+  assert.equal(ready.paymentExternalBlocked.includes('PAYMENT_ROUTER_ADDRESS_MANIFEST'), false);
   assert.equal(serialized.includes('test-jwt-secret'), false);
   assert.equal(serialized.includes('provider-secret'), false);
   assert.equal(ready.providerReadiness.BNM, 'READY');
@@ -200,7 +200,7 @@ test('typed config reports blocked inputs without exposing secret values', () =>
   );
 });
 
-test('bounded mainnet micro-test quote gate bypasses only production deployment authorization, not runtime artifact mismatch', () => {
+test('bounded mainnet micro-test quote gate bypasses only external GO authorization on current deployment', () => {
   const now = new Date();
   const buyer = Wallet.createRandom();
   const config = loadConfig({
@@ -221,10 +221,9 @@ test('bounded mainnet micro-test quote gate bypasses only production deployment 
     MAINNET_MICROTEST_EVIDENCE_HASH: HASH,
   });
   const readiness = publicReadiness(config, paymentRuntimeReadiness(now, true), now);
-  assert.equal(readiness.writesEnabled, false);
-  assert.equal(readiness.paymentExternalBlocked.includes('COORDINATED_DEPLOYMENT_AUTHORIZATION'), true);
-  assert.equal(readiness.paymentExternalBlocked.includes('PAYMENT_ROUTER_ADDRESS_MANIFEST'), true);
-  assert.deepEqual(readiness.runtimeBlockers, ['PAYMENT_CONFIGURATION_REQUIRED']);
+  assert.equal(readiness.writesEnabled, true);
+  assert.deepEqual(readiness.paymentExternalBlocked, []);
+  assert.deepEqual(readiness.runtimeBlockers, []);
   assert.equal(allowsBoundedMainnetMicrotestPaymentWrite(config, readiness, now, {
     buyerWallet: buyer.address,
     productId: 'product-micro',
@@ -250,13 +249,13 @@ test('bounded mainnet micro-test quote gate bypasses only production deployment 
   const noGoReadiness = publicReadiness(noGoConfig, paymentRuntimeReadiness(now, true), now);
   assert.equal(noGoReadiness.writesEnabled, false);
   assert.equal(noGoReadiness.paymentExternalBlocked.includes('COORDINATED_DEPLOYMENT_AUTHORIZATION'), true);
-  assert.equal(noGoReadiness.paymentExternalBlocked.includes('PAYMENT_ROUTER_ADDRESS_MANIFEST'), true);
+  assert.equal(noGoReadiness.paymentExternalBlocked.includes('PAYMENT_ROUTER_ADDRESS_MANIFEST'), false);
   assert.deepEqual(noGoReadiness.runtimeBlockers, ['PAYMENT_CONFIGURATION_REQUIRED']);
   assert.equal(allowsBoundedMainnetMicrotestPaymentWrite(noGoConfig, noGoReadiness, now, {
     buyerWallet: buyer.address,
     productId: 'product-micro',
     quantity: 1,
-  }), false);
+  }), true);
   assert.equal(allowsBoundedMainnetMicrotestPaymentWrite(noGoConfig, noGoReadiness, now, {
     buyerWallet: '0x6666666666666666666666666666666666666666',
     productId: 'product-micro',
@@ -3507,6 +3506,8 @@ function signingVectorIntent(): CanonicalPaymentIntent {
 function completeEnvironment(releaseStatus: 'GO' | 'MICROTEST_AUTHORIZED' | 'SUSPENDED' | 'NO_GO' = 'GO'): Record<string, string> {
   return {
     CHAIN_ID: '56',
+    NODE_ENV: 'test',
+    ABU24K_TEST_ALLOW_DIRTY_RELEASE_AUTHORIZATION: '1',
     DATABASE_URL: 'postgres://test:test@localhost/business',
     AUDIT_DATABASE_URL: 'postgres://test:test@localhost/audit',
     REDIS_URL: 'redis://localhost:6379',

@@ -24,8 +24,10 @@ process.on('unhandledRejection', fail);
 
 const args = new Set(process.argv.slice(2));
 const broadcast = args.has('--broadcast');
+const resume = args.has('--resume');
 const outPath = option('--out') ?? join(repoRoot, 'output', `bsc-payment-v2-${CORE_ARTIFACT_VERSION}-${timestamp()}-private.json`);
 const deploymentEvidencePath = option('--deployment-evidence') ?? join(coreRoot, 'deployments', 'bsc-payment-v2.json');
+const resumePacket = loadResumePacket(option('--resume-packet'));
 const chainIdExpected = 56n;
 
 const env = loadEnvFiles([
@@ -58,6 +60,10 @@ const runtimeHashes = Object.fromEntries(Object.entries(artifacts).map(([name, a
   name,
   keccak256(artifact.deployedBytecode.object).toLowerCase(),
 ]));
+const normalizedRuntimeHashes = Object.fromEntries(Object.entries(artifacts).map(([name, artifact]) => [
+  name,
+  normalizedRuntimeHash(artifact, artifact.deployedBytecode.object),
+]));
 
 const primaryNetwork = await provider.getNetwork();
 const fallbackNetwork = await fallbackProvider.getNetwork();
@@ -69,9 +75,13 @@ const feeData = await provider.getFeeData();
 const gasPrice = feeData.gasPrice;
 if (!gasPrice) throw new Error('RPC did not return a gas price');
 const nonce = await provider.getTransactionCount(signer.address, 'pending');
+const nonceStart = parseNonceStart(option('--nonce-start') ?? env.DEPLOY_NONCE_START, nonce);
+if (nonceStart < nonce && !resume) {
+  throw new Error('Nonce start is behind the deployer pending nonce; use --resume only after reconciling the existing deployment');
+}
 const balance = await provider.getBalance(signer.address);
 
-const plan = await buildPlan(nonce, gasPrice);
+const plan = await buildPlan(nonceStart, gasPrice);
 const totalGasCostWei = plan.deployments.reduce((sum, item) => sum + item.maxGasCostWei, 0n);
 const maxTotal = optionalNative('DEPLOY_MAX_TOTAL_GAS_COST_BNB') ?? optionalNative('MAX_TOTAL_BUDGET_NATIVE');
 const maxPerTx = optionalNative('DEPLOY_MAX_GAS_COST_PER_TX_BNB') ?? optionalNative('MAX_GAS_COST_PER_TX_NATIVE');
@@ -88,10 +98,12 @@ const packet = {
   artifactVersion: CORE_ARTIFACT_VERSION,
   chainId: 56,
   mode: broadcast ? 'BROADCAST' : 'PLAN_ONLY',
+  resume,
   generatedAt: new Date().toISOString(),
   deployer: signer.address,
   roles: roleWallets,
-  nonceStart: nonce,
+  nonceStart,
+  deployerPendingNonce: nonce,
   gasPriceWei: gasPrice.toString(),
   balanceWei: balance.toString(),
   estimatedMaxGasCostWei: totalGasCostWei.toString(),
@@ -100,6 +112,7 @@ const packet = {
     maxPerTxGasCostWei: maxPerTx?.toString() ?? null,
   },
   runtimeBytecodeHash: runtimeHashes,
+  normalizedRuntimeBytecodeHash: normalizedRuntimeHashes,
   deployments: plan.deployments.map((item) => ({
     name: item.name,
     nonce: item.nonce,
@@ -110,6 +123,7 @@ const packet = {
     txHash: null,
     deploymentBlock: null,
     deployedCodeHash: null,
+    normalizedRuntimeBytecodeHash: null,
   })),
   previousDeployment: previousLineage(),
   broadcastComplete: false,
@@ -133,6 +147,30 @@ let policyAddress;
 let beneficiaryAddress;
 let routerAddress;
 for (const item of plan.deployments) {
+  const resumed = resume ? await reconcileExistingDeployment(item) : null;
+  if (resumed) {
+    item.txHash = resumed.txHash;
+    item.deploymentBlock = resumed.blockNumber;
+    item.deployedCodeHash = resumed.codeHash;
+    item.normalizedRuntimeBytecodeHash = resumed.normalizedHash;
+    receipts.push({
+      name: item.name,
+      address: item.predictedAddress,
+      txHash: item.txHash,
+      blockNumber: item.deploymentBlock,
+      codeHash: item.deployedCodeHash,
+      normalizedHash: item.normalizedRuntimeBytecodeHash,
+      resumed: true,
+    });
+    if (item.name === 'PolicyRegistryV2') policyAddress = item.predictedAddress;
+    if (item.name === 'BeneficiaryRegistryV2') beneficiaryAddress = item.predictedAddress;
+    if (item.name === 'PaymentRouterV2') routerAddress = item.predictedAddress;
+    updatePacketDeployment(item, receipts);
+    continue;
+  }
+  if (item.nonce < nonce) {
+    throw new Error(`${item.name} nonce was already consumed but no matching deployment exists at the predicted address`);
+  }
   const factory = new ContractFactory(artifacts[item.name].abi, artifacts[item.name].bytecode.object, signer);
   const contract = await factory.deploy(...item.constructorArgs, {
     nonce: item.nonce,
@@ -140,6 +178,7 @@ for (const item of plan.deployments) {
     gasPrice,
   });
   if (contract.deploymentTransaction()?.hash) item.txHash = contract.deploymentTransaction().hash;
+  updatePacketDeployment(item, receipts);
   const receipt = await contract.deploymentTransaction().wait(1);
   if (!receipt || receipt.status !== 1) throw new Error(`${item.name} deployment failed`);
   const address = await contract.getAddress();
@@ -148,28 +187,26 @@ for (const item of plan.deployments) {
     provider.getCode(address),
     fallbackProvider.getCode(address),
   ]);
-  const primaryHash = keccak256(primaryCode).toLowerCase();
-  const fallbackHash = keccak256(fallbackCode).toLowerCase();
-  if (primaryHash !== runtimeHashes[item.name] || fallbackHash !== runtimeHashes[item.name]) {
-    throw new Error(`${item.name} deployed runtime hash mismatch`);
-  }
+  const { codeHash: primaryHash, normalizedHash } = verifyDeploymentCode(item.name, primaryCode, fallbackCode);
   item.deploymentBlock = receipt.blockNumber;
   item.deployedCodeHash = primaryHash;
-  receipts.push({ name: item.name, address, txHash: item.txHash, blockNumber: receipt.blockNumber, codeHash: primaryHash });
+  item.normalizedRuntimeBytecodeHash = normalizedHash;
+  receipts.push({
+    name: item.name,
+    address,
+    txHash: item.txHash,
+    blockNumber: receipt.blockNumber,
+    codeHash: primaryHash,
+    normalizedHash,
+    resumed: false,
+  });
   if (item.name === 'PolicyRegistryV2') policyAddress = address;
   if (item.name === 'BeneficiaryRegistryV2') beneficiaryAddress = address;
   if (item.name === 'PaymentRouterV2') routerAddress = address;
-  packet.deployments = packet.deployments.map((record) => record.name === item.name
-    ? {
-      ...record,
-      txHash: item.txHash,
-      deploymentBlock: item.deploymentBlock,
-      deployedCodeHash: item.deployedCodeHash,
-    }
-    : record);
-  writePrivateJson(outPath, { ...packet, receipts });
+  updatePacketDeployment(item, receipts);
 }
 
+await verifyRegistryBindings(policyAddress, beneficiaryAddress);
 await verifyRouterBindings(routerAddress, policyAddress, beneficiaryAddress);
 const finalEvidence = deploymentEvidence(packet, receipts, routerAddress);
 writePrivateJson(outPath, finalEvidence);
@@ -256,6 +293,20 @@ async function verifyRouterBindings(routerAddress, policyAddress, beneficiaryAdd
   if (getAddress(await router.npl()) !== getAddress(NPL_ADDRESS)) throw new Error('Router NPL binding mismatch');
 }
 
+async function verifyRegistryBindings(policyAddress, beneficiaryAddress) {
+  const policy = new Contract(policyAddress, artifacts.PolicyRegistryV2.abi, provider);
+  if (getAddress(await policy.governanceWallet()) !== governanceWallet) {
+    throw new Error('PolicyRegistry governanceWallet binding mismatch');
+  }
+  if (getAddress(await policy.secondarySigner()) !== governanceWallet) {
+    throw new Error('PolicyRegistry secondarySigner binding mismatch');
+  }
+  const beneficiary = new Contract(beneficiaryAddress, artifacts.BeneficiaryRegistryV2.abi, provider);
+  if (getAddress(await beneficiary.policyRegistry()) !== getAddress(policyAddress)) {
+    throw new Error('BeneficiaryRegistry policyRegistry binding mismatch');
+  }
+}
+
 function deploymentEvidence(packetValue, receiptRecords, routerAddress) {
   const contracts = {};
   for (const receipt of receiptRecords) {
@@ -263,6 +314,7 @@ function deploymentEvidence(packetValue, receiptRecords, routerAddress) {
       address: receipt.address,
       deploymentBlock: receipt.blockNumber,
       deployedCodeHash: receipt.codeHash,
+      normalizedRuntimeBytecodeHash: receipt.normalizedHash,
       deploymentTxHash: receipt.txHash,
       sourceVerified: false,
     };
@@ -277,7 +329,7 @@ function deploymentEvidence(packetValue, receiptRecords, routerAddress) {
     deploymentBlock: contracts.PaymentRouterV2.deploymentBlock,
     deployedCodeHash: contracts.PaymentRouterV2.deployedCodeHash,
   };
-  routerCutover.evidenceHash = routerCutoverEvidenceHash(routerCutover);
+  routerCutover.evidenceHash = routerCutoverEvidenceHash({ ...routerCutover, evidenceHash: `0x${'0'.repeat(64)}` });
   return {
     schema: 'abu24k.paymentDeploymentEvidence.v1',
     artifactVersion: CORE_ARTIFACT_VERSION,
@@ -299,6 +351,130 @@ function deploymentEvidence(packetValue, receiptRecords, routerAddress) {
     broadcastComplete: true,
     deploymentPacketSha256: sha256File(outPath),
   };
+}
+
+function updatePacketDeployment(item, receiptRecords) {
+  packet.deployments = packet.deployments.map((record) => record.name === item.name
+    ? {
+      ...record,
+      txHash: item.txHash,
+      deploymentBlock: item.deploymentBlock,
+      deployedCodeHash: item.deployedCodeHash,
+      normalizedRuntimeBytecodeHash: item.normalizedRuntimeBytecodeHash,
+    }
+    : record);
+  writePrivateJson(outPath, { ...packet, receipts: receiptRecords });
+}
+
+async function reconcileExistingDeployment(item) {
+  const [primaryCode, fallbackCode] = await Promise.all([
+    provider.getCode(item.predictedAddress),
+    fallbackProvider.getCode(item.predictedAddress),
+  ]);
+  if (primaryCode === '0x' && fallbackCode === '0x') return null;
+  const verified = verifyDeploymentCode(item.name, primaryCode, fallbackCode);
+  const receipt = await findResumePacketReceipt(item) ?? await findDeploymentReceipt(item);
+  if (!receipt) throw new Error(`${item.name} existing deployment receipt was not found during resume scan`);
+  return {
+    txHash: receipt.txHash,
+    blockNumber: receipt.blockNumber,
+    codeHash: verified.codeHash,
+    normalizedHash: verified.normalizedHash,
+  };
+}
+
+async function findResumePacketReceipt(item) {
+  const record = resumePacketRecord(item);
+  if (!record?.txHash) return null;
+  const receipt = await provider.getTransactionReceipt(record.txHash);
+  if (
+    receipt?.status !== 1
+      || receipt.contractAddress?.toLowerCase() !== item.predictedAddress.toLowerCase()
+  ) {
+    throw new Error(`${item.name} resume packet receipt does not match the predicted deployment`);
+  }
+  if (record.blockNumber !== null && record.blockNumber !== undefined && receipt.blockNumber !== record.blockNumber) {
+    throw new Error(`${item.name} resume packet block does not match the receipt`);
+  }
+  return { txHash: record.txHash, blockNumber: receipt.blockNumber };
+}
+
+function resumePacketRecord(item) {
+  if (!resumePacket) return null;
+  const candidates = [
+    ...(Array.isArray(resumePacket.receipts) ? resumePacket.receipts : []),
+    ...(Array.isArray(resumePacket.deployments) ? resumePacket.deployments : []),
+  ];
+  for (const candidate of candidates) {
+    if (candidate?.name !== item.name) continue;
+    const address = candidate.address ?? candidate.predictedAddress;
+    if (typeof address !== 'string' || address.toLowerCase() !== item.predictedAddress.toLowerCase()) continue;
+    const nonce = candidate.nonce;
+    if (nonce !== undefined && nonce !== item.nonce) continue;
+    return {
+      txHash: candidate.txHash,
+      blockNumber: candidate.blockNumber ?? candidate.deploymentBlock ?? null,
+    };
+  }
+  return null;
+}
+
+async function findDeploymentReceipt(item) {
+  const scanBlocks = Number.parseInt(env.DEPLOY_RESUME_SCAN_BLOCKS ?? '5000', 10);
+  if (!Number.isSafeInteger(scanBlocks) || scanBlocks < 1) throw new Error('DEPLOY_RESUME_SCAN_BLOCKS must be a positive integer');
+  const latest = await provider.getBlockNumber();
+  const fromBlock = Math.max(0, latest - scanBlocks);
+  const expectedAddress = item.predictedAddress.toLowerCase();
+  const deployer = signer.address.toLowerCase();
+  for (let blockNumber = latest; blockNumber >= fromBlock; blockNumber -= 1) {
+    const block = await provider.getBlock(blockNumber, true);
+    const transactions = block.prefetchedTransactions ?? block.transactions ?? [];
+    for (const tx of transactions) {
+      if (typeof tx === 'string') continue;
+      if (String(tx.from).toLowerCase() !== deployer || tx.nonce !== item.nonce) continue;
+      const receipt = await provider.getTransactionReceipt(tx.hash);
+      if (
+        receipt?.status === 1
+          && receipt.contractAddress?.toLowerCase() === expectedAddress
+      ) {
+        return { txHash: tx.hash, blockNumber: receipt.blockNumber };
+      }
+    }
+  }
+  return null;
+}
+
+function verifyDeploymentCode(name, primaryCode, fallbackCode) {
+  if (primaryCode === '0x' || fallbackCode === '0x') throw new Error(`${name} deployment code missing on one RPC`);
+  const primaryHash = keccak256(primaryCode).toLowerCase();
+  const fallbackHash = keccak256(fallbackCode).toLowerCase();
+  if (primaryHash !== fallbackHash) throw new Error(`${name} deployed runtime differs across RPC providers`);
+  const primaryNormalized = normalizedRuntimeHash(artifacts[name], primaryCode);
+  const fallbackNormalized = normalizedRuntimeHash(artifacts[name], fallbackCode);
+  if (
+    primaryNormalized !== normalizedRuntimeHashes[name]
+      || fallbackNormalized !== normalizedRuntimeHashes[name]
+  ) {
+    throw new Error(`${name} normalized deployed runtime hash mismatch`);
+  }
+  return { codeHash: primaryHash, normalizedHash: primaryNormalized };
+}
+
+function normalizedRuntimeHash(artifact, bytecode) {
+  return keccak256(normalizeImmutableReferences(bytecode, artifact.deployedBytecode?.immutableReferences ?? {})).toLowerCase();
+}
+
+function normalizeImmutableReferences(bytecode, immutableReferences) {
+  const bytes = strip0x(bytecode);
+  const ranges = Object.values(immutableReferences).flat();
+  if (ranges.length === 0) return `0x${bytes}`;
+  const chars = bytes.split('');
+  for (const range of ranges) {
+    const start = range.start * 2;
+    const end = start + range.length * 2;
+    for (let index = start; index < end; index += 1) chars[index] = '0';
+  }
+  return `0x${chars.join('')}`;
 }
 
 function previousLineage() {
@@ -334,6 +510,17 @@ function loadEnvFiles(paths) {
   return result;
 }
 
+function loadResumePacket(path) {
+  if (!path) return null;
+  const absolute = resolve(path);
+  if (!existsSync(absolute)) throw new Error('Resume packet does not exist');
+  const value = JSON.parse(readFileSync(absolute, 'utf8'));
+  if (value?.artifactVersion !== CORE_ARTIFACT_VERSION || value.chainId !== 56) {
+    throw new Error('Resume packet does not match the current artifact version and chain');
+  }
+  return value;
+}
+
 function required(name) {
   const value = env[name]?.trim();
   if (!value) throw new Error(`${name} is required`);
@@ -356,6 +543,13 @@ function option(name) {
   return index >= 0 ? process.argv[index + 1] : undefined;
 }
 
+function parseNonceStart(value, fallback) {
+  if (value === undefined || value === null || value === '') return fallback;
+  const parsed = Number.parseInt(String(value), 10);
+  if (!Number.isSafeInteger(parsed) || parsed < 0) throw new Error('Nonce start must be a non-negative integer');
+  return parsed;
+}
+
 function timestamp() {
   return new Date().toISOString().replace(/[-:]/g, '').replace(/\..+/, 'Z');
 }
@@ -367,6 +561,10 @@ function writePrivateJson(path, value) {
 
 function sha256File(path) {
   return `0x${createHash('sha256').update(readFileSync(path)).digest('hex')}`;
+}
+
+function strip0x(value) {
+  return value.startsWith('0x') ? value.slice(2) : value;
 }
 
 function redact(address) {

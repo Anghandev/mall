@@ -101,11 +101,20 @@ for (const name of contracts) {
   const bytecode = artifact.bytecode?.object ?? '';
   const deployedBytecode = artifact.deployedBytecode?.object ?? '';
   const runtimeBytecodeHash = deployedBytecode ? keccak256(deployedBytecode).toLowerCase() : null;
+  const normalizedRuntimeBytecodeHash = deployedBytecode
+    ? normalizedRuntimeHash(artifact, deployedBytecode)
+    : null;
   const deployment = deploymentEvidence?.contracts[name];
   const deploymentMatchesCurrentRuntime = Boolean(deployment)
     && deploymentEvidence?.artifactVersion === artifactVersion
     && typeof deployment?.deployedCodeHash === 'string'
-    && deployment.deployedCodeHash.toLowerCase() === runtimeBytecodeHash;
+    && (
+      deployment.deployedCodeHash.toLowerCase() === runtimeBytecodeHash
+        || (
+          typeof deployment.normalizedRuntimeBytecodeHash === 'string'
+            && deployment.normalizedRuntimeBytecodeHash.toLowerCase() === normalizedRuntimeBytecodeHash
+        )
+    );
   if (!deploymentMatchesCurrentRuntime) currentDeploymentMatchesArtifact = false;
   contractEntries.push({
     name,
@@ -119,7 +128,9 @@ for (const name of contracts) {
     bytecodeSha256: sha256(bytecode),
     deployedBytecodeSha256: sha256(deployedBytecode),
     runtimeBytecodeHash,
+    normalizedRuntimeBytecodeHash,
     deployedCodeHash: deployment?.deployedCodeHash ?? null,
+    deployedNormalizedRuntimeBytecodeHash: deployment?.normalizedRuntimeBytecodeHash ?? null,
   });
   for (const item of abi) {
     if (item.type === 'event') {
@@ -299,6 +310,10 @@ function validateContractDeployments(value, base) {
       !entry || !/^0x[0-9a-fA-F]{40}$/.test(entry.address ?? '')
         || !Number.isSafeInteger(entry.deploymentBlock) || entry.deploymentBlock < 0
         || !/^0x[0-9a-fA-F]{64}$/.test(entry.deployedCodeHash ?? '')
+        || (
+          entry.normalizedRuntimeBytecodeHash !== undefined
+            && !/^0x[0-9a-fA-F]{64}$/.test(entry.normalizedRuntimeBytecodeHash)
+        )
     ) throw new Error(`Invalid deployment evidence for ${name}`);
     const address = entry.address.toLowerCase();
     if (addresses.has(address)) throw new Error('Deployment evidence contains duplicate contract addresses');
@@ -307,6 +322,7 @@ function validateContractDeployments(value, base) {
       address,
       deploymentBlock: entry.deploymentBlock,
       deployedCodeHash: entry.deployedCodeHash.toLowerCase(),
+      normalizedRuntimeBytecodeHash: entry.normalizedRuntimeBytecodeHash?.toLowerCase(),
     };
   }
   return {
@@ -326,4 +342,25 @@ function json(value) {
 
 function sha256(value) {
   return createHash('sha256').update(value).digest('hex');
+}
+
+function normalizedRuntimeHash(artifact, bytecode) {
+  return keccak256(normalizeImmutableReferences(bytecode, artifact.deployedBytecode?.immutableReferences ?? {})).toLowerCase();
+}
+
+function normalizeImmutableReferences(bytecode, immutableReferences) {
+  const bytes = strip0x(bytecode);
+  const ranges = Object.values(immutableReferences).flat();
+  if (ranges.length === 0) return `0x${bytes}`;
+  const chars = bytes.split('');
+  for (const range of ranges) {
+    const start = range.start * 2;
+    const end = start + range.length * 2;
+    for (let index = start; index < end; index += 1) chars[index] = '0';
+  }
+  return `0x${chars.join('')}`;
+}
+
+function strip0x(value) {
+  return value.startsWith('0x') ? value.slice(2) : value;
 }

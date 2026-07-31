@@ -37,7 +37,8 @@ test('production Core configuration is release-authorization and runtime-hash bo
   assert.match(source, /line\('RELEASE_RUNTIME_CONFIG_SHA256', releaseRuntimeConfigSha256\)/);
   assert.match(source, /core-runtime-config\.sha256/);
   assert.match(source, /Current contract artifact is not deployed/);
-  assert.match(source, /runtimeBytecodeHash\.toLowerCase\(\) !== String\(contract\.deployedCodeHash/);
+  assert.match(source, /contractRuntimeMatchesDeployment\(contract\)/);
+  assert.match(source, /normalizedRuntimeBytecodeHash/);
 });
 
 test('Nginx serves Mall and Merchant /assets business routes as SPA deep links without shadowing static assets', async () => {

@@ -64,7 +64,7 @@
     },
     "contractManifest": {
       "path": "contracts/contract-manifest.json",
-      "sha256": "76bde95ff001659d6c3c9f0a47a8f94e1b55432749f48f073a8888397878c9a9"
+      "sha256": "ffb4bec843e9da558a66ad517f1484cac2ae90f5d8bb79601905480ca7134d7d"
     },
     "eventCatalog": {
       "path": "contracts/event-catalog.json",
@@ -78,11 +78,11 @@
   "consumerTests": [
     {
       "path": "platform-v2/server/api/api.test.ts",
-      "sha256": "920e5a322fb09e4a1b05d19883015b2b43b75228ff514a68883ce0e51075a2b1"
+      "sha256": "4be22b13f8fc9d53addc17b895a4cc386feb1a003cbae3aeae2f58d1409d9310"
     },
     {
       "path": "platform-v2/test/consumer/core-artifacts.test.ts",
-      "sha256": "187b6ba49f0f503319536e651579298db7325ca3c074c441c5c295879f2712fc"
+      "sha256": "8a5e74ff5f4f09865340ce672bed6d31ec358322c5be7d88ec2cff84dbf5cf9b"
     }
   ],
   "httpSurface": [

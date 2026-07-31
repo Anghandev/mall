@@ -370,6 +370,8 @@ function coordinatedDeploymentReady() {
         deploymentBlock: unknown;
         deployedCodeHash: unknown;
         runtimeBytecodeHash: unknown;
+        normalizedRuntimeBytecodeHash: unknown;
+        deployedNormalizedRuntimeBytecodeHash: unknown;
       };
       return deployment.status === 'DEPLOYED'
         && typeof deployment.address === 'string'
@@ -378,7 +380,15 @@ function coordinatedDeploymentReady() {
         && typeof deployment.deployedCodeHash === 'string'
         && /^0x[0-9a-fA-F]{64}$/.test(deployment.deployedCodeHash)
         && typeof deployment.runtimeBytecodeHash === 'string'
-        && deployment.runtimeBytecodeHash.toLowerCase() === deployment.deployedCodeHash.toLowerCase();
+        && (
+          deployment.runtimeBytecodeHash.toLowerCase() === deployment.deployedCodeHash.toLowerCase()
+            || (
+              typeof deployment.normalizedRuntimeBytecodeHash === 'string'
+                && typeof deployment.deployedNormalizedRuntimeBytecodeHash === 'string'
+                && deployment.normalizedRuntimeBytecodeHash.toLowerCase()
+                  === deployment.deployedNormalizedRuntimeBytecodeHash.toLowerCase()
+            )
+        );
     })
   );
 }

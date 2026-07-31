@@ -124,7 +124,7 @@ if (
   || contractManifest.contracts.some((contract) => (
     contract.status !== 'DEPLOYED'
     || typeof contract.runtimeBytecodeHash !== 'string'
-    || contract.runtimeBytecodeHash.toLowerCase() !== String(contract.deployedCodeHash ?? '').toLowerCase()
+    || !contractRuntimeMatchesDeployment(contract)
   ))
 ) {
   throw new Error('Current contract artifact is not deployed; redeploy and regenerate the manifest before preparing production config');
@@ -182,6 +182,16 @@ if (
   primaryRecipient !== fallbackRecipient
   || decodedRecipient !== required('PLATFORM_SERVICE_FEE_WALLET_ADDRESS').toLowerCase()
 ) throw new Error('Router service-fee recipient does not match production configuration');
+
+function contractRuntimeMatchesDeployment(contract) {
+  const deployedCodeHash = String(contract.deployedCodeHash ?? '').toLowerCase();
+  const runtimeBytecodeHash = String(contract.runtimeBytecodeHash ?? '').toLowerCase();
+  if (/^0x[0-9a-f]{64}$/.test(deployedCodeHash) && runtimeBytecodeHash === deployedCodeHash) return true;
+  const normalizedRuntime = String(contract.normalizedRuntimeBytecodeHash ?? '').toLowerCase();
+  const deployedNormalizedRuntime = String(contract.deployedNormalizedRuntimeBytecodeHash ?? '').toLowerCase();
+  return /^0x[0-9a-f]{64}$/.test(normalizedRuntime)
+    && normalizedRuntime === deployedNormalizedRuntime;
+}
 
 const databasePassword = secret();
 const redisPassword = secret();

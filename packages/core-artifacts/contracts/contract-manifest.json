@@ -21,8 +21,8 @@
     "cborMetadata": false
   },
   "sourceDigestSha256": "9bba53c1ef80843af97a560a18d4234a247eeca61c235c0d1866b724210be5bf",
-  "deploymentStatus": "HISTORICAL_DEPLOYMENT_ONLY",
-  "deploymentArtifactVersion": "2.0.0-settlement-admin.16",
+  "deploymentStatus": "DEPLOYED",
+  "deploymentArtifactVersion": "2.0.0-fulfillment-launch.30",
   "deploymentAuthorized": false,
   "deploymentAuthorizationEvidenceHash": null,
   "releaseGateStatus": "EXTERNAL_AUTHORIZATION_REQUIRED",
@@ -35,11 +35,9 @@
     "artifactVersion": "2.0.0-settlement-admin.16",
     "deploymentAuthorized": false,
     "deploymentAuthorizationEvidenceHash": "0x9d260a962e4cefe886ddf1382b1c6efb4ff06fef6fbac17bf7014b3b3e78c3eb",
-    "note": "Historical deployment evidence only; release authorization is external and signed per artifact SHA."
+    "note": "Previous deployment lineage only; current artifact was redeployed separately."
   },
-  "externalBlocked": [
-    "CURRENT_ARTIFACT_REDEPLOYMENT_REQUIRED"
-  ],
+  "externalBlocked": [],
   "decisionBlocked": [],
   "deploymentOrder": [
     "PolicyRegistryV2",
@@ -50,9 +48,9 @@
     {
       "name": "PolicyRegistryV2",
       "source": "platform-v2/contracts/PolicyRegistryV2.sol",
-      "address": "0x217df9b9de12dc790e2e18db8bd80ad87661d201",
-      "deploymentBlock": 110724913,
-      "status": "HISTORICAL_DEPLOYMENT_ONLY",
+      "address": "0x43b14a903cf433deb9cba7d6d9d705a23d271ce6",
+      "deploymentBlock": 113193773,
+      "status": "DEPLOYED",
       "constructorInputs": [
         {
           "name": "governanceWallet_",
@@ -63,14 +61,16 @@
       "bytecodeSha256": "edf7d9da016d49dc75250f8381282b5fac61ba29c887c0dd6f158683aaeabe0c",
       "deployedBytecodeSha256": "598e1b04e0b493f2025edb1b01bc5322cfc5e5e6179fe5e8e184313a28007081",
       "runtimeBytecodeHash": "0x43e83e1b072303cf71f58353698e458d4fbca796345133bf789ae8c138775337",
-      "deployedCodeHash": "0xf65d22cc6e0813fd62b8256cef1fef42bd6ffe88c9e397f36c57be506de592a3"
+      "normalizedRuntimeBytecodeHash": "0x43e83e1b072303cf71f58353698e458d4fbca796345133bf789ae8c138775337",
+      "deployedCodeHash": "0xcfb17955f5e5c39c98db32d45ffc0079f7501e7621e2fb71bce13a4310d5e079",
+      "deployedNormalizedRuntimeBytecodeHash": "0x43e83e1b072303cf71f58353698e458d4fbca796345133bf789ae8c138775337"
     },
     {
       "name": "BeneficiaryRegistryV2",
       "source": "platform-v2/contracts/BeneficiaryRegistryV2.sol",
-      "address": "0xc821c7a29cba3eb452e8ec76dee0b905cedbc956",
-      "deploymentBlock": 110724928,
-      "status": "HISTORICAL_DEPLOYMENT_ONLY",
+      "address": "0x07f9c2758fadc2ae5bd6341a763d2a00a4092e0f",
+      "deploymentBlock": 113194666,
+      "status": "DEPLOYED",
       "constructorInputs": [
         {
           "name": "policyRegistry_",
@@ -81,14 +81,16 @@
       "bytecodeSha256": "fbd751fd18d1f1727d2919cda5a6df166a4268e02cabd27560882b0727b49d0c",
       "deployedBytecodeSha256": "602bc34b05fd53dc77807c5417192022ebdefe46a2101faa578ea580ad85fbe8",
       "runtimeBytecodeHash": "0xa2bc0200111bf3dc1d538bd66388d2f3339d207d704e208b8ef0c3365200aada",
-      "deployedCodeHash": "0x5a9eada2e8f89239be8c85cfa08f3a4d11ae5e2442051891b554aa73cc67b618"
+      "normalizedRuntimeBytecodeHash": "0xa2bc0200111bf3dc1d538bd66388d2f3339d207d704e208b8ef0c3365200aada",
+      "deployedCodeHash": "0xb084592cd8fc591f3e2c27f1844dbfdc11219c5d9b21aa7337fe7bce1c834808",
+      "deployedNormalizedRuntimeBytecodeHash": "0xa2bc0200111bf3dc1d538bd66388d2f3339d207d704e208b8ef0c3365200aada"
     },
     {
       "name": "PaymentRouterV2",
       "source": "platform-v2/contracts/PaymentRouterV2.sol",
-      "address": "0xf127055e811768e87f5baee62f2e5b9de863664c",
-      "deploymentBlock": 110882311,
-      "status": "HISTORICAL_DEPLOYMENT_ONLY",
+      "address": "0xaa943a60d44725d4d4a5e1c35c5c4a39ed544a7d",
+      "deploymentBlock": 113194679,
+      "status": "DEPLOYED",
       "constructorInputs": [
         {
           "name": "usdt_",
@@ -134,7 +136,9 @@
       "bytecodeSha256": "aa778410e79ca71cd0cb91abfe72767f228b3ba4bc63ad20e60c7f95d752ed05",
       "deployedBytecodeSha256": "438322b51d1187f37c3dc769bf97ead89df1325964c8fddff522e9b1ca6a8e6a",
       "runtimeBytecodeHash": "0xa8f0e155baef3b9ce58932a613dfdb2b75c4ad3bc8a7e5e4f3915741420d9deb",
-      "deployedCodeHash": "0x5a49d60865659b711f87606a6a6893effa954d4f85b06aa3fb12a97f3a9e9191"
+      "normalizedRuntimeBytecodeHash": "0xa8f0e155baef3b9ce58932a613dfdb2b75c4ad3bc8a7e5e4f3915741420d9deb",
+      "deployedCodeHash": "0x45f2fe4a1aba464c00fa8ae9f83d9619299c7cd122a2092fa002efd7ad3b876d",
+      "deployedNormalizedRuntimeBytecodeHash": "0xa8f0e155baef3b9ce58932a613dfdb2b75c4ad3bc8a7e5e4f3915741420d9deb"
     }
   ],
   "postDeploymentRoleGrants": [],

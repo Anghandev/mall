@@ -31,9 +31,9 @@ test('fulfillment-launch .30 checkpoint has one immutable identity, resolvable e
   assert.equal(openapi['x-artifactVersion'], artifactVersion);
   assert.equal(manifest.publicationStatus, 'COORDINATED_SETTLEMENT_ADMIN_CHECKPOINT');
   assert.equal(contractManifest.publicationStatus, 'coordinated-settlement-admin-checkpoint');
-  assert.equal(contractManifest.deploymentArtifactVersion, '2.0.0-settlement-admin.16');
-  assert.equal(contractManifest.deploymentStatus, 'HISTORICAL_DEPLOYMENT_ONLY');
-  assert.deepEqual(contractManifest.externalBlocked, ['CURRENT_ARTIFACT_REDEPLOYMENT_REQUIRED']);
+  assert.equal(contractManifest.deploymentArtifactVersion, artifactVersion);
+  assert.equal(contractManifest.deploymentStatus, 'DEPLOYED');
+  assert.deepEqual(contractManifest.externalBlocked, []);
   assert.equal(contractManifest.deploymentAuthorized, false);
   assert.equal(contractManifest.deploymentAuthorizationEvidenceHash, null);
   assert.equal(contractManifest.releaseGateStatus, 'EXTERNAL_AUTHORIZATION_REQUIRED');
@@ -950,21 +950,24 @@ test('catalog, settlement/admin and seckill realtime capabilities publish the at
     'PaymentRouterV2',
     'PolicyRegistryV2',
   ]);
-  assert.equal(contractManifest.deploymentStatus, 'HISTORICAL_DEPLOYMENT_ONLY');
-  assert.deepEqual(contractManifest.externalBlocked, ['CURRENT_ARTIFACT_REDEPLOYMENT_REQUIRED']);
+  assert.equal(contractManifest.deploymentStatus, 'DEPLOYED');
+  assert.deepEqual(contractManifest.externalBlocked, []);
   assert.ok(contractManifest.contracts.every((contract: {
     status: string;
     address: string | null;
     deploymentBlock: number | null;
     deployedCodeHash: string | null;
     runtimeBytecodeHash: string | null;
-  }) => contract.status === 'HISTORICAL_DEPLOYMENT_ONLY'
+    normalizedRuntimeBytecodeHash: string | null;
+    deployedNormalizedRuntimeBytecodeHash: string | null;
+  }) => contract.status === 'DEPLOYED'
       && /^0x[0-9a-f]{40}$/.test(contract.address ?? '')
       && Number.isSafeInteger(contract.deploymentBlock)
       && Number(contract.deploymentBlock) > 0
       && /^0x[0-9a-f]{64}$/.test(contract.deployedCodeHash ?? '')
       && /^0x[0-9a-f]{64}$/.test(contract.runtimeBytecodeHash ?? '')
-      && contract.runtimeBytecodeHash !== contract.deployedCodeHash));
+      && /^0x[0-9a-f]{64}$/.test(contract.normalizedRuntimeBytecodeHash ?? '')
+      && contract.normalizedRuntimeBytecodeHash === contract.deployedNormalizedRuntimeBytecodeHash));
   const fulfillmentActions = [
     'PAY_ORDER',
     'REQUEST_EXCHANGE',
