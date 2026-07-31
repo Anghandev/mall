@@ -1,0 +1,99 @@
+{
+  "schema": "abu24k.policyReplay.public.v1",
+  "artifactVersion": "2.0.0-fulfillment-launch.30",
+  "chainId": 56,
+  "generatedAt": "2026-07-31T12:07:19.147Z",
+  "status": "FINAL",
+  "latestVersion": "4",
+  "confirmationsRequirement": 15,
+  "policyRegistryAddress": "0x43B14A903cF433Deb9cba7D6d9d705A23D271ce6",
+  "sourcePolicyRegistryAddress": "0x217df9b9de12dc790e2e18db8bd80ad87661d201",
+  "governanceExecutor": "0x723CbCd8c83CC7CB96E0113b963E11027CCf80be",
+  "accountNonceStart": 134,
+  "accountNonceEnd": 137,
+  "policies": [
+    {
+      "version": 1,
+      "policyHash": "0xf985da3bac3edf411af2bd3519f5bdcc9c07c85b07556e6df5b4750ff620c044",
+      "operationsHash": "0x63ff198d66645eb85ac7279608b9759bd154164d86aac8d72c600de2c99000e1",
+      "decisionEvidenceHash": "0xc63b5dedeb757cb972329da14cf3cc0377fcb4e0b91264e61525033fb7423699",
+      "rulesContentHash": "0xc9de54409af04456ef8c5d58b88581aad13637fa0a2bd7d4a505bd3519f35068",
+      "beneficiarySetHash": "0xeeee18c94533387355a935b65aa3419ed87ef63e708bc98232876db0486a6eea",
+      "concessionDestinationSetHash": "0x24d8e27dce684b027bee0beeb98d11bb7074a78419bf69898ed383cf48368779"
+    },
+    {
+      "version": 2,
+      "policyHash": "0x1a84e8f65fe180f6f07e587cdbec9fbc0821367c05b0752d84905a0f13c9b360",
+      "operationsHash": "0x63ff198d66645eb85ac7279608b9759bd154164d86aac8d72c600de2c99000e1",
+      "decisionEvidenceHash": "0x007564918c3b8bed1d39e637274b705786ed688aac9966b9ab8d736c0c642463",
+      "rulesContentHash": "0xc9de54409af04456ef8c5d58b88581aad13637fa0a2bd7d4a505bd3519f35068",
+      "beneficiarySetHash": "0xeeee18c94533387355a935b65aa3419ed87ef63e708bc98232876db0486a6eea",
+      "concessionDestinationSetHash": "0x24d8e27dce684b027bee0beeb98d11bb7074a78419bf69898ed383cf48368779"
+    },
+    {
+      "version": 3,
+      "policyHash": "0x14b1b932a6c8e11ce90c6b8de5a1026eeb7f330071bc3678db555831706c446f",
+      "operationsHash": "0x63ff198d66645eb85ac7279608b9759bd154164d86aac8d72c600de2c99000e1",
+      "decisionEvidenceHash": "0x007564918c3b8bed1d39e637274b705786ed688aac9966b9ab8d736c0c642463",
+      "rulesContentHash": "0x90aa7eb9edbd5f4adcb453ea18162cb661776ae5002ec4fde74f170153122fc3",
+      "beneficiarySetHash": "0xeeee18c94533387355a935b65aa3419ed87ef63e708bc98232876db0486a6eea",
+      "concessionDestinationSetHash": "0x24d8e27dce684b027bee0beeb98d11bb7074a78419bf69898ed383cf48368779"
+    },
+    {
+      "version": 4,
+      "policyHash": "0x9c157a69fa64984b5b56541715f7ddc51b74f2223064cc0e74964954c4cfec0e",
+      "operationsHash": "0xf6e81eaac91efbe58879719c31accd95b1b5648bdae6528d8eac165f98a8ad34",
+      "decisionEvidenceHash": "0x5e86b8b68662b30ed6e39a210ec36d1dde290f7618019d0b1f072fd873dee466",
+      "rulesContentHash": "0x90aa7eb9edbd5f4adcb453ea18162cb661776ae5002ec4fde74f170153122fc3",
+      "beneficiarySetHash": "0xefb2d67e480b11d787dbebf531410e1e29f912d82ff2daffc4514fc0662f275d",
+      "concessionDestinationSetHash": "0x24d8e27dce684b027bee0beeb98d11bb7074a78419bf69898ed383cf48368779"
+    }
+  ],
+  "transactions": [
+    {
+      "version": 1,
+      "publicationNonce": "1785499494732",
+      "txHash": "0xe2be30dc8e18e20eb56ef4fecaddebce270941ea8a74621d2374a7961a63b8f9",
+      "blockNumber": 113198857,
+      "blockHash": "0x22d0a5f5a425ea2103b6890f762d8e0766e354ab9c87cf2c0e4cf689e7f58f5d",
+      "gasUsed": "514002",
+      "confirmations": 81,
+      "policyHash": "0xf985da3bac3edf411af2bd3519f5bdcc9c07c85b07556e6df5b4750ff620c044",
+      "operationsHash": "0x63ff198d66645eb85ac7279608b9759bd154164d86aac8d72c600de2c99000e1"
+    },
+    {
+      "version": 2,
+      "publicationNonce": "1785499494733",
+      "txHash": "0x4966c9e33b21c46ce76769ef4a12c584625e21d4795d91636cf9fa88ded19402",
+      "blockNumber": 113198878,
+      "blockHash": "0xe044c0f9f84c8902f0f3741b03a5fcd4fb3fee4cb40d8d889fbfe031f7c946aa",
+      "gasUsed": "495343",
+      "confirmations": 61,
+      "policyHash": "0x1a84e8f65fe180f6f07e587cdbec9fbc0821367c05b0752d84905a0f13c9b360",
+      "operationsHash": "0x63ff198d66645eb85ac7279608b9759bd154164d86aac8d72c600de2c99000e1"
+    },
+    {
+      "version": 3,
+      "publicationNonce": "1785499494734",
+      "txHash": "0x25fa4aef9cdf553c8a010e5dcf43d51f6d62bbd73478a05ececb2def334f565c",
+      "blockNumber": 113198899,
+      "blockHash": "0xff0ddf1d1c794721535336392fa22174aeea66e1fb29087e9a47f7e6a4556ece",
+      "gasUsed": "495331",
+      "confirmations": 40,
+      "policyHash": "0x14b1b932a6c8e11ce90c6b8de5a1026eeb7f330071bc3678db555831706c446f",
+      "operationsHash": "0x63ff198d66645eb85ac7279608b9759bd154164d86aac8d72c600de2c99000e1"
+    },
+    {
+      "version": 4,
+      "publicationNonce": "1785499494735",
+      "txHash": "0xa48106a124d8a5910a2a5067350127ba2b102b731dc58d8cd24bc11fc2899be0",
+      "blockNumber": 113198919,
+      "blockHash": "0x7254f162106235c07d5d2726992da1ab71030a69b84d5ff1b5a9de0de4413232",
+      "gasUsed": "495331",
+      "confirmations": 20,
+      "policyHash": "0x9c157a69fa64984b5b56541715f7ddc51b74f2223064cc0e74964954c4cfec0e",
+      "operationsHash": "0xf6e81eaac91efbe58879719c31accd95b1b5648bdae6528d8eac165f98a8ad34"
+    }
+  ],
+  "privateEvidenceRetained": "output/policy-replay/*-private.json (local only, not committed)"
+}
