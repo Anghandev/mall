@@ -12,7 +12,9 @@ const COMMIT = 'abcdef0123456789abcdef0123456789abcdef01';
 const WALLET = '0x1111111111111111111111111111111111111111';
 const TARGET = '0x2222222222222222222222222222222222222222';
 const HASH = `0x${'1'.repeat(64)}`;
-const TX_HASH = `0x${'a'.repeat(64)}`;
+const SIGNED_RAW = '0x123456';
+const TX_HASH = keccak256(SIGNED_RAW);
+const BLOCK_HASH = `0x${'b'.repeat(64)}`;
 const DATA = '0x1234';
 const DATA_HASH = keccak256(DATA).toLowerCase();
 
@@ -55,17 +57,38 @@ test('runner calls broadcast preflight, executes only packet-bound calldata and 
       },
       estimateGas: async () => 21_000n,
       getFeeData: async () => ({ gasPrice: 5n }),
+      broadcastTransaction: async (raw) => {
+        assert.equal(raw, SIGNED_RAW);
+        return {
+          hash: TX_HASH,
+          wait: async (confirmations) => {
+            assert.equal(confirmations, 15);
+            return receiptFixture();
+          },
+        };
+      },
+      getTransactionReceipt: async (hash) => {
+        assert.equal(hash, TX_HASH);
+        return receiptFixture();
+      },
+      getBlockNumber: async () => 114,
+      getBlock: async (blockNumber) => {
+        assert.equal(blockNumber, 100);
+        return { hash: BLOCK_HASH };
+      },
     };
     const result = await runAbuV2Runner({
       cwd: root,
       env: {
         BSC_RPC_URL: 'https://bsc.example.invalid',
+        BSC_FALLBACK_RPC_URL: 'https://bsc-fallback.example.invalid',
         MAINNET_MICROTEST_PACKET_PATH: 'packet.json',
         MAINNET_MICROTEST_MAX_NATIVE_VALUE_PER_TX: '0',
         MAINNET_MICROTEST_MAX_GAS_COST_PER_TX_BNB: '1',
         MAINNET_MICROTEST_MAX_TOTAL_NATIVE_SPEND_BNB: '1',
       },
       provider: fakeProvider,
+      fallbackProvider: fakeProvider,
       runPreflight: async (input) => {
         preflightCalled = true;
         assert.equal(input.requireBroadcastAuthorized, true);
@@ -73,17 +96,11 @@ test('runner calls broadcast preflight, executes only packet-bound calldata and 
       },
       signerFactory: async (wallet) => ({
         address: wallet,
-        sendTransaction: async (request) => {
+        signTransaction: async (request) => {
           assert.equal(request.to, TARGET);
           assert.equal(request.data, DATA);
           assert.equal(request.nonce, 7);
-          return {
-            hash: TX_HASH,
-            wait: async (confirmations) => {
-              assert.equal(confirmations, 1);
-              return { status: 1, gasUsed: 21_000n, gasPrice: 5n };
-            },
-          };
+          return SIGNED_RAW;
         },
       }),
     });
@@ -95,6 +112,10 @@ test('runner calls broadcast preflight, executes only packet-bound calldata and 
     assert.equal(log[0].status, 'SUCCESS');
     assert.equal(log[0].gasCostWei, '105000');
     assert.equal(log[0].packetCalldataHash, DATA_HASH);
+    assert.equal(log[0].rawTransactionHash, TX_HASH);
+    const rawLog = JSON.parse(readFileSync(join(root, 'test-artifacts', 'signed-raw-transactions.json'), 'utf8'));
+    assert.equal(rawLog[0].signedRawTransaction, SIGNED_RAW);
+    assert.equal(rawLog[0].hash, TX_HASH);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -181,27 +202,30 @@ test('runner records submitted hash before receipt wait failures', async () => {
       call: async () => '0x',
       estimateGas: async () => 21_000n,
       getFeeData: async () => ({ gasPrice: 5n }),
+      broadcastTransaction: async () => ({
+        hash: TX_HASH,
+        wait: async () => {
+          throw new Error('receipt RPC disconnected');
+        },
+      }),
     };
     await assert.rejects(
       runAbuV2Runner({
         cwd: root,
         env: {
           BSC_RPC_URL: 'https://bsc.example.invalid',
+          BSC_FALLBACK_RPC_URL: 'https://bsc-fallback.example.invalid',
           MAINNET_MICROTEST_PACKET_PATH: 'packet.json',
           MAINNET_MICROTEST_MAX_NATIVE_VALUE_PER_TX: '0',
           MAINNET_MICROTEST_MAX_GAS_COST_PER_TX_BNB: '1',
           MAINNET_MICROTEST_MAX_TOTAL_NATIVE_SPEND_BNB: '1',
         },
         provider: fakeProvider,
+        fallbackProvider: fakeProvider,
         runPreflight: async () => preflight,
         signerFactory: async (wallet) => ({
           address: wallet,
-          sendTransaction: async () => ({
-            hash: TX_HASH,
-            wait: async () => {
-              throw new Error('receipt RPC disconnected');
-            },
-          }),
+          signTransaction: async () => SIGNED_RAW,
         }),
       }),
       /waitForReceipt failed/,
@@ -212,6 +236,8 @@ test('runner records submitted hash before receipt wait failures', async () => {
     assert.equal(log[0].status, 'SUBMITTED');
     assert.equal(log[0].gasCostWei, '210000');
     assert.equal(log[0].totalSpentWei, '210000');
+    const rawLog = JSON.parse(readFileSync(join(root, 'test-artifacts', 'signed-raw-transactions.json'), 'utf8'));
+    assert.equal(rawLog[0].hash, TX_HASH);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -246,12 +272,14 @@ test('runner redacts provider error messages before returning them', async () =>
         cwd: root,
         env: {
           BSC_RPC_URL: 'https://bsc.example.invalid',
+          BSC_FALLBACK_RPC_URL: 'https://bsc-fallback.example.invalid',
           MAINNET_MICROTEST_PACKET_PATH: 'packet.json',
           MAINNET_MICROTEST_MAX_NATIVE_VALUE_PER_TX: '0',
           MAINNET_MICROTEST_MAX_GAS_COST_PER_TX_BNB: '1',
           MAINNET_MICROTEST_MAX_TOTAL_NATIVE_SPEND_BNB: '1',
         },
         provider: fakeProvider,
+        fallbackProvider: fakeProvider,
         runPreflight: async () => preflight,
         signerFactory: async (wallet) => ({ address: wallet }),
       }),
@@ -297,6 +325,17 @@ function packetFixture(overrides = {}) {
       tokenValueUsdtAtomic: '3000000000000000000',
       expectedResult: 'status-1 receipt',
     }],
+    ...overrides,
+  };
+}
+
+function receiptFixture(overrides = {}) {
+  return {
+    status: 1,
+    gasUsed: 21_000n,
+    gasPrice: 5n,
+    blockNumber: 100,
+    blockHash: BLOCK_HASH,
     ...overrides,
   };
 }

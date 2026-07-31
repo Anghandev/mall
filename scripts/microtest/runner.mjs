@@ -9,6 +9,9 @@ import { appendTxLog, assertTxBudget, nativeToWei, updateTxLog, withExclusiveTxE
 
 const DEFAULT_PACKET = 'platform-v2/deployments/bsc-eoa-micro-packet-private.json';
 const MAX_TOKEN_VALUE_USDT = 3n * 10n ** 18n;
+const REQUIRED_CONFIRMATIONS = 15;
+const ARTIFACT_DIR = 'test-artifacts';
+const RAW_TX_LOG = path.join(ARTIFACT_DIR, 'signed-raw-transactions.json');
 export const PRIVATE_KEY_ENV = Object.freeze([
   'PLATFORM_TECH_PRIVATE_KEY',
   'WALLET_2_PRIVATE_KEY',
@@ -42,17 +45,26 @@ export async function runAbuV2Runner(options = {}) {
         requireBroadcastAuthorized: true,
       });
       const provider = options.provider ?? new JsonRpcProvider(env.BSC_RPC_URL, 56, { staticNetwork: true });
+      const fallbackProvider = options.fallbackProvider ?? new JsonRpcProvider(env.BSC_FALLBACK_RPC_URL, 56, { staticNetwork: true });
       await assertBscProvider(provider);
+      await assertBscProvider(fallbackProvider);
       const packet = readRunnerPacket(preflight.packetPath);
       const transactions = normalizeRunnerTransactions(packet);
       if (!transactions.length) throw new Error('micro-test packet does not contain executable transactions');
       const signerFactory = options.signerFactory ?? defaultSignerFactory(env, provider);
       const hashes = [];
       for (const transaction of transactions) {
-        const hash = await executePacketTransaction({ env, preflight, provider, signerFactory, transaction });
+        const hash = await executePacketTransaction({
+          env,
+          preflight,
+          provider,
+          fallbackProvider,
+          signerFactory,
+          transaction,
+        });
         hashes.push(hash);
       }
-      console.log(`runner: PASS - broadcast ${hashes.length} packet-bound transaction(s)`);
+      console.log(`runner: PASS - broadcast and dual-RPC finalized ${hashes.length} packet-bound transaction(s)`);
       return { preflight, hashes };
     });
   } finally {
@@ -71,7 +83,7 @@ export function normalizeRunnerTransactions(packet) {
   return transactions;
 }
 
-async function executePacketTransaction({ env, preflight, provider, signerFactory, transaction }) {
+async function executePacketTransaction({ env, preflight, provider, fallbackProvider, signerFactory, transaction }) {
   const signer = await signerFactory(transaction.wallet);
   if (signer.address.toLowerCase() !== transaction.wallet.toLowerCase()) {
     throw new Error(`packet signer key does not match ${transaction.operation}`);
@@ -105,14 +117,34 @@ async function executePacketTransaction({ env, preflight, provider, signerFactor
     expectedResult: transaction.expectedResult,
   });
   console.log(`runner tx: ${transaction.operation} ${redactAddress(transaction.wallet)} -> ${redactAddress(transaction.target)}`);
-  const sent = await rpcStep('sendTransaction', () => signer.sendTransaction({
+  const request = {
     to: transaction.target,
     data: transaction.calldata,
     value: transaction.valueWei,
+    chainId: 56,
     gasLimit,
     gasPrice,
     nonce: Number(transaction.nonce),
-  }));
+  };
+  const signedRawTransaction = await rpcStep('signTransaction', () => signer.signTransaction(request));
+  const rawTransactionHash = keccak256(signedRawTransaction);
+  persistSignedRawTransaction({
+    hash: rawTransactionHash,
+    chainId: 56,
+    wallet: transaction.wallet,
+    target: transaction.target,
+    nonce: transaction.nonce.toString(),
+    valueWei: transaction.valueWei.toString(),
+    gasLimit: gasLimit.toString(),
+    gasPriceWei: gasPrice.toString(),
+    calldataHash: transaction.calldataHash,
+    packetSha256: budget.packetSha256,
+    signedRawTransaction,
+  });
+  const sent = await rpcStep('broadcastTransaction', () => provider.broadcastTransaction(signedRawTransaction));
+  if (sent.hash.toLowerCase() !== rawTransactionHash.toLowerCase()) {
+    throw new Error('broadcast transaction hash does not match persisted signed raw transaction');
+  }
   appendTxLog({
     hash: sent.hash,
     chainId: 56,
@@ -123,8 +155,11 @@ async function executePacketTransaction({ env, preflight, provider, signerFactor
     operation: transaction.operation,
     functionCall: transaction.functionCall,
     packetCalldataHash: transaction.calldataHash,
+    rawTransactionHash,
   });
-  const receipt = await rpcStep('waitForReceipt', () => sent.wait(1));
+  const receipt = await rpcStep('waitForReceipt', () => sent.wait(REQUIRED_CONFIRMATIONS));
+  await verifyCanonicalReceipt(provider, receipt, sent.hash, 'primary RPC');
+  await verifyCanonicalReceipt(fallbackProvider, receipt, sent.hash, 'fallback RPC');
   const receiptGasPrice = receipt.gasPrice ?? receipt.effectiveGasPrice ?? gasPrice;
   updateTxLog(sent.hash, {
     status: receipt.status === 1 ? 'SUCCESS' : 'FAILED',
@@ -133,6 +168,42 @@ async function executePacketTransaction({ env, preflight, provider, signerFactor
   });
   if (receipt.status !== 1) throw new Error(`transaction reverted for ${transaction.operation}: ${sent.hash}`);
   return sent.hash;
+}
+
+function persistSignedRawTransaction(entry) {
+  fs.mkdirSync(ARTIFACT_DIR, { recursive: true, mode: 0o700 });
+  fs.chmodSync(ARTIFACT_DIR, 0o700);
+  const existing = fs.existsSync(RAW_TX_LOG)
+    ? JSON.parse(fs.readFileSync(RAW_TX_LOG, 'utf8'))
+    : [];
+  if (!Array.isArray(existing)) throw new Error('Signed raw transaction log is invalid');
+  if (existing.some((item) => String(item.hash ?? '').toLowerCase() === entry.hash.toLowerCase())) {
+    return;
+  }
+  const next = [...existing, { timestamp: new Date().toISOString(), ...entry }];
+  const temp = `${RAW_TX_LOG}.${process.pid}.tmp`;
+  fs.writeFileSync(temp, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
+  fs.renameSync(temp, RAW_TX_LOG);
+  fs.chmodSync(RAW_TX_LOG, 0o600);
+}
+
+async function verifyCanonicalReceipt(provider, expectedReceipt, hash, label) {
+  const receipt = await rpcStep(`${label} receipt`, () => provider.getTransactionReceipt(hash));
+  if (!receipt) throw new Error(`${label} missing receipt for ${hash}`);
+  if (receipt.status !== expectedReceipt.status) throw new Error(`${label} receipt status mismatch for ${hash}`);
+  if (receipt.blockNumber !== expectedReceipt.blockNumber) throw new Error(`${label} receipt blockNumber mismatch for ${hash}`);
+  if (String(receipt.blockHash).toLowerCase() !== String(expectedReceipt.blockHash).toLowerCase()) {
+    throw new Error(`${label} receipt blockHash mismatch for ${hash}`);
+  }
+  const latest = await rpcStep(`${label} latest block`, () => provider.getBlockNumber());
+  const confirmations = latest - receipt.blockNumber + 1;
+  if (confirmations < REQUIRED_CONFIRMATIONS) {
+    throw new Error(`${label} receipt has only ${confirmations} confirmations for ${hash}`);
+  }
+  const block = await rpcStep(`${label} canonical block`, () => provider.getBlock(receipt.blockNumber));
+  if (!block || String(block.hash).toLowerCase() !== String(receipt.blockHash).toLowerCase()) {
+    throw new Error(`${label} canonical block hash mismatch for ${hash}`);
+  }
 }
 
 function normalizeRunnerTransaction(entry, index, total) {
