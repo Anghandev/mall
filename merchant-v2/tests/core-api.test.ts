@@ -1128,6 +1128,18 @@ describe('settlement-admin.16 Core HTTP consumer', () => {
     );
   });
 
+  it('accepts the live Core numeric settlement transition sequence', async () => {
+    const liveSettlementList = structuredClone(settlementList) as unknown as {
+      requests: Array<{ transitions: Array<{ transition_sequence: unknown }> }>;
+    };
+    liveSettlementList.requests[2]!.transitions[0]!.transition_sequence = 1;
+    globalThis.fetch = vi.fn(async () => jsonResponse(liveSettlementList)) as typeof fetch;
+
+    const settlements = await createCoreApi().listSettlements('merchant-session');
+
+    expect(settlements.requests[2]?.transitions[0]?.transition_sequence).toBe('1');
+  });
+
   it('keeps merchant finance settlement compatible with the old action name during rollout', async () => {
     globalThis.fetch = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ ...merchantFinance, allowedActions: ['REQUEST_MERCHANT_USDT'] })) as typeof fetch;

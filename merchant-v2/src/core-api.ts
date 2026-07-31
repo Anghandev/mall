@@ -2892,10 +2892,7 @@ function parseSettlementRequest(input: unknown): SettlementRequestProjection {
           'settlement transition.request_item_index',
         ),
         transfer_id: nullableString(transition.transfer_id, 'settlement transition.transfer_id'),
-        transition_sequence: atomicAmount(
-          transition.transition_sequence,
-          'settlement transition.transition_sequence',
-        ),
+        transition_sequence: settlementTransitionSequence(transition.transition_sequence),
         transition_type: string(transition.transition_type, 'settlement transition.transition_type'),
         journal_id: string(transition.journal_id, 'settlement transition.journal_id'),
         created_at: dateTime(transition.created_at, 'settlement transition.created_at'),
@@ -3294,6 +3291,12 @@ function positiveAtomicAmount(input: unknown, name: string) {
 
 function nullableAtomicAmount(input: unknown, name: string) {
   return input === null ? null : atomicAmount(input, name);
+}
+
+function settlementTransitionSequence(input: unknown) {
+  const name = 'settlement transition.transition_sequence';
+  if (typeof input === 'number') return String(positiveInteger(input, name));
+  return atomicAmount(input, name);
 }
 
 function dateTime(input: unknown, name: string) {
