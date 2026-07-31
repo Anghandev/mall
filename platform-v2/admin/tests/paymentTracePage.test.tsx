@@ -16,9 +16,9 @@ afterEach(() => {
 });
 
 describe('global clearing workspace', () => {
-  it('renders clearing audit read-only and does not expose money movement commands', () => {
+  it('renders clearing audit read-only and does not expose money movement commands', async () => {
     renderAt('/clearing');
-    expect(screen.getByRole('heading', { name: '全局清算审计' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: '全局清算审计' })).toBeTruthy();
     expect(screen.getByText(/这里只能查看，不提供转账或执行按钮/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: /发起转账|执行转账/ })).toBeNull();
     expect(document.body.textContent).not.toMatch(blockedGuaranteeCopy);

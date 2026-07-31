@@ -3,13 +3,15 @@ pragma solidity 0.8.26;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
-import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {IBeneficiaryRegistryV2, IPolicyRegistryV2} from "./interfaces/IV2Core.sol";
 import {V2Types} from "./types/V2Types.sol";
 
-contract PaymentRouterV2 is ReentrancyGuard {
+contract PaymentRouterV2 {
     using SafeERC20 for IERC20;
+
+    uint256 private constant _NOT_ENTERED = 1;
+    uint256 private constant _ENTERED = 2;
+    uint256 private constant _SECP256K1_HALF_ORDER = 0x7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0;
 
     bytes32 private constant EIP712_DOMAIN_TYPEHASH =
         keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
@@ -41,8 +43,8 @@ contract PaymentRouterV2 is ReentrancyGuard {
     address public immutable usdtSettlementWallet;
     address public immutable nplRewardWallet;
     address public immutable operationsWallet;
-    address public immutable quoteSigner;
     bytes32 private immutable _domainSeparator;
+    uint256 private _reentrancyStatus = _NOT_ENTERED;
 
     mapping(bytes32 orderId => bool used) public usedOrderId;
     mapping(address buyer => mapping(uint256 nonce => bool used)) public usedPaymentNonce;
@@ -64,6 +66,7 @@ contract PaymentRouterV2 is ReentrancyGuard {
     error InvalidSession();
     error SessionNotLive();
     error GovernanceWalletRequired();
+    error ReentrancyGuardReentrantCall();
 
     event PaymentCompleted(
         bytes32 indexed orderId,
@@ -83,14 +86,6 @@ contract PaymentRouterV2 is ReentrancyGuard {
         uint256 bnmLocked,
         bytes32 reservationId,
         bytes32 snapshotHash
-    );
-    event MerchantReceivableSnapshotted(
-        bytes32 indexed orderId,
-        uint256 baseReceivableUsdt,
-        uint16 concessionBps,
-        uint256 concessionAmountUsdt,
-        uint256 netReceivableUsdt,
-        bytes32 indexed allocationHash
     );
     event SeckillSessionOpened(
         bytes32 indexed sessionId,
@@ -138,7 +133,6 @@ contract PaymentRouterV2 is ReentrancyGuard {
         usdtSettlementWallet = usdtSettlementWallet_;
         nplRewardWallet = nplRewardWallet_;
         operationsWallet = operationsWallet_;
-        quoteSigner = governanceWallet_;
         _domainSeparator = keccak256(
             abi.encode(EIP712_DOMAIN_TYPEHASH, EIP712_NAME_HASH, EIP712_VERSION_HASH, block.chainid, address(this))
         );
@@ -147,6 +141,13 @@ contract PaymentRouterV2 is ReentrancyGuard {
     modifier onlyGovernanceWallet() {
         if (msg.sender != governanceWallet) revert GovernanceWalletRequired();
         _;
+    }
+
+    modifier nonReentrant() {
+        if (_reentrancyStatus == _ENTERED) revert ReentrancyGuardReentrantCall();
+        _reentrancyStatus = _ENTERED;
+        _;
+        _reentrancyStatus = _NOT_ENTERED;
     }
 
     function pay(V2Types.PaymentIntent calldata intent, bytes calldata quoteSignature, bytes calldata buyerSignature)
@@ -270,6 +271,10 @@ contract PaymentRouterV2 is ReentrancyGuard {
         return _sessions[sessionId];
     }
 
+    function quoteSigner() external view returns (address) {
+        return governanceWallet;
+    }
+
     function _executePayment(V2Types.PaymentIntent calldata intent, V2Types.PaymentClassification classification)
         private
     {
@@ -331,14 +336,6 @@ contract PaymentRouterV2 is ReentrancyGuard {
             intent.bnmAmount,
             intent.reservationId,
             snapshotHash
-        );
-        emit MerchantReceivableSnapshotted(
-            intent.orderId,
-            intent.merchantBaseReceivableUsdt,
-            intent.merchantConcessionBps,
-            intent.merchantConcessionAmount,
-            intent.merchantNetReceivableUsdt,
-            intent.concessionAllocationHash
         );
     }
 
@@ -441,11 +438,22 @@ contract PaymentRouterV2 is ReentrancyGuard {
         bytes calldata quoteSignature,
         bytes calldata buyerSignature
     ) private view {
-        (address quoteRecovered, ECDSA.RecoverError quoteError,) = ECDSA.tryRecover(digest, quoteSignature);
-        (address buyerRecovered, ECDSA.RecoverError buyerError,) = ECDSA.tryRecover(digest, buyerSignature);
-        if (
-            quoteError != ECDSA.RecoverError.NoError || quoteRecovered != quoteSigner
-                || buyerError != ECDSA.RecoverError.NoError || buyerRecovered != buyer
-        ) revert InvalidSignature();
+        if (_recover(digest, quoteSignature) != governanceWallet || _recover(digest, buyerSignature) != buyer) {
+            revert InvalidSignature();
+        }
+    }
+
+    function _recover(bytes32 digest, bytes calldata signature) private pure returns (address) {
+        if (signature.length != 65) return address(0);
+        bytes32 r;
+        bytes32 s;
+        uint8 v;
+        assembly {
+            r := calldataload(signature.offset)
+            s := calldataload(add(signature.offset, 32))
+            v := byte(0, calldataload(add(signature.offset, 64)))
+        }
+        if (uint256(s) > _SECP256K1_HALF_ORDER || (v != 27 && v != 28)) return address(0);
+        return ecrecover(digest, v, r, s);
     }
 }

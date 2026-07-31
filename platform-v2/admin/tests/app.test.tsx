@@ -34,7 +34,7 @@ describe('platform admin simplified zero-guarantee experience', () => {
     expect(productBaseline.artifactVersion).toBe(artifactVersion);
     expect(coreState.artifactVersion).toBe(artifactVersion);
     expect(coreState.artifactStatus).toBe('coordinated-merchant-governance-checkpoint');
-    expect(coreState.connectionLabel).toBe('系统已连接');
+    expect(coreState.connectionLabel).toBe('后台未连接');
 
     renderAt('/');
     expect(screen.getByRole('img', { name: '24K商城' })).toBeTruthy();
@@ -44,10 +44,10 @@ describe('platform admin simplified zero-guarantee experience', () => {
     expect(document.body.textContent).not.toMatch(blockedGuaranteeCopy);
   });
 
-  it('keeps the dashboard fail-closed before wallet login and avoids fake operating numbers', () => {
+  it('keeps the dashboard fail-closed before wallet login and avoids fake operating numbers', async () => {
     vi.stubGlobal('fetch', vi.fn());
     renderAt('/');
-    expect(screen.getByRole('heading', { name: '今日运营态势' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: '今日运营态势' })).toBeTruthy();
     expect(screen.getByText(/只有平台授权钱包可以查看业务数据/)).toBeTruthy();
     expect(screen.queryByText('300000000')).toBeNull();
     expect(document.body.textContent).not.toMatch(blockedGuaranteeCopy);

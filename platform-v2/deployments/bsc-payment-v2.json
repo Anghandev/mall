@@ -3,7 +3,7 @@
   "chainId": 56,
   "architecture": "FIVE_ROLE_EOA_V2",
   "deploymentStatus": "DEPLOYED",
-  "deploymentAuthorized": true,
+  "deploymentAuthorized": false,
   "authorizationEvidenceHash": "0x9d260a962e4cefe886ddf1382b1c6efb4ff06fef6fbac17bf7014b3b3e78c3eb",
   "authorizationEvidence": {
     "gitCommit": "056fa1860640aec843c5cbdadd56a50538357a3f",
@@ -58,5 +58,11 @@
     "deploymentBlock": 110882311,
     "deployedCodeHash": "0x5a49d60865659b711f87606a6a6893effa954d4f85b06aa3fb12a97f3a9e9191",
     "evidenceHash": "0x007564918c3b8bed1d39e637274b705786ed688aac9966b9ab8d736c0c642463"
+  },
+  "historicalLineageOnly": true,
+  "historicalAuthorization": {
+    "deploymentAuthorized": true,
+    "authorizationEvidenceHash": "0x9d260a962e4cefe886ddf1382b1c6efb4ff06fef6fbac17bf7014b3b3e78c3eb",
+    "note": "Historical deployment evidence only; current .30 production GO requires a separate signed release authorization."
   }
 }

@@ -19,9 +19,9 @@ afterEach(() => {
 });
 
 describe('governed Admin forms', () => {
-  it('keeps policy, system config and CMS forms behind wallet login with simple copy', () => {
+  it('keeps policy, system config and CMS forms behind wallet login with simple copy', async () => {
     renderAt('/policy');
-    expect(screen.getByRole('heading', { name: '规则治理工作台' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: '规则治理工作台' })).toBeTruthy();
     expect(screen.getAllByText(/不需要手填编号|连接平台治理钱包/).length).toBeGreaterThan(0);
     expect(document.body.textContent).not.toMatch(blockedGuaranteeCopy);
   });
@@ -45,7 +45,7 @@ describe('governed Admin forms', () => {
     const user = userEvent.setup();
     renderAt('/policy', fetchMock);
 
-    await user.click(screen.getByRole('button', { name: /连接钱包/ }));
+    await user.click(await screen.findByRole('button', { name: /连接钱包/ }));
     const fieldLabel = await screen.findByText('秒杀额外商家收益：固定 0，不可修改。');
     const field = fieldLabel.closest('label');
     expect(field).toBeTruthy();
@@ -56,16 +56,16 @@ describe('governed Admin forms', () => {
     expect(within(field!).getByText('固定规则，不可修改。')).toBeTruthy();
   });
 
-  it('renders system config as a guarded production configuration surface', () => {
+  it('renders system config as a guarded production configuration surface', async () => {
     renderAt('/system');
-    expect(screen.getByRole('heading', { name: '系统配置' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: '系统配置' })).toBeTruthy();
     expect(screen.getAllByText(/密钥只填引用名|连接平台钱包/).length).toBeGreaterThan(0);
     expect(document.body.textContent).not.toMatch(blockedGuaranteeCopy);
   });
 
-  it('renders CMS as wallet-guarded content operations', () => {
+  it('renders CMS as wallet-guarded content operations', async () => {
     renderAt('/cms');
-    expect(screen.getByRole('heading', { name: '内容中心' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: '内容中心' })).toBeTruthy();
     expect(screen.getAllByText(/审核员只读|管理员和运营可创建/).length).toBeGreaterThan(0);
     expect(document.body.textContent).not.toMatch(blockedGuaranteeCopy);
   });
@@ -93,7 +93,7 @@ describe('governed Admin forms', () => {
     const user = userEvent.setup();
     renderAt('/cms', fetchMock);
 
-    await user.click(screen.getByRole('button', { name: /钱包登录/ }));
+    await user.click(await screen.findByRole('button', { name: /钱包登录/ }));
     expect(await screen.findByText('第 1 步：选择用途')).toBeTruthy();
     expect(screen.getByDisplayValue('seckill-rules-main')).toBeTruthy();
     await user.click(screen.getByText(/高级信息/));
@@ -140,7 +140,7 @@ describe('governed Admin forms', () => {
     const user = userEvent.setup();
     renderAt('/cms', fetchMock);
 
-    await user.click(screen.getByRole('button', { name: /钱包登录/ }));
+    await user.click(await screen.findByRole('button', { name: /钱包登录/ }));
     await user.type(await screen.findByLabelText(/读取历史内容版本/), 'cms-version-seckill');
     await user.click(screen.getByRole('button', { name: '读取' }));
 

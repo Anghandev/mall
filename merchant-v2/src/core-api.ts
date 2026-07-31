@@ -475,7 +475,7 @@ export class CoreApiError extends Error {
   }
 }
 
-export function createCoreApi(baseUrl = import.meta.env.VITE_CORE_API_BASE_URL ?? ''): CoreApi {
+export function createCoreApi(baseUrl = import.meta.env.VITE_CORE_API_BASE_URL ?? '/core'): CoreApi {
   const normalizedBaseUrl = baseUrl.trim().replace(/\/$/, '');
 
   return {

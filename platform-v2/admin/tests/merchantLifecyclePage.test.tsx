@@ -16,9 +16,9 @@ afterEach(() => {
 });
 
 describe('merchant lifecycle page', () => {
-  it('opens the merchant governance page with zero-guarantee-friendly copy', () => {
+  it('opens the merchant governance page with zero-guarantee-friendly copy', async () => {
     renderAt('/merchants');
-    expect(screen.getByRole('heading', { name: '商家准入与经营穿透' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: '商家准入与经营穿透' })).toBeTruthy();
     expect(screen.getByText(/结算钱包审核通过后不可随便变更/)).toBeTruthy();
     expect(document.body.textContent).not.toMatch(/保证金不足|待缴纳保证金|1,000\.00 USDT|1000 USDT|保证金充值暂未开放/);
   });

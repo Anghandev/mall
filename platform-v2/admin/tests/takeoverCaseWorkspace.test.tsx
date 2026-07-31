@@ -16,9 +16,9 @@ afterEach(() => {
 });
 
 describe('Admin takeover case workspace', () => {
-  it('renders takeover as fulfillment, not a refund or guarantee gate', () => {
+  it('renders takeover as fulfillment, not a refund or guarantee gate', async () => {
     renderAt('/takeover');
-    expect(screen.getByRole('heading', { name: '商家接管履约中心' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: '商家接管履约中心' })).toBeTruthy();
     expect(screen.getByText(/接管不是退款/)).toBeTruthy();
     expect(document.body.textContent).not.toMatch(/七天无理由退款|保证金不足|待缴纳保证金|1,000\.00 USDT|1000 USDT/);
   });

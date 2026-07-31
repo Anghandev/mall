@@ -27,7 +27,8 @@
     "micro:init-env": "./scripts/node scripts/microtest/init-env.mjs",
     "micro:preflight": "./scripts/node scripts/microtest/preflight.mjs",
     "micro:runner": "./scripts/node scripts/microtest/runner.mjs",
-    "micro:report": "./scripts/node scripts/microtest/report.mjs"
+    "micro:report": "./scripts/node scripts/microtest/report.mjs",
+    "e2e:real-readonly": "pnpm --filter @abu24k/core e2e:real-readonly"
   },
   "devDependencies": {
     "@playwright/test": "1.61.1",

@@ -7,6 +7,7 @@ import { useCoreResource } from '../useCoreResource';
 export function CoreStatusPage() {
   const bootstrap = useCoreResource(fetchCoreBootstrap);
   const readiness = bootstrap.data?.readiness;
+  const connected = !bootstrap.loading && !bootstrap.error && bootstrap.data?.status === 'CORE_API_READY';
 
   return (
     <>
@@ -21,7 +22,12 @@ export function CoreStatusPage() {
       </header>
 
       <section className="status-overview" aria-label="系统发布状态">
-        <article><span>系统状态</span><strong>已连接</strong><small>{publicationLabel(publicationStatus)}</small><details className="technical-details compact"><summary>版本信息</summary><code>{artifactVersion}</code></details></article>
+        <article>
+          <span>系统状态</span>
+          <strong>{bootstrap.loading ? '检查中' : connected ? '系统已连接' : '后台服务不可用'}</strong>
+          <small>{connected ? publicationLabel(publicationStatus) : bootstrap.error ? errorLabel(bootstrap.error.code) : '等待后台返回'}</small>
+          <details className="technical-details compact"><summary>版本信息</summary><code>{artifactVersion}</code></details>
+        </article>
         <article><span>运行网络</span><strong>BSC 主网</strong><small>平台正式运行网络</small><details className="technical-details compact"><summary>网络编号</summary><code>{chainIdentity.chainId}</code></details></article>
         <article><span>部署状态</span><strong>{deploymentAuthorized ? '已授权' : '暂未就绪'}</strong><small>没有地址时不推断</small></article>
         <article>

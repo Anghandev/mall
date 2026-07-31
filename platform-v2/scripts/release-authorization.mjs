@@ -18,8 +18,14 @@ if (command === 'create') {
   const out = option('--out');
   const status = option('--status');
   if (!out || !status) throw new Error('usage: release-authorization create --status <STATUS> --out <path>');
+  assertCleanGitWorktree();
   const wallet = new Wallet(required('RELEASE_AUTHORIZATION_PRIVATE_KEY'));
   const normalizedStatus = status.toUpperCase();
+  const gitCommit = currentGitCommit();
+  const configuredGitCommit = process.env.RELEASE_GIT_COMMIT?.trim();
+  if (configuredGitCommit && configuredGitCommit !== gitCommit) {
+    throw new Error('RELEASE_GIT_COMMIT does not match the current git HEAD');
+  }
   const evidenceArchiveSha256 = process.env.RELEASE_EVIDENCE_ARCHIVE_SHA256?.trim();
   if (normalizedStatus === 'GO' && !evidenceArchiveSha256) {
     throw new Error('RELEASE_EVIDENCE_ARCHIVE_SHA256 is required when creating GO authorization');
@@ -34,7 +40,7 @@ if (command === 'create') {
     coordinatedManifestSha256: sha256File(resolve('packages/core-artifacts/coordinated-manifest.json')),
     openapiSha256: sha256File(resolve('packages/core-artifacts/openapi/openapi.json')),
     contractsManifestSha256: sha256File(resolve('packages/core-artifacts/contracts/contract-manifest.json')),
-    gitCommit: process.env.RELEASE_GIT_COMMIT ?? currentGitCommit(),
+    gitCommit,
     imageDigest: required('RELEASE_IMAGE_DIGEST'),
     runtimeConfigSha256: required('RELEASE_RUNTIME_CONFIG_SHA256'),
     packetSha256: required('MAINNET_MICROTEST_PACKET_SHA256'),
@@ -55,7 +61,10 @@ if (command === 'create') {
   const path = option('--path') ?? process.env.RELEASE_AUTHORIZATION_PATH;
   const hash = option('--hash') ?? process.env.RELEASE_AUTHORIZATION_SHA256;
   const status = option('--status') ?? 'GO';
-  if (!path || !hash) throw new Error('usage: release-authorization verify --path <path> --hash <sha256> [--status GO]');
+  const allowDirtyGit = args.includes('--allow-dirty');
+  if (!path || !hash) {
+    throw new Error('usage: release-authorization verify --path <path> --hash <sha256> [--status GO] [--allow-dirty]');
+  }
   const result = verifyReleaseAuthorization({
     cwd: process.cwd(),
     env: {
@@ -66,7 +75,7 @@ if (command === 'create') {
     },
     allowedStatuses: [status.toUpperCase()],
     requireGitCommit: true,
-    allowDirtyGit: true,
+    allowDirtyGit,
   });
   console.log(`release authorization verified: ${result.status} ${result.artifactVersion}`);
 } else {
@@ -86,4 +95,9 @@ function required(name) {
 
 function currentGitCommit() {
   return execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+}
+
+function assertCleanGitWorktree() {
+  const status = execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }).trim();
+  if (status) throw new Error('release authorization requires a clean git worktree');
 }

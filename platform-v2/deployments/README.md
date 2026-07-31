@@ -1,10 +1,10 @@
 # BSC Payment Deployment Evidence
 
 `bsc-payment-v2.json` is the canonical, reviewable input for the five-role EOA
-payment deployment. Before deployment it has `deploymentStatus: "PENDING"`, so
-generated artifacts contain current ABI but no active address. It becomes
-`DEPLOYED` only after deployment, source verification, EOA-role/immutable
-verification and the release approval gate are complete.
+payment deployment lineage. Before deployment it has `deploymentStatus:
+"PENDING"`, so generated artifacts contain current ABI but no active address. A
+`DEPLOYED` file proves the historical address/code lineage only. It does not
+authorize the current `.30` production release, buyer acceptance or Mainnet Go.
 
 `bsc-payment-v2-safe-superseded.json` preserves the previous Safe-bound
 deployment evidence. Those contracts received no policy publication or user
@@ -26,8 +26,13 @@ The file contains no secrets. It is committed with the release so both
   "chainId": 56,
   "architecture": "FIVE_ROLE_EOA_V2",
   "deploymentStatus": "DEPLOYED",
-  "deploymentAuthorized": true,
+  "deploymentAuthorized": false,
+  "historicalLineageOnly": true,
   "authorizationEvidenceHash": "0x...32-byte-release-evidence-hash...",
+  "historicalAuthorization": {
+    "deploymentAuthorized": true,
+    "authorizationEvidenceHash": "0x...32-byte-release-evidence-hash..."
+  },
   "contracts": {
     "PolicyRegistryV2": {
       "address": "0x...",
@@ -49,9 +54,10 @@ The file contains no secrets. It is committed with the release so both
 ```
 
 The generator rejects missing/extra contracts, duplicate addresses, invalid
-blocks, invalid code hashes, a different artifact version or chain, and a
-missing authorization evidence hash. Hand-editing generated manifests is never
-a publication path.
+blocks, invalid code hashes, a different artifact version or chain, a missing
+historical authorization evidence hash, or any attempt to mark this lineage file
+as current release authorization. Hand-editing generated manifests is never a
+publication path.
 
 ## Historical fulfillment-launch authorization
 

@@ -444,7 +444,7 @@ describe('00 wallet gateway', () => {
 
     render(<MemoryRouter><App client={client} /></MemoryRouter>);
 
-    const connect = screen.getByRole('button', { name: /连接钱包/ });
+    const connect = await screen.findByRole('button', { name: /连接钱包/ });
     await waitFor(() => expect((connect as HTMLButtonElement).disabled).toBe(false));
     await user.click(connect);
 

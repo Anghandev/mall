@@ -1,6 +1,14 @@
 import { screen, within } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import type { Root } from 'react-dom/client';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { merchantDeployment } from '../src/bootstrap';
+
+let mountedRoot: Root | undefined;
+
+afterEach(() => {
+  mountedRoot?.unmount();
+  mountedRoot = undefined;
+});
 
 describe('merchant production path entry', () => {
   it('mounts the real BrowserRouter entry on a /merchant/ deep link', async () => {
@@ -10,7 +18,8 @@ describe('merchant production path entry', () => {
       throw new Error('Core is intentionally offline in the router smoke test');
     });
 
-    await import('../src/main');
+    const { mountMerchantApp } = await import('../src/main');
+    mountedRoot = mountMerchantApp();
 
     expect(await screen.findByRole('heading', { name: '运营大盘' })).toBeTruthy();
     const navigation = screen.getByRole('navigation', { name: '商家工作台导航' });

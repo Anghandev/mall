@@ -235,19 +235,19 @@ describe('Mall V2 payment consumer', () => {
     }
     expect(Array.from(navigation.querySelectorAll('a')).map((link) => link.textContent?.trim())).toEqual(labels);
     await user.click(within(navigation).getByRole('link', { name: '爆区块' }));
-    expect(screen.getByRole('heading', { name: '爆区块' })).toBeTruthy();
-    expect(screen.getByText(/DEFI共识顶层逻辑/)).toBeTruthy();
-    const accountHeading = screen.getByRole('heading', { name: '我的本金权重' });
-    const nextHeading = screen.getByRole('heading', { name: '下一次爆区块' });
+    expect(await screen.findByRole('heading', { name: '爆区块' })).toBeTruthy();
+    expect(await screen.findByText(/DEFI共识顶层逻辑/)).toBeTruthy();
+    const accountHeading = await screen.findByRole('heading', { name: '我的本金权重' });
+    const nextHeading = await screen.findByRole('heading', { name: '下一次爆区块' });
     expect(Boolean(accountHeading.compareDocumentPosition(nextHeading) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
   });
 
-  it('fails the block burst page closed until a production contract is configured', () => {
+  it('fails the block burst page closed until a production contract is configured', async () => {
     renderAt('/block-blast');
 
-    expect(screen.getByRole('heading', { name: '爆区块' })).toBeTruthy();
-    expect(screen.getByRole('heading', { name: '生产合约未配置' })).toBeTruthy();
-    expect(screen.getByText(/测试入口不作为生产入口/)).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: '爆区块' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: '生产合约未配置' })).toBeTruthy();
+    expect(await screen.findByText(/测试入口不作为生产入口/)).toBeTruthy();
     for (const label of ['打入 NPL', '领取本金', '领取奖励', '爆区块']) {
       expect(screen.getByRole('button', { name: label }).hasAttribute('disabled')).toBe(true);
     }

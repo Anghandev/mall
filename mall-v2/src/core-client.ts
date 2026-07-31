@@ -1309,8 +1309,10 @@ function parseSeckillPrizeSettlement(value: unknown, winnerWallet: unknown) {
     || review
     || payout
     || winnerWallet !== null
-    || settlement.rolloverTargetSessionId === null
-    || settlement.rolloverJournalId === null
+    || (BigInt(poolAmountUsdt) > 0n && (
+      settlement.rolloverTargetSessionId === null
+      || settlement.rolloverJournalId === null
+    ))
   )) throw new CoreClientError('InvalidResponse', '秒杀奖池滚入证据不完整');
 }
 

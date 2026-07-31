@@ -75,9 +75,10 @@ on-chain Claim function.
 `PaymentCompleted` records classification, product USDT, service fee, Custody
 product USDT, freight USDT, total USDT paid, exact NPL paid/Burn/reward amounts,
 BNM Locked points, reservation and immutable snapshot hash.
-`MerchantReceivableSnapshotted` records merchant base receivable, concession,
-net receivable and allocation hash. These events are evidence for the canonical
-off-chain double-entry ledger; they are not settlement authorization.
+Merchant base receivable, concession, net receivable and allocation hash are
+bound by the same signed payment snapshot and recovered from `PaymentCompleted`
+plus Core's append-only ledger/projection. No separate merchant receivable event
+is required, and these records are not settlement authorization.
 
 ## Seckill Boundary
 

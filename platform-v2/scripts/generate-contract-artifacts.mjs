@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { keccak256 } from 'ethers';
 import { CORE_ARTIFACT_VERSION } from '../server/api/enums.ts';
 
 const coreRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -82,6 +83,8 @@ const bundle = {};
 const contractEntries = [];
 const events = [];
 const roles = [];
+let currentDeploymentMatchesArtifact = Boolean(deploymentEvidence)
+  && deploymentEvidence.artifactVersion === artifactVersion;
 
 for (const name of contracts) {
   const artifactPath = join(coreRoot, 'out', `${name}.sol`, `${name}.json`);
@@ -97,16 +100,25 @@ for (const name of contracts) {
   const constructor = abi.find((item) => item.type === 'constructor') ?? { inputs: [] };
   const bytecode = artifact.bytecode?.object ?? '';
   const deployedBytecode = artifact.deployedBytecode?.object ?? '';
+  const runtimeBytecodeHash = deployedBytecode ? keccak256(deployedBytecode).toLowerCase() : null;
   const deployment = deploymentEvidence?.contracts[name];
+  const deploymentMatchesCurrentRuntime = Boolean(deployment)
+    && deploymentEvidence?.artifactVersion === artifactVersion
+    && typeof deployment?.deployedCodeHash === 'string'
+    && deployment.deployedCodeHash.toLowerCase() === runtimeBytecodeHash;
+  if (!deploymentMatchesCurrentRuntime) currentDeploymentMatchesArtifact = false;
   contractEntries.push({
     name,
     source: `platform-v2/contracts/${name}.sol`,
     address: deployment?.address ?? null,
     deploymentBlock: deployment?.deploymentBlock ?? null,
-    status: deployment ? 'DEPLOYED' : 'PENDING',
+    status: deploymentMatchesCurrentRuntime
+      ? 'DEPLOYED'
+      : deployment ? 'HISTORICAL_DEPLOYMENT_ONLY' : 'PENDING',
     constructorInputs: constructor.inputs,
     bytecodeSha256: sha256(bytecode),
     deployedBytecodeSha256: sha256(deployedBytecode),
+    runtimeBytecodeHash,
     deployedCodeHash: deployment?.deployedCodeHash ?? null,
   });
   for (const item of abi) {
@@ -151,7 +163,7 @@ const manifest = {
     cborMetadata: false,
   },
   sourceDigestSha256: sourceDigest,
-  deploymentStatus: deploymentEvidence?.deploymentStatus ?? 'PENDING',
+  deploymentStatus: currentDeploymentMatchesArtifact ? 'DEPLOYED' : deploymentEvidence ? 'HISTORICAL_DEPLOYMENT_ONLY' : 'PENDING',
   deploymentArtifactVersion: deploymentEvidence?.artifactVersion ?? null,
   deploymentAuthorized: false,
   deploymentAuthorizationEvidenceHash: null,
@@ -162,16 +174,14 @@ const manifest = {
     note: 'SUSPENDED, MICROTEST_AUTHORIZED, GO and NO_GO are external signed release authorization files, not artifact fields.',
   },
   historicalDeploymentLineage: deploymentEvidence
-    ? {
+    ? deploymentEvidence.historicalDeploymentLineage ?? {
       artifactVersion: deploymentEvidence.artifactVersion ?? null,
       deploymentAuthorized: false,
       deploymentAuthorizationEvidenceHash: deploymentEvidence.authorizationEvidenceHash ?? null,
       note: 'Historical deployment evidence only; release authorization is external and signed per artifact SHA.',
     }
     : null,
-  externalBlocked: deploymentEvidence?.deploymentStatus === 'DEPLOYED'
-    ? []
-    : ['EOA_CONTRACT_REDEPLOYMENT_REQUIRED'],
+  externalBlocked: currentDeploymentMatchesArtifact ? [] : ['CURRENT_ARTIFACT_REDEPLOYMENT_REQUIRED'],
   decisionBlocked: [],
   deploymentOrder: contracts,
   contracts: contractEntries,
@@ -246,12 +256,37 @@ function validateDeploymentEvidence(value) {
     return { deploymentStatus: 'PENDING', deploymentAuthorized: false, contracts: {} };
   }
   if (
+    value?.artifactVersion === artifactVersion && value.chainId === 56
+      && value.architecture === 'FIVE_ROLE_EOA_V2' && value.deploymentStatus === 'DEPLOYED'
+      && value.deploymentAuthorized === false && value.currentArtifactDeployment === true
+      && (value.authorizationEvidenceHash === null || value.authorizationEvidenceHash === undefined)
+      && value.contracts && typeof value.contracts === 'object' && !Array.isArray(value.contracts)
+  ) {
+    return validateContractDeployments(value, {
+      artifactVersion: value.artifactVersion,
+      deploymentStatus: 'DEPLOYED',
+      deploymentAuthorized: false,
+      authorizationEvidenceHash: null,
+      historicalDeploymentLineage: value.previousHistoricalLineage ?? null,
+    });
+  }
+  if (
     !value || !compatibleDeploymentArtifactVersion(value.artifactVersion) || value.chainId !== 56
       || value.architecture !== 'FIVE_ROLE_EOA_V2' || value.deploymentStatus !== 'DEPLOYED'
-      || value.deploymentAuthorized !== true
-      || !/^0x[0-9a-fA-F]{64}$/.test(value.authorizationEvidenceHash ?? '')
+      || value.deploymentAuthorized !== false || value.historicalLineageOnly !== true
+      || value.historicalAuthorization?.deploymentAuthorized !== true
+      || !/^0x[0-9a-fA-F]{64}$/.test(value.historicalAuthorization?.authorizationEvidenceHash ?? '')
       || !value.contracts || typeof value.contracts !== 'object' || Array.isArray(value.contracts)
-  ) throw new Error('Invalid BSC payment deployment evidence header');
+  ) throw new Error('Invalid BSC payment historical deployment evidence header');
+  return validateContractDeployments(value, {
+    artifactVersion: value.artifactVersion,
+    deploymentStatus: 'DEPLOYED',
+    deploymentAuthorized: false,
+    authorizationEvidenceHash: value.historicalAuthorization.authorizationEvidenceHash.toLowerCase(),
+  });
+}
+
+function validateContractDeployments(value, base) {
   const names = Object.keys(value.contracts).sort();
   if (JSON.stringify(names) !== JSON.stringify([...contracts].sort())) {
     throw new Error('Deployment evidence must contain exactly the coordinated payment contracts');
@@ -275,10 +310,7 @@ function validateDeploymentEvidence(value) {
     };
   }
   return {
-    artifactVersion: value.artifactVersion,
-    deploymentStatus: 'DEPLOYED',
-    deploymentAuthorized: true,
-    authorizationEvidenceHash: value.authorizationEvidenceHash.toLowerCase(),
+    ...base,
     contracts: deployments,
   };
 }

@@ -784,6 +784,29 @@ describe('coordinated Core HTTP client', () => {
     }).getCurrentSeckillSession()).resolves.toMatchObject({ prizeSettlement: { state: prizeSettlement.state } });
   });
 
+  it('accepts a zero-pool rolled-over seckill prize projection without rollover evidence', async () => {
+    const projection = seckillSession({
+      phase: 'SETTLED',
+      storedPhase: 'SETTLED',
+      prizePoolUsdt: '0',
+      prizeSettlement: {
+        ...rolledOverPrizeSettlement(),
+        poolAmountUsdt: '0',
+        rolloverTargetSessionId: null,
+        rolloverJournalId: null,
+      },
+    });
+    await expect(createCoreClient({
+      fetch: vi.fn().mockResolvedValue(json(projection)),
+    }).getCurrentSeckillSession()).resolves.toMatchObject({
+      prizeSettlement: {
+        state: 'ROLLED_OVER',
+        rolloverTargetSessionId: null,
+        rolloverJournalId: null,
+      },
+    });
+  });
+
   it('rejects prize projections whose winner or payout evidence is inconsistent', async () => {
     const wrongWinner = seckillSession({
       phase: 'SETTLED',

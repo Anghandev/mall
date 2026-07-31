@@ -6,28 +6,28 @@ import {
   WalletCards,
   Zap,
 } from 'lucide-react';
-import { useEffect } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { BrowserRouter, Link, Navigate, useLocation } from 'react-router-dom';
 
-import { BlockBurstScreen } from './block-burst';
 import { productBaseline } from './bootstrap';
 import { brandAssetUrl, mallBasePath } from './deployment-paths';
 import { MallRuntimeProvider, useMallRuntime, type MallServices } from './mall-runtime';
-import {
-  ActivityScreen,
-  AddressScreen,
-  AssetsScreen,
-  CheckoutScreen,
-  MallScreen,
-  NotFoundScreen,
-  NotificationsScreen,
-  OrdersScreen,
-  ProductDetailScreen,
-  ReviewScreen,
-  RewardsScreen,
-  SeckillScreen,
-  StoresScreen,
-} from './screens';
+
+
+const BlockBurstScreen = lazy(() => import('./block-burst').then((module) => ({ default: module.BlockBurstScreen })));
+const ActivityScreen = lazy(() => import('./screens').then((module) => ({ default: module.ActivityScreen })));
+const AddressScreen = lazy(() => import('./screens').then((module) => ({ default: module.AddressScreen })));
+const AssetsScreen = lazy(() => import('./screens').then((module) => ({ default: module.AssetsScreen })));
+const CheckoutScreen = lazy(() => import('./screens').then((module) => ({ default: module.CheckoutScreen })));
+const MallScreen = lazy(() => import('./screens').then((module) => ({ default: module.MallScreen })));
+const NotFoundScreen = lazy(() => import('./screens').then((module) => ({ default: module.NotFoundScreen })));
+const NotificationsScreen = lazy(() => import('./screens').then((module) => ({ default: module.NotificationsScreen })));
+const OrdersScreen = lazy(() => import('./screens').then((module) => ({ default: module.OrdersScreen })));
+const ProductDetailScreen = lazy(() => import('./screens').then((module) => ({ default: module.ProductDetailScreen })));
+const ReviewScreen = lazy(() => import('./screens').then((module) => ({ default: module.ReviewScreen })));
+const RewardsScreen = lazy(() => import('./screens').then((module) => ({ default: module.RewardsScreen })));
+const SeckillScreen = lazy(() => import('./screens').then((module) => ({ default: module.SeckillScreen })));
+const StoresScreen = lazy(() => import('./screens').then((module) => ({ default: module.StoresScreen })));
 
 const tabs = [
   { path: '/seckill', label: '秒杀', icon: Flame },
@@ -122,6 +122,7 @@ function MallShell() {
               </div>
             </section>
           ) : null}
+          <Suspense fallback={<ScreenLoading />}>
           <div className="primary-screens" hidden={!isPrimary}>
             {isPrimary && activeRoot === '/seckill' ? (
               <section aria-label="秒杀大厅">
@@ -151,6 +152,8 @@ function MallShell() {
           </div>
 
           {!isPrimary ? <DetailRoute pathname={location.pathname} /> : null}
+          </Suspense>
+
         </main>
 
         <nav className="bottom-nav" aria-label="主要导航">
@@ -188,6 +191,10 @@ function useRouteSeckillCurrentSync(
     // data loads, and including it would re-poll after every projection update.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname, shouldLoadCurrent]);
+}
+
+function ScreenLoading() {
+  return <div className="resource-state" role="status">正在加载页面</div>;
 }
 
 function DetailRoute({ pathname }: { pathname: string }) {

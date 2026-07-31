@@ -128,49 +128,6 @@
   },
   {
     "type": "event",
-    "name": "MerchantReceivableSnapshotted",
-    "inputs": [
-      {
-        "name": "orderId",
-        "type": "bytes32",
-        "indexed": true,
-        "internalType": "bytes32"
-      },
-      {
-        "name": "baseReceivableUsdt",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "concessionBps",
-        "type": "uint16",
-        "indexed": false,
-        "internalType": "uint16"
-      },
-      {
-        "name": "concessionAmountUsdt",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "netReceivableUsdt",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "allocationHash",
-        "type": "bytes32",
-        "indexed": true,
-        "internalType": "bytes32"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
     "name": "PaymentCompleted",
     "inputs": [
       {

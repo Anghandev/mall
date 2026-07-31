@@ -97,10 +97,17 @@ export function verifyReleaseAuthorization(input: VerifyReleaseAuthorizationInpu
   if (!/^[0-9a-f]{40}$/.test(gitCommit)) {
     throw new CoreError('ExternalBlocked', 'Release authorization gitCommit is invalid', 503);
   }
-  if (input.allowDirtyGit === false && currentGitStatus(cwd)?.trim()) {
+  const allowDirtyGit = input.allowDirtyGit === true;
+  const gitStatus = currentGitStatus(cwd);
+  if (!allowDirtyGit && gitStatus?.trim()) {
     throw new CoreError('ExternalBlocked', 'Release authorization requires a clean git worktree', 503);
   }
-  const expectedGitCommit = input.env.RELEASE_GIT_COMMIT?.trim() || currentGitCommit(cwd, input.allowDirtyGit === true);
+  const runtimeGitCommit = currentGitCommit(cwd);
+  const configuredGitCommit = input.env.RELEASE_GIT_COMMIT?.trim();
+  if (runtimeGitCommit && configuredGitCommit && configuredGitCommit !== runtimeGitCommit) {
+    throw new CoreError('ExternalBlocked', 'RELEASE_GIT_COMMIT does not match the current git HEAD', 503);
+  }
+  const expectedGitCommit = runtimeGitCommit ?? configuredGitCommit;
   if (!expectedGitCommit) {
     if (input.requireGitCommit !== false) {
       throw new CoreError('ExternalBlocked', 'RELEASE_GIT_COMMIT is required when git commit cannot be verified', 503);
@@ -279,13 +286,8 @@ function trustedSignerAddress(env: Readonly<ReleaseAuthorizationEnv>) {
   return addressField(value, 'trustedSigner');
 }
 
-function currentGitCommit(cwd: string, allowDirty: boolean) {
+function currentGitCommit(cwd: string) {
   try {
-    if (!allowDirty) {
-      const status = currentGitStatus(cwd);
-      if (status === undefined) return undefined;
-      if (status.trim().length > 0) return undefined;
-    }
     return execFileSync('git', ['rev-parse', 'HEAD'], { cwd, encoding: 'utf8' }).trim();
   } catch {
     return undefined;

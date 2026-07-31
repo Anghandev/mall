@@ -73,8 +73,8 @@ export function AppShell({ children }: AppShellProps) {
         </nav>
         <div className="sidebar-footer">
           <p>系统状态</p>
-          <strong>已连接</strong>
-          <span>所有操作以当前钱包权限和系统状态为准</span>
+          <strong>未连接</strong>
+          <span>进入系统状态页后按后台真实响应更新</span>
           <details className="technical-details compact">
             <summary>版本信息</summary>
             <code>{coreState.artifactVersion}</code>

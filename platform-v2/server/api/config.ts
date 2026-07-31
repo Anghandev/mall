@@ -356,21 +356,29 @@ function coordinatedDeploymentReady() {
   ) {
     throw new CoreError('ArtifactVersionMismatch', 'Deployment manifests do not match the coordinated artifact', 503);
   }
+  if (
+    contractManifest.deploymentArtifactVersion !== CORE_ARTIFACT_VERSION ||
+    contractManifest.deploymentStatus !== 'DEPLOYED'
+  ) {
+    return false;
+  }
   return (
-    contractManifest.deploymentStatus === 'DEPLOYED' &&
     contractManifest.contracts.every((contract) => {
       const deployment = contract as unknown as {
         status: string;
         address: unknown;
         deploymentBlock: unknown;
         deployedCodeHash: unknown;
+        runtimeBytecodeHash: unknown;
       };
       return deployment.status === 'DEPLOYED'
         && typeof deployment.address === 'string'
         && /^0x[0-9a-fA-F]{40}$/.test(deployment.address)
         && Number.isSafeInteger(deployment.deploymentBlock)
         && typeof deployment.deployedCodeHash === 'string'
-        && /^0x[0-9a-fA-F]{64}$/.test(deployment.deployedCodeHash);
+        && /^0x[0-9a-fA-F]{64}$/.test(deployment.deployedCodeHash)
+        && typeof deployment.runtimeBytecodeHash === 'string'
+        && deployment.runtimeBytecodeHash.toLowerCase() === deployment.deployedCodeHash.toLowerCase();
     })
   );
 }
@@ -385,6 +393,7 @@ function loadRuntimeReleaseAuthorization(env: Readonly<Record<string, string | u
         env,
         allowedStatuses: ['SUSPENDED', 'MICROTEST_AUTHORIZED', 'GO', 'NO_GO'],
         requireGitCommit: true,
+        allowDirtyGit: env.NODE_ENV === 'test' && env.ABU24K_TEST_ALLOW_DIRTY_RELEASE_AUTHORIZATION === '1',
       }),
       blockers: [] as string[],
     };

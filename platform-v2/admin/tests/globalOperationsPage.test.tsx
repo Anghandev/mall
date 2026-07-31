@@ -16,9 +16,9 @@ afterEach(() => {
 });
 
 describe('Admin global operations page', () => {
-  it('opens the simplified global resource page fail-closed before wallet login', () => {
+  it('opens the simplified global resource page fail-closed before wallet login', async () => {
     renderAt('/global-operations');
-    expect(screen.getByRole('heading', { name: '全局资源操作' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: '全局资源操作' })).toBeTruthy();
     expect(screen.getAllByRole('button', { name: /连接管理钱包|连接钱包|钱包登录/ }).length).toBeGreaterThan(0);
     expect(document.body.textContent).not.toMatch(blockedGuaranteeCopy);
   });

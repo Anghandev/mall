@@ -16,9 +16,9 @@ afterEach(() => {
 });
 
 describe('platform risk workspace', () => {
-  it('renders risk controls behind platform wallet authorization', () => {
+  it('renders risk controls behind platform wallet authorization', async () => {
     renderAt('/risk');
-    expect(screen.getByRole('heading', { name: '风控处置中心' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: '风控处置中心' })).toBeTruthy();
     expect(screen.getByText(/真实风险证据仅向管理员、运营和审计开放/)).toBeTruthy();
     expect(document.body.textContent).not.toMatch(blockedGuaranteeCopy);
   });

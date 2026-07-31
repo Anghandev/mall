@@ -76,7 +76,7 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
             <span>安全经营模式</span>
           </div>
           <p>系统状态</p>
-          <strong>已连接</strong>
+          <strong>{bootstrap.phase === 'ready' ? '系统已连接' : '未连接'}</strong>
           <details className="technical-details compact">
             <summary>版本信息</summary>
             <code>{coreBoundary.artifactVersion}</code>

@@ -152,49 +152,6 @@
     },
     {
       "contract": "PaymentRouterV2",
-      "name": "MerchantReceivableSnapshotted",
-      "signature": "MerchantReceivableSnapshotted(bytes32,uint256,uint16,uint256,uint256,bytes32)",
-      "inputs": [
-        {
-          "name": "orderId",
-          "type": "bytes32",
-          "indexed": true,
-          "internalType": "bytes32"
-        },
-        {
-          "name": "baseReceivableUsdt",
-          "type": "uint256",
-          "indexed": false,
-          "internalType": "uint256"
-        },
-        {
-          "name": "concessionBps",
-          "type": "uint16",
-          "indexed": false,
-          "internalType": "uint16"
-        },
-        {
-          "name": "concessionAmountUsdt",
-          "type": "uint256",
-          "indexed": false,
-          "internalType": "uint256"
-        },
-        {
-          "name": "netReceivableUsdt",
-          "type": "uint256",
-          "indexed": false,
-          "internalType": "uint256"
-        },
-        {
-          "name": "allocationHash",
-          "type": "bytes32",
-          "indexed": true,
-          "internalType": "bytes32"
-        }
-      ]
-    },
-    {
-      "contract": "PaymentRouterV2",
       "name": "PaymentCompleted",
       "signature": "PaymentCompleted(bytes32,address,address,uint8,uint64,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,bytes32,bytes32)",
       "inputs": [

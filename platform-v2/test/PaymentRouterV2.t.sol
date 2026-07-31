@@ -9,6 +9,8 @@ import {IBeneficiaryRegistryV2, IPolicyRegistryV2} from "../contracts/interfaces
 import {V2Types} from "../contracts/types/V2Types.sol";
 
 contract PaymentRouterV2Test is CoreFixture {
+    uint256 private constant SECP256K1_ORDER = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141;
+
     function testPaymentEncodingMatchesCoreSigningVector() public pure {
         V2Types.PaymentIntent memory intent = _signingVectorIntent();
         bytes32 paymentHash = keccak256(abi.encode(intent));
@@ -301,6 +303,29 @@ contract PaymentRouterV2Test is CoreFixture {
         _expectInvalidOldSignatures(changed, quoteSignature, buyerSignature);
     }
 
+    function testSignaturesRejectMalformedHighSWrongSignerAndBuyerMismatch() public {
+        V2Types.PaymentIntent memory intent =
+            _makePayment(keccak256("bad-signature"), buyer, 21, false, keccak256("reservation-21"));
+        bytes32 digest = router.hashPayment(intent);
+        bytes memory quoteSignature = _sign(GOVERNANCE_KEY, digest);
+        bytes memory buyerSignature = _sign(BUYER_KEY, digest);
+
+        vm.expectRevert(PaymentRouterV2.InvalidSignature.selector);
+        router.pay(intent, new bytes(64), buyerSignature);
+
+        vm.expectRevert(PaymentRouterV2.InvalidSignature.selector);
+        router.pay(intent, _withV(quoteSignature, 1), buyerSignature);
+
+        vm.expectRevert(PaymentRouterV2.InvalidSignature.selector);
+        router.pay(intent, _highSSignature(GOVERNANCE_KEY, digest), buyerSignature);
+
+        vm.expectRevert(PaymentRouterV2.InvalidSignature.selector);
+        router.pay(intent, _sign(BUYER_KEY, digest), buyerSignature);
+
+        vm.expectRevert(PaymentRouterV2.InvalidSignature.selector);
+        router.pay(intent, quoteSignature, _sign(0x1234, digest));
+    }
+
     function testSubBpsPaymentCannotCreateZeroCostBnmLiability() public {
         V2Types.PaymentIntent memory intent =
             _makePayment(keccak256("sub-bps"), buyer, 16, false, keccak256("reservation-16"));
@@ -462,6 +487,21 @@ contract PaymentRouterV2Test is CoreFixture {
     ) private {
         vm.expectRevert(PaymentRouterV2.InvalidSignature.selector);
         router.pay(intent, quoteSignature, buyerSignature);
+    }
+
+    function _withV(bytes memory signature, uint8 v) private pure returns (bytes memory) {
+        bytes memory copy = new bytes(signature.length);
+        for (uint256 index = 0; index < signature.length; index++) {
+            copy[index] = signature[index];
+        }
+        copy[64] = bytes1(v);
+        return copy;
+    }
+
+    function _highSSignature(uint256 key, bytes32 digest) private returns (bytes memory) {
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(key, digest);
+        bytes32 highS = bytes32(SECP256K1_ORDER - uint256(s));
+        return abi.encodePacked(r, highS, v == 27 ? uint8(28) : uint8(27));
     }
 
     function _dualIntent(uint256 nonce) private view returns (V2Types.SeckillIntent memory dual) {

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { createHash, createHmac } from 'node:crypto';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
@@ -99,7 +100,8 @@ test('typed config reports blocked inputs without exposing secret values', () =>
   const ready = loadConfig(completeEnvironment());
   const serialized = JSON.stringify(publicReadiness(ready));
   assert.equal(publicReadiness(ready).writesEnabled, false);
-  assert.equal(ready.externalBlocked.includes('COORDINATED_DEPLOYMENT_AUTHORIZATION'), false);
+  assert.equal(ready.externalBlocked.includes('COORDINATED_DEPLOYMENT_AUTHORIZATION'), true);
+  assert.equal(ready.paymentExternalBlocked.includes('PAYMENT_ROUTER_ADDRESS_MANIFEST'), true);
   assert.equal(serialized.includes('test-jwt-secret'), false);
   assert.equal(serialized.includes('provider-secret'), false);
   assert.equal(ready.providerReadiness.BNM, 'READY');
@@ -198,7 +200,7 @@ test('typed config reports blocked inputs without exposing secret values', () =>
   );
 });
 
-test('bounded mainnet micro-test quote gate bypasses only production deployment authorization', () => {
+test('bounded mainnet micro-test quote gate bypasses only production deployment authorization, not runtime artifact mismatch', () => {
   const now = new Date();
   const buyer = Wallet.createRandom();
   const config = loadConfig({
@@ -219,9 +221,10 @@ test('bounded mainnet micro-test quote gate bypasses only production deployment 
     MAINNET_MICROTEST_EVIDENCE_HASH: HASH,
   });
   const readiness = publicReadiness(config, paymentRuntimeReadiness(now, true), now);
-  assert.equal(readiness.writesEnabled, true);
-  assert.deepEqual(readiness.paymentExternalBlocked, []);
-  assert.deepEqual(readiness.runtimeBlockers, []);
+  assert.equal(readiness.writesEnabled, false);
+  assert.equal(readiness.paymentExternalBlocked.includes('COORDINATED_DEPLOYMENT_AUTHORIZATION'), true);
+  assert.equal(readiness.paymentExternalBlocked.includes('PAYMENT_ROUTER_ADDRESS_MANIFEST'), true);
+  assert.deepEqual(readiness.runtimeBlockers, ['PAYMENT_CONFIGURATION_REQUIRED']);
   assert.equal(allowsBoundedMainnetMicrotestPaymentWrite(config, readiness, now, {
     buyerWallet: buyer.address,
     productId: 'product-micro',
@@ -246,13 +249,14 @@ test('bounded mainnet micro-test quote gate bypasses only production deployment 
   });
   const noGoReadiness = publicReadiness(noGoConfig, paymentRuntimeReadiness(now, true), now);
   assert.equal(noGoReadiness.writesEnabled, false);
-  assert.deepEqual(noGoReadiness.paymentExternalBlocked, ['COORDINATED_DEPLOYMENT_AUTHORIZATION']);
+  assert.equal(noGoReadiness.paymentExternalBlocked.includes('COORDINATED_DEPLOYMENT_AUTHORIZATION'), true);
+  assert.equal(noGoReadiness.paymentExternalBlocked.includes('PAYMENT_ROUTER_ADDRESS_MANIFEST'), true);
   assert.deepEqual(noGoReadiness.runtimeBlockers, ['PAYMENT_CONFIGURATION_REQUIRED']);
   assert.equal(allowsBoundedMainnetMicrotestPaymentWrite(noGoConfig, noGoReadiness, now, {
     buyerWallet: buyer.address,
     productId: 'product-micro',
     quantity: 1,
-  }), true);
+  }), false);
   assert.equal(allowsBoundedMainnetMicrotestPaymentWrite(noGoConfig, noGoReadiness, now, {
     buyerWallet: '0x6666666666666666666666666666666666666666',
     productId: 'product-micro',
@@ -3583,7 +3587,7 @@ function releaseAuthorizationEnv(status: 'GO' | 'MICROTEST_AUTHORIZED' | 'SUSPEN
     coordinatedManifestSha256: sha256File(join(root, 'packages/core-artifacts/coordinated-manifest.json')),
     openapiSha256: sha256File(join(root, 'packages/core-artifacts/openapi/openapi.json')),
     contractsManifestSha256: sha256File(join(root, 'packages/core-artifacts/contracts/contract-manifest.json')),
-    gitCommit: 'abcdef0123456789abcdef0123456789abcdef01',
+    gitCommit: currentGitCommit(),
     imageDigest,
     runtimeConfigSha256,
     packetSha256,
@@ -3618,6 +3622,14 @@ function repoRoot() {
       if (parent === current) throw new Error('repo root not found');
       current = parent;
     }
+  }
+}
+
+function currentGitCommit() {
+  try {
+    return execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  } catch {
+    return 'abcdef0123456789abcdef0123456789abcdef01';
   }
 }
 

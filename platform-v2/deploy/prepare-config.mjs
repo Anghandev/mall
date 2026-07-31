@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { mkdir, open, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { Interface, JsonRpcProvider, Wallet, getAddress, keccak256 } from 'ethers';
@@ -19,6 +19,27 @@ const required = (name) => {
 };
 const secret = () => randomBytes(32).toString('hex');
 const line = (name, value) => `${name}=${String(value).replaceAll('\n', '')}`;
+const sha256 = (value) => `0x${createHash('sha256').update(value).digest('hex')}`;
+const runtimeConfigHash = (entries) => sha256(`${entries.join('\n')}\n`);
+const requiredSha256 = (name) => {
+  const normalized = String(required(name)).trim().toLowerCase();
+  if (/^0x[0-9a-f]{64}$/.test(normalized)) return normalized;
+  if (/^[0-9a-f]{64}$/.test(normalized)) return `0x${normalized}`;
+  throw new Error(`${name} must be a SHA-256 hash`);
+};
+const optionalSha256 = (name) => {
+  const value = process.env[name]?.trim();
+  if (!value) return undefined;
+  const normalized = value.toLowerCase();
+  if (/^0x[0-9a-f]{64}$/.test(normalized)) return normalized;
+  if (/^[0-9a-f]{64}$/.test(normalized)) return `0x${normalized}`;
+  throw new Error(`${name} must be a SHA-256 hash`);
+};
+const requiredImageDigest = (name) => {
+  const value = required(name).trim().toLowerCase();
+  if (!/^sha256:[0-9a-f]{64}$/.test(value)) throw new Error(`${name} must be sha256:<64 hex>`);
+  return value;
+};
 const writeEnv = async (name, entries) => {
   const path = join(target, name);
   const file = await open(path, 'wx', 0o600);
@@ -97,6 +118,17 @@ const contractManifest = JSON.parse(await readFile(
   resolve('packages/core-artifacts/contracts/contract-manifest.json'),
   'utf8',
 ));
+if (
+  contractManifest.deploymentStatus !== 'DEPLOYED'
+  || contractManifest.deploymentArtifactVersion !== contractManifest.artifactVersion
+  || contractManifest.contracts.some((contract) => (
+    contract.status !== 'DEPLOYED'
+    || typeof contract.runtimeBytecodeHash !== 'string'
+    || contract.runtimeBytecodeHash.toLowerCase() !== String(contract.deployedCodeHash ?? '').toLowerCase()
+  ))
+) {
+  throw new Error('Current contract artifact is not deployed; redeploy and regenerate the manifest before preparing production config');
+}
 const routerAddress = contractManifest.contracts
   .find((contract) => contract.name === 'PaymentRouterV2')?.address?.toLowerCase();
 if (!/^0x[0-9a-f]{40}$/.test(routerAddress ?? '')) throw new Error('PaymentRouter deployment is unavailable');
@@ -162,15 +194,25 @@ const mediaStorageEncryptionKey = secret();
 const databaseUrl = `postgres://abu24k:${databasePassword}@127.0.0.1:54329/abu24k_core`;
 const auditDatabaseUrl = `postgres://abu24k:${databasePassword}@127.0.0.1:54329/abu24k_audit`;
 const redisUrl = `redis://:${redisPassword}@127.0.0.1:63829/0`;
+const releaseGitCommit = required('RELEASE_GIT_COMMIT').trim().toLowerCase();
+if (!/^[0-9a-f]{40}$/.test(releaseGitCommit) || !releaseGitCommit.startsWith(release)) {
+  throw new Error('RELEASE_GIT_COMMIT must be the full commit for the ABU24K_RELEASE image tag');
+}
+const releaseImageDigest = requiredImageDigest('RELEASE_IMAGE_DIGEST');
+const releaseAuthorizationPath = required('RELEASE_AUTHORIZATION_PATH');
+const releaseAuthorizationSha256 = requiredSha256('RELEASE_AUTHORIZATION_SHA256');
+const releaseAuthorizationSigner = getAddress(required('RELEASE_AUTHORIZATION_SIGNER_ADDRESS'));
+const releasePacketSha256 = requiredSha256('MAINNET_MICROTEST_PACKET_SHA256');
+const releaseEvidenceArchiveSha256 = requiredSha256('RELEASE_EVIDENCE_ARCHIVE_SHA256');
 
-await writeEnv('.env', [line('ABU24K_RELEASE', release)]);
+await writeEnv('.env', [line('ABU24K_RELEASE', release), line('ABU24K_RELEASE_IMAGE_DIGEST', releaseImageDigest)]);
 await writeEnv('database.env', [
   line('POSTGRES_USER', 'abu24k'),
   line('POSTGRES_PASSWORD', databasePassword),
   line('POSTGRES_DB', 'abu24k_core'),
 ]);
 await writeEnv('redis.env', [line('REDIS_PASSWORD', redisPassword)]);
-await writeEnv('core.env', [
+const coreRuntimeEntries = [
   line('NODE_ENV', 'production'),
   line('HOST', '127.0.0.1'),
   line('PORT', '8788'),
@@ -213,7 +255,25 @@ await writeEnv('core.env', [
   line('MEDIA_UPLOAD_MAX_BYTES_PER_WALLET_HOUR', '104857600'),
   line('BSC_EXPLORER_API_URL', 'https://api.etherscan.io/v2/api'),
   line('EXPLORER_API_KEY', required('EXPLORER_API_KEY')),
-]);
+ ];
+const computedRuntimeConfigSha256 = runtimeConfigHash(coreRuntimeEntries);
+const expectedRuntimeConfigSha256 = optionalSha256('RELEASE_RUNTIME_CONFIG_SHA256');
+if (expectedRuntimeConfigSha256 && expectedRuntimeConfigSha256 !== computedRuntimeConfigSha256) {
+  throw new Error('RELEASE_RUNTIME_CONFIG_SHA256 does not match the generated Core runtime configuration');
+}
+const releaseRuntimeConfigSha256 = expectedRuntimeConfigSha256 ?? computedRuntimeConfigSha256;
+const coreReleaseEntries = [
+  line('RELEASE_AUTHORIZATION_PATH', releaseAuthorizationPath),
+  line('RELEASE_AUTHORIZATION_SHA256', releaseAuthorizationSha256),
+  line('RELEASE_AUTHORIZATION_SIGNER_ADDRESS', releaseAuthorizationSigner),
+  line('RELEASE_GIT_COMMIT', releaseGitCommit),
+  line('RELEASE_IMAGE_DIGEST', releaseImageDigest),
+  line('RELEASE_RUNTIME_CONFIG_SHA256', releaseRuntimeConfigSha256),
+  line('MAINNET_MICROTEST_PACKET_SHA256', releasePacketSha256),
+  line('RELEASE_EVIDENCE_ARCHIVE_SHA256', releaseEvidenceArchiveSha256),
+];
+await writeEnv('core.env', [...coreRuntimeEntries, ...coreReleaseEntries]);
+await writeFile(join(target, 'core-runtime-config.sha256'), `${releaseRuntimeConfigSha256}  core.env\n`, { mode: 0o600 });
 await writeEnv('eoa-runtime.env', [
   line('NODE_ENV', 'production'),
   line('HOST', '127.0.0.1'),

@@ -14,6 +14,8 @@
     "contracts:build": "forge build",
     "contracts:artifacts": "../scripts/node scripts/generate-contract-artifacts.mjs",
     "contracts:artifacts:check": "../scripts/node scripts/generate-contract-artifacts.mjs --check",
+    "contracts:deploy:plan": "../scripts/node scripts/deploy-payment-contracts.mjs",
+    "contracts:deploy:broadcast": "../scripts/node scripts/deploy-payment-contracts.mjs --broadcast",
     "artifacts": "pnpm contracts:artifacts && ../scripts/node scripts/generate-core-artifacts.mjs",
     "artifacts:check": "pnpm contracts:artifacts:check && ../scripts/node scripts/generate-core-artifacts.mjs --check",
     "contracts:test": "forge fmt --check && forge build --sizes && forge test && ../scripts/node scripts/generate-contract-artifacts.mjs --check",
@@ -22,9 +24,10 @@
     "database:postgres:prize-reorg-check": "../scripts/node --test --test-concurrency=1 --test-timeout=600000 test/integration/postgres-prize-reorg.test.ts",
     "database:postgres:payment-receipt-check": "../scripts/node --test --test-concurrency=1 --test-timeout=600000 test/integration/postgres-payment-receipt.test.ts",
     "database:postgres:check": "pnpm database:postgres:nonce-check && pnpm database:postgres:prize-reorg-check && pnpm database:postgres:payment-receipt-check",
-    "api:check": "../scripts/node --test --test-concurrency=1 server/api/api.test.ts server/chain/payment-receipt-worker.test.ts server/chain/workers.test.ts server/chain/eoa-governance.test.ts server/operations/eoa-runtime-service.test.ts server/operations/media-storage-service.test.ts scripts/check-mainnet-microtest-cleanup.test.mjs deploy/prepare-config.test.mjs deploy/router-cutover.test.mjs",
+    "api:check": "../scripts/node --test --test-concurrency=1 server/api/api.test.ts server/api/release-authorization.test.ts server/chain/payment-receipt-worker.test.ts server/chain/workers.test.ts server/chain/eoa-governance.test.ts server/operations/eoa-runtime-service.test.ts server/operations/media-storage-service.test.ts scripts/check-mainnet-microtest-cleanup.test.mjs scripts/release-authorization.test.mjs deploy/prepare-config.test.mjs deploy/router-cutover.test.mjs",
     "consumer:check": "pnpm artifacts:check && ../scripts/node --test --test-concurrency=1 server/api/api.test.ts test/consumer/core-artifacts.test.ts",
-    "e2e:full": "../scripts/node --test --test-concurrency=1 --test-name-pattern='takeover assignment authorizes' server/data/database.test.ts && ../scripts/node --test --test-concurrency=1 test/e2e/combined-v2.test.ts && ../scripts/node ../node_modules/@playwright/test/cli.js test --config test/e2e/playwright.config.ts && pnpm --filter @abu24k/mall test:e2e"
+    "e2e:full": "../scripts/node --test --test-concurrency=1 --test-name-pattern='takeover assignment authorizes' server/data/database.test.ts && ../scripts/node --test --test-concurrency=1 test/e2e/combined-v2.test.ts && ../scripts/node ../node_modules/@playwright/test/cli.js test --config test/e2e/playwright.config.ts && pnpm --filter @abu24k/mall test:e2e",
+    "e2e:real-readonly": "../scripts/node test/e2e/real-readonly-smoke.mjs"
   },
   "dependencies": {
     "@openzeppelin/contracts": "5.6.1",

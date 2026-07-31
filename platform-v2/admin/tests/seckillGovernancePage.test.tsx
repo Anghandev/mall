@@ -19,9 +19,9 @@ afterEach(() => {
 });
 
 describe('seckill governance workspace', () => {
-  it('renders seckill read pages and keeps admin actions wallet-guarded', () => {
+  it('renders seckill read pages and keeps admin actions wallet-guarded', async () => {
     renderAt('/seckill');
-    expect(screen.getByRole('heading', { name: '秒杀活动管理' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: '秒杀活动管理' })).toBeTruthy();
     expect(screen.getByText(/页面只展示系统确认结果/)).toBeTruthy();
     expect(document.body.textContent).not.toMatch(blockedGuaranteeCopy);
   });
@@ -58,7 +58,7 @@ describe('seckill governance workspace', () => {
     const user = userEvent.setup();
 
     renderAt('/seckill', fetchMock);
-    await user.click(screen.getByRole('button', { name: /连接钱包/ }));
+    await user.click(await screen.findByRole('button', { name: /连接钱包/ }));
     const approvalButton = await screen.findByRole('button', { name: '请求二次确认' });
     walletRequest.mockClear();
     await user.click(approvalButton);
@@ -106,7 +106,7 @@ describe('seckill governance workspace', () => {
     const user = userEvent.setup();
 
     renderAt('/seckill', fetchMock);
-    await user.click(screen.getByRole('button', { name: /连接钱包/ }));
+    await user.click(await screen.findByRole('button', { name: /连接钱包/ }));
     await user.click(await screen.findByRole('button', { name: '请求二次确认' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/secondary-signature'), expect.anything()));
@@ -147,7 +147,7 @@ describe('seckill governance workspace', () => {
     const user = userEvent.setup();
 
     renderAt('/seckill', fetchMock);
-    await user.click(screen.getByRole('button', { name: /连接钱包/ }));
+    await user.click(await screen.findByRole('button', { name: /连接钱包/ }));
 
     expect(await screen.findByText(/已自动选择已发布秒杀规则/)).toBeTruthy();
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
@@ -206,7 +206,7 @@ describe('seckill governance workspace', () => {
     const user = userEvent.setup();
 
     renderAt('/seckill', fetchMock);
-    await user.click(screen.getByRole('button', { name: /连接钱包/ }));
+    await user.click(await screen.findByRole('button', { name: /连接钱包/ }));
 
     expect(await screen.findByText(/系统开关当前未完全放开/)).toBeTruthy();
     expect(screen.getByText(/付款回执确认服务异常/)).toBeTruthy();
@@ -250,7 +250,7 @@ describe('seckill governance workspace', () => {
     const user = userEvent.setup();
 
     renderAt('/seckill', fetchMock);
-    await user.click(screen.getByRole('button', { name: /连接钱包/ }));
+    await user.click(await screen.findByRole('button', { name: /连接钱包/ }));
 
     expect(await screen.findByText(/这条确认已过期/)).toBeTruthy();
     const executeButton = await screen.findByRole('button', { name: '确认已过期' });

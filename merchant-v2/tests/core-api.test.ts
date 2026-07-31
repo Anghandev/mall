@@ -426,10 +426,10 @@ describe('settlement-admin.16 Core HTTP consumer', () => {
 
     expect(session.roles).toEqual(['MERCHANT']);
     expect(session.merchantId).toBe('merchant-1');
-    expect(fetchMock).toHaveBeenNthCalledWith(1, '/v2/auth/nonce', expect.objectContaining({
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/core/v2/auth/nonce', expect.objectContaining({
       body: JSON.stringify({ walletAddress: '0x1111111111111111111111111111111111111111' }),
     }));
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/v2/auth/verify', expect.objectContaining({
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/core/v2/auth/verify', expect.objectContaining({
       body: JSON.stringify({ message: challenge.message, signature: '0xsigned' }),
     }));
   });
@@ -832,7 +832,7 @@ describe('settlement-admin.16 Core HTTP consumer', () => {
     const actions = await createCoreApi().getOrderAllowedActions('order-1', 'session-token');
 
     expect(actions).toEqual([{ action: 'RECORD_SHIPMENT', enabled: false, reasonCode: 'ConfigurationRequired' }]);
-    expect(fetchMock).toHaveBeenCalledWith('/v2/actions/order', expect.objectContaining({
+    expect(fetchMock).toHaveBeenCalledWith('/core/v2/actions/order', expect.objectContaining({
       body: JSON.stringify({ orderId: 'order-1' }),
       headers: expect.objectContaining({ authorization: 'Bearer session-token' }),
     }));
@@ -963,7 +963,7 @@ describe('settlement-admin.16 Core HTTP consumer', () => {
     const result = await createCoreApi().recordShipmentBatch(input, 'merchant-session');
 
     expect(result).toMatchObject({ batchId, shipments: [{ orderId: deliveryOrderId, state: 'SHIPPED' }] });
-    expect(fetchMock).toHaveBeenCalledWith('/v2/shipments/batches', expect.objectContaining({
+    expect(fetchMock).toHaveBeenCalledWith('/core/v2/shipments/batches', expect.objectContaining({
       method: 'POST',
       body: JSON.stringify(input),
       headers: expect.objectContaining({ authorization: 'Bearer merchant-session' }),
@@ -1022,14 +1022,14 @@ describe('settlement-admin.16 Core HTTP consumer', () => {
       state: 'FULFILLED',
       method: 'PICKUP_VERIFICATION',
     });
-    expect(fetchMock).toHaveBeenNthCalledWith(1, `/v2/orders/${deliveryOrderId}/shipments`, expect.objectContaining({
+    expect(fetchMock).toHaveBeenNthCalledWith(1, `/core/v2/orders/${deliveryOrderId}/shipments`, expect.objectContaining({
       body: JSON.stringify(shipment),
       headers: expect.objectContaining({ authorization: 'Bearer merchant-session' }),
     }));
-    expect(fetchMock).toHaveBeenNthCalledWith(2, `/v2/orders/${deliveryOrderId}/forced-receipt-requests`, expect.objectContaining({
+    expect(fetchMock).toHaveBeenNthCalledWith(2, `/core/v2/orders/${deliveryOrderId}/forced-receipt-requests`, expect.objectContaining({
       body: JSON.stringify(receipt),
     }));
-    expect(fetchMock).toHaveBeenNthCalledWith(3, `/v2/orders/${pickupOrderId}/pickup-verification`, expect.objectContaining({
+    expect(fetchMock).toHaveBeenNthCalledWith(3, `/core/v2/orders/${pickupOrderId}/pickup-verification`, expect.objectContaining({
       body: JSON.stringify(pickup),
     }));
   });

@@ -16,9 +16,9 @@ afterEach(() => {
 });
 
 describe('notification campaign operations', () => {
-  it('renders notifications as wallet-scoped simple operations', () => {
+  it('renders notifications as wallet-scoped simple operations', async () => {
     renderAt('/notifications');
-    expect(screen.getByRole('heading', { name: '消息通知' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: '消息通知' })).toBeTruthy();
     expect(screen.getByText(/未连接时不读取数据/)).toBeTruthy();
     expect(document.body.textContent).not.toMatch(blockedGuaranteeCopy);
   });

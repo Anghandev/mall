@@ -1,22 +1,54 @@
 import react from '@vitejs/plugin-react';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Plugin } from 'vite';
 import { defineConfig } from 'vitest/config';
 
-export default defineConfig({
-  base: '/mall/',
-  plugins: [mallCoreArtifactBoundary(), react()],
-  server: {
-    host: '127.0.0.1',
-    port: 4311,
-    strictPort: true,
-  },
-  test: {
-    environment: 'jsdom',
-    globals: true,
-    setupFiles: ['./tests/setup.ts'],
-    include: ['./tests/**/*.test.ts', './tests/**/*.test.tsx'],
-  },
+const CORE_WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+export default defineConfig(({ command }) => {
+  const coreProxyTarget = process.env.CORE_PROXY_TARGET?.trim().replace(/\/+$/, '');
+  return {
+    base: '/mall/',
+    ...(command === 'serve' && coreProxyTarget && !process.env.VITE_CORE_API_BASE_URL ? {
+      define: { 'import.meta.env.VITE_CORE_API_BASE_URL': JSON.stringify('/core') },
+    } : {}),
+    plugins: [mallCoreArtifactBoundary(), react()],
+    server: {
+      host: '127.0.0.1',
+      port: 4311,
+      strictPort: true,
+      ...(coreProxyTarget ? { proxy: coreProxy(coreProxyTarget) } : {}),
+    },
+    test: {
+      environment: 'jsdom',
+      globals: true,
+      setupFiles: ['./tests/setup.ts'],
+      include: ['./tests/**/*.test.ts', './tests/**/*.test.tsx'],
+    },
+  };
 });
+
+function coreProxy(target: string) {
+  return {
+    '/core': {
+      target,
+      changeOrigin: true,
+      ws: true,
+      bypass: rejectCoreWrites,
+      rewrite: (path: string) => path.replace(/^\/core/, '') || '/',
+    },
+  };
+}
+
+function rejectCoreWrites(request: IncomingMessage, response: ServerResponse | undefined) {
+  const method = request.method?.toUpperCase() ?? 'GET';
+  if (!CORE_WRITE_METHODS.has(method)) return undefined;
+  if (!response) return false;
+  response.statusCode = 405;
+  response.setHeader('content-type', 'application/json; charset=utf-8');
+  response.end(JSON.stringify({ error: 'READ_ONLY_CORE_PROXY', method }));
+  return false;
+}
 
 function mallCoreArtifactBoundary(): Plugin {
   return {
