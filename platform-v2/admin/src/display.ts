@@ -144,6 +144,8 @@ export function translateErrorMessage(message: string) {
   if (/Published seckill rules are unavailable for this policy/i.test(cleaned)) return '这版资金规则没有可用的已发布秒杀规则。请先发布秒杀规则，再创建活动。';
   if (/Published policy does not contain the frozen seckill timers/i.test(cleaned)) return '当前资金规则里的秒杀计时参数不符合固定规则，不能创建活动。';
   if (/Seckill approval expired before EOA execution/i.test(cleaned)) return '这条秒杀二次确认已经过期，请取消旧动作后重新创建或重新确认。';
+  if (/Only a finalized force-closed session can authorize breaker recovery/i.test(cleaned)) return '恢复购买必须选择刚才强制截止的那场秒杀，不要选当前已结算场次。';
+  if (/Seckill breaker has no exclusively operational recovery path/i.test(cleaned)) return '秒杀购买开关不是普通运营暂停，不能直接恢复；请先处理系统提示的安全原因。';
   if (/Session product and SKU must be active/i.test(cleaned)) return '商品或规格还没有上架，先把商品审核通过并上架后再开秒杀。';
   if (/Session start must be a future ISO timestamp/i.test(cleaned)) return '开始时间必须选未来时间，请点快捷时间或重新选择。';
   if (/Fresh wallet coverage evidence is unavailable|Canonical coverage evidence is unavailable/i.test(cleaned)) return '资金覆盖检查还没拿到最新结果，系统暂时不能继续打款或开高风险动作；请稍等后刷新。';

@@ -65,6 +65,11 @@ type RuntimeGateState =
   | { phase: 'ready'; readiness: CoreBootstrap['readiness'] }
   | { phase: 'error'; message: string };
 
+type PendingSeckillRecovery = Readonly<{
+  forceClose: SeckillGovernanceActionProjection;
+  resumeAction: SeckillGovernanceActionProjection | null;
+}>;
+
 export function SeckillGovernanceWorkspace({ current, onRefresh }: {
   current: SeckillSessionProjection | null;
   onRefresh(): void;
@@ -74,6 +79,7 @@ export function SeckillGovernanceWorkspace({ current, onRefresh }: {
   const [selectedId, setSelectedId] = useState('');
   const [selected, setSelected] = useState<SeckillGovernanceActionProjection | null>(null);
   const [loading, setLoading] = useState(false);
+  const [actionsLoaded, setActionsLoaded] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [pendingAction, setPendingAction] = useState('');
   const [error, setError] = useState<CoreApiError | null>(null);
@@ -88,6 +94,7 @@ export function SeckillGovernanceWorkspace({ current, onRefresh }: {
   const [productLookupError, setProductLookupError] = useState('');
   const [runtimeGate, setRuntimeGate] = useState<RuntimeGateState>({ phase: 'idle' });
   const [targetSessionId, setTargetSessionId] = useState('');
+  const [targetSessionEdited, setTargetSessionEdited] = useState(false);
   const [forceReason, setForceReason] = useState('');
   const [forceKey, setForceKey] = useState(() => seckillCommandKey('seckill-force-close'));
   const [prize金额, setPrize金额] = useState('');
@@ -142,20 +149,23 @@ export function SeckillGovernanceWorkspace({ current, onRefresh }: {
   };
 
   useEffect(() => {
-    if (current && !targetSessionId) setTargetSessionId(current.sessionId);
-  }, [current, targetSessionId]);
-
-  useEffect(() => {
     setActions([]); setSelected(null); setError(null);
+    setActionsLoaded(false);
     if (!session || !canRead) return;
     const controller = new AbortController();
     setLoading(true);
     void fetchSeckillGovernanceActions(session.token, controller.signal)
       .then((items) => {
         setActions(items);
+        setActionsLoaded(true);
         setSelectedId((value) => items.some((item) => item.actionId === value) ? value : (items[0]?.actionId ?? ''));
       })
-      .catch((cause) => { if (!controller.signal.aborted) setError(asCoreError(cause)); })
+      .catch((cause) => {
+        if (!controller.signal.aborted) {
+          setActionsLoaded(false);
+          setError(asCoreError(cause));
+        }
+      })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
   }, [canRead, reload, session]);
@@ -304,6 +314,23 @@ export function SeckillGovernanceWorkspace({ current, onRefresh }: {
 
   const submitResume = (event: FormEvent) => {
     event.preventDefault(); if (!session || !isAdmin) return;
+    if (!actionsLoaded) {
+      setError(new CoreApiError({ code: 'InvalidRequest', message: '先等操作记录读取完成，系统要确认哪一场强制截止需要恢复。', status: 409 }));
+      return;
+    }
+    if (!pendingRecovery) {
+      setError(new CoreApiError({ code: 'InvalidRequest', message: '当前没有需要恢复的强制截止场次，不要手动恢复已结算场次。', status: 409 }));
+      return;
+    }
+    if (targetSessionId.toLowerCase() !== pendingRecovery.forceClose.sessionId.toLowerCase()) {
+      setError(new CoreApiError({ code: 'InvalidRequest', message: `恢复购买必须选强制截止场次 ${shortHash(pendingRecovery.forceClose.sessionId)}，不是当前已结算场次。`, status: 409 }));
+      return;
+    }
+    if (pendingRecovery?.resumeAction && pendingRecovery.resumeAction.state !== 'FINAL') {
+      setSelectedId(pendingRecovery.resumeAction.actionId);
+      setError(new CoreApiError({ code: 'InvalidRequest', message: '已有恢复购买动作，先在“下一步处理”里完成二次确认和提交执行。', status: 409 }));
+      return;
+    }
     void run('resume', async () => {
       const action = await createSeckillBreakerResume({ sessionId: targetSessionId, idempotencyKey: resumeKey }, session.token);
       setResumeKey(seckillCommandKey('seckill-resume'));
@@ -366,7 +393,23 @@ export function SeckillGovernanceWorkspace({ current, onRefresh }: {
   };
 
   const currentAction = useMemo(() => selected ?? actions.find((item) => item.actionId === selectedId) ?? null, [actions, selected, selectedId]);
+  const pendingRecovery = useMemo(() => pendingSeckillRecovery(actions), [actions]);
+  const recoveryTargetSessionId = pendingRecovery?.forceClose.sessionId ?? '';
+  const autoTargetSessionId = recoveryTargetSessionId || currentAction?.sessionId || current?.sessionId || '';
   const currentActionExpired = isActionApprovalExpired(currentAction);
+
+  useEffect(() => {
+    if (recoveryTargetSessionId) {
+      setTargetSessionId(recoveryTargetSessionId);
+      return;
+    }
+    if (!targetSessionEdited && autoTargetSessionId) setTargetSessionId(autoTargetSessionId);
+  }, [autoTargetSessionId, recoveryTargetSessionId, targetSessionEdited]);
+
+  const updateTargetSessionId = (value: string) => {
+    setTargetSessionId(value);
+    setTargetSessionEdited(true);
+  };
 
   return (
     <section className="seckill-governance-stack" aria-label="秒杀后台操作区">
@@ -384,7 +427,7 @@ export function SeckillGovernanceWorkspace({ current, onRefresh }: {
           {isAdmin && current?.prizeSettlement?.state === 'REVIEW_PENDING'
             ? <WinnerReviewForm session={current} decision={winnerDecision} setDecision={setWinnerDecision} reasonCode={winnerReason} setReasonCode={setWinnerReason} evidenceHash={winnerEvidenceHash} setEvidenceHash={setWinnerEvidenceHash} idempotencyKey={winnerReviewKey} setIdempotencyKey={setWinnerReviewKey} pending={pendingAction === 'winner-review'} onSubmit={submitWinnerReview} />
             : null}
-          {canCreate ? <SessionDraftForm input={draft} setInput={setDraft} rulesVersionId={rulesVersionId} setRulesVersionId={changeRulesVersion} rulesBinding={rulesBinding} rulesLookupState={rulesLookupState} products={catalogProducts} productLookupState={productLookupState} productLookupError={productLookupError} runtimeGate={runtimeGate} pending={Boolean(pendingAction)} onLoadLatestRules={() => void loadLatestPublishedRules()} onLoadRules={() => void loadRulesBinding()} onSubmit={submitSession} /> : null}
+          {canCreate ? <SessionDraftForm input={draft} setInput={setDraft} rulesVersionId={rulesVersionId} setRulesVersionId={changeRulesVersion} rulesBinding={rulesBinding} rulesLookupState={rulesLookupState} products={catalogProducts} productLookupState={productLookupState} productLookupError={productLookupError} runtimeGate={runtimeGate} pendingRecovery={pendingRecovery} pending={Boolean(pendingAction)} onLoadLatestRules={() => void loadLatestPublishedRules()} onLoadRules={() => void loadRulesBinding()} onSubmit={submitSession} /> : null}
 
           <div className="seckill-governance-layout">
             <article className="panel seckill-action-list">
@@ -418,7 +461,7 @@ export function SeckillGovernanceWorkspace({ current, onRefresh }: {
               <p className="button-explanation">只显示当前动作能做的按钮；最终是否生效以系统确认结果为准。</p>
             </aside>
           </div>
-          {isAdmin ? <ControlForms targetSessionId={targetSessionId} setTargetSessionId={setTargetSessionId} forceReason={forceReason} setForceReason={setForceReason} forceKey={forceKey} setForceKey={setForceKey} prize金额={prize金额} setPrize金额={setPrize金额} prizeKey={prizeKey} setPrizeKey={setPrizeKey} resumeKey={resumeKey} setResumeKey={setResumeKey} pendingAction={pendingAction} onForceClose={submitForceClose} onPrize={submitPrize} onResume={submitResume} /> : null}
+          {isAdmin ? <ControlForms targetSessionId={targetSessionId} setTargetSessionId={updateTargetSessionId} pendingRecovery={pendingRecovery} actionsLoaded={actionsLoaded} forceReason={forceReason} setForceReason={setForceReason} forceKey={forceKey} setForceKey={setForceKey} prize金额={prize金额} setPrize金额={setPrize金额} prizeKey={prizeKey} setPrizeKey={setPrizeKey} resumeKey={resumeKey} setResumeKey={setResumeKey} pendingAction={pendingAction} onForceClose={submitForceClose} onPrize={submitPrize} onResume={submitResume} /> : null}
         </>
       ) : null}
     </section>
@@ -445,7 +488,7 @@ function RoleBoundary({ isAdmin, canCreate }: { isAdmin: boolean; canCreate: boo
   return <div className="seckill-role-boundary" role="status"><ShieldCheck aria-hidden="true" /><div><strong>{label}</strong><p>最终写入仍由系统重新校验权限、二次确认和最终确认结果。</p></div></div>;
 }
 
-function SessionDraftForm({ input, setInput, rulesVersionId, setRulesVersionId, rulesBinding, rulesLookupState, products, productLookupState, productLookupError, runtimeGate, pending, onLoadLatestRules, onLoadRules, onSubmit }: {
+function SessionDraftForm({ input, setInput, rulesVersionId, setRulesVersionId, rulesBinding, rulesLookupState, products, productLookupState, productLookupError, runtimeGate, pendingRecovery, pending, onLoadLatestRules, onLoadRules, onSubmit }: {
   input: SeckillSessionCreateRequest;
   setInput(value: SeckillSessionCreateRequest): void;
   rulesVersionId: string;
@@ -456,6 +499,7 @@ function SessionDraftForm({ input, setInput, rulesVersionId, setRulesVersionId, 
   productLookupState: ProductLookupState;
   productLookupError: string;
   runtimeGate: RuntimeGateState;
+  pendingRecovery: PendingSeckillRecovery | null;
   pending: boolean;
   onLoadLatestRules(): void;
   onLoadRules(): void;
@@ -469,6 +513,7 @@ function SessionDraftForm({ input, setInput, rulesVersionId, setRulesVersionId, 
   const selectedSku = skuOptions.find((sku) => sku.skuId === input.skuId) ?? null;
   const selectedSkuCap = selectedSku ? skuInventoryCap(selectedSku) : 0;
   const runtimeUnavailable = runtimeGate.phase !== 'ready';
+  const seckillPurchasePaused = Boolean(pendingRecovery);
   const selectProduct = (productId: string) => {
     const product = productOptions.find((item) => item.productId === productId) ?? null;
     const skus = product ? seckillReadySkus(product) : [];
@@ -491,7 +536,7 @@ function SessionDraftForm({ input, setInput, rulesVersionId, setRulesVersionId, 
   const chooseStart = (kind: '15m' | '1h' | 'tomorrow10') => setInput({ ...input, startsAt: quickStartIso(kind) });
   return <form className="panel seckill-session-form" onSubmit={onSubmit}><div className="panel-heading"><div><p className="section-kicker">开新场</p><h2>创建场次草稿</h2></div><Plus aria-hidden="true" /></div><div className="seckill-fixed-timers" aria-label="固定秒杀计时参数"><div><span>主场</span><strong>60 分钟</strong></div><div><span>初始接力</span><strong>60 秒</strong></div><div><span>成功购买</span><strong>+30 秒</strong></div><div><span>接力上限</span><strong>60 秒</strong></div><LockKeyhole aria-hidden="true" /></div>
     <div className="resource-state"><ShieldCheck aria-hidden="true" /><div><strong>{rulesBinding ? '已自动选择已发布秒杀规则' : rulesLookupState === 'loading' ? '正在自动查找秒杀规则' : '还没有可用秒杀规则'}</strong><p>{rulesBinding ? `当前规则：${rulesBinding.slug}，资金规则版本 ${rulesBinding.policyVersion}` : rulesLookupState === 'empty' ? '请先到内容中心发布秒杀规则，再回来创建活动。' : rulesLookupState === 'error' ? '自动读取失败，可以刷新或手动指定。' : '系统会自动读取内容中心最新版，不用复制编号。'}</p></div></div>
-    <RuntimeGateNotice runtimeGate={runtimeGate} />
+    <RuntimeGateNotice runtimeGate={runtimeGate} pendingRecovery={pendingRecovery} />
     <div className={productLookupState === 'error' || productLookupState === 'empty' ? 'resource-state resource-state-error' : 'resource-state'}>
       {productLookupState === 'ready' ? <ShieldCheck aria-hidden="true" /> : <AlertTriangle aria-hidden="true" />}
       <div>
@@ -508,10 +553,10 @@ function SessionDraftForm({ input, setInput, rulesVersionId, setRulesVersionId, 
       <label>活动库存<input type="number" min="1" max={selectedSkuCap || undefined} step="1" value={input.inventory} onChange={(event) => setInput({ ...input, inventory: Number(event.target.value) })} disabled={pending || !selectedSku} required /><small>{selectedSku ? `最多 ${selectedSkuCap} 件，可少不能超。` : '选规格后自动填写。'}</small></label>
       <label>秒杀价（USDT）<input inputMode="decimal" value={input.seckillListPriceUsdt} onChange={(event) => setInput({ ...input, seckillListPriceUsdt: event.target.value })} disabled={pending || !selectedSku} required /><small>{selectedSku ? `默认按原价 ${formatUsdt(selectedSku.listPriceUsdt)}，需要折扣可改。` : '选规格后自动填写。'}</small></label>
       <label className="seckill-start-time-field">开始时间<span className="seckill-quick-start" role="group" aria-label="快捷开始时间"><button type="button" onClick={() => chooseStart('15m')} disabled={pending}>15 分钟后</button><button type="button" onClick={() => chooseStart('1h')} disabled={pending}>1 小时后</button><button type="button" onClick={() => chooseStart('tomorrow10')} disabled={pending}>明天 10:00</button></span><input type="datetime-local" value={isoToDateTimeLocal(input.startsAt)} onChange={(event) => setInput({ ...input, startsAt: dateTimeLocalToIso(event.target.value) })} disabled={pending} required /><small>不会让你算时区，点上面快捷时间即可。</small></label>
-    </div>{rulesBinding ? <p className={runtimeGate.phase === 'ready' && runtimeGate.readiness.writesEnabled ? 'healthy-copy' : 'muted-copy'} role="status"><ShieldCheck aria-hidden="true" />{runtimeGate.phase === 'ready' && runtimeGate.readiness.writesEnabled ? '规则和系统开关都准备好，可以创建场次。' : '规则已准备好；提交时由系统按当前授权和开关再次判断，不能创建会直接说明原因。'}</p> : <p className="muted-copy">没有已发布规则时不能开秒杀。先去内容中心发布秒杀规则。</p>}<details className="technical-details"><summary>校验信息</summary><dl className="definition-grid"><div><dt>资金规则版本</dt><dd>{input.policyVersion || '未读取'}</dd></div><div><dt>规则校验编号</dt><dd>{shortHash(input.rulesContentHash) || '未读取'}</dd></div><div><dt>商品编号</dt><dd>{input.productId || '未选择'}</dd></div><div><dt>规格编号</dt><dd>{input.skuId || '未选择'}</dd></div></dl></details><button className="button button-primary" type="submit" disabled={pending || runtimeUnavailable || !rulesBinding || !selectedSku || !input.startsAt}><TimerReset aria-hidden="true" />{pending ? '提交中' : '创建并锁定活动库存'}</button></form>;
+    </div>{rulesBinding ? <p className={runtimeGate.phase === 'ready' && runtimeGate.readiness.writesEnabled && !seckillPurchasePaused ? 'healthy-copy' : 'muted-copy'} role="status"><ShieldCheck aria-hidden="true" />{seckillPurchasePaused ? `秒杀购买开关暂停中：先恢复场次 ${shortHash(pendingRecovery?.forceClose.sessionId)}，再创建新秒杀。` : runtimeGate.phase === 'ready' && runtimeGate.readiness.writesEnabled ? '规则和系统开关都准备好，可以创建场次。' : '规则已准备好；提交时由系统按当前授权和开关再次判断，不能创建会直接说明原因。'}</p> : <p className="muted-copy">没有已发布规则时不能开秒杀。先去内容中心发布秒杀规则。</p>}<details className="technical-details"><summary>校验信息</summary><dl className="definition-grid"><div><dt>资金规则版本</dt><dd>{input.policyVersion || '未读取'}</dd></div><div><dt>规则校验编号</dt><dd>{shortHash(input.rulesContentHash) || '未读取'}</dd></div><div><dt>商品编号</dt><dd>{input.productId || '未选择'}</dd></div><div><dt>规格编号</dt><dd>{input.skuId || '未选择'}</dd></div></dl></details><button className="button button-primary" type="submit" disabled={pending || runtimeUnavailable || seckillPurchasePaused || !rulesBinding || !selectedSku || !input.startsAt}><TimerReset aria-hidden="true" />{pending ? '提交中' : seckillPurchasePaused ? '先恢复秒杀购买开关' : '创建并锁定活动库存'}</button></form>;
 }
 
-function RuntimeGateNotice({ runtimeGate }: { runtimeGate: RuntimeGateState }) {
+function RuntimeGateNotice({ runtimeGate, pendingRecovery }: { runtimeGate: RuntimeGateState; pendingRecovery: PendingSeckillRecovery | null }) {
   if (runtimeGate.phase === 'idle' || runtimeGate.phase === 'loading') {
     return <div className="resource-state"><AlertTriangle aria-hidden="true" /><div><strong>正在检查系统开关</strong><p>系统确认可以写入后，才允许创建新秒杀。</p></div></div>;
   }
@@ -520,6 +565,9 @@ function RuntimeGateNotice({ runtimeGate }: { runtimeGate: RuntimeGateState }) {
   }
   const readiness = runtimeGate.phase === 'ready' ? runtimeGate.readiness : null;
   if (!readiness) return null;
+  if (pendingRecovery) {
+    return <div className="resource-state resource-state-error" role="alert"><AlertTriangle aria-hidden="true" /><div><strong>秒杀购买开关暂停</strong><p>{pendingRecovery.resumeAction ? `已有恢复购买动作 ${shortHash(pendingRecovery.resumeAction.actionId)}，先在“下一步处理”里完成二次确认和提交执行。` : `由强制截止场次 ${shortHash(pendingRecovery.forceClose.sessionId)} 触发；下面已自动填入这场，不要选当前已结算场次。`}</p></div></div>;
+  }
   if (!readiness.writesEnabled) {
     return <div className="resource-state resource-state-error" role="alert"><AlertTriangle aria-hidden="true" /><div><strong>系统开关当前未完全放开</strong><p>{runtimeBlockerCopy(readiness)}。可以提交给系统确认；最终能不能开场以系统返回为准，不是你表单填错了。</p></div></div>;
   }
@@ -725,17 +773,22 @@ function quickStartIso(kind: '15m' | '1h' | 'tomorrow10') {
 }
 
 function ControlForms(props: {
-  targetSessionId: string; setTargetSessionId(value: string): void;
+  targetSessionId: string; setTargetSessionId(value: string): void; pendingRecovery: PendingSeckillRecovery | null; actionsLoaded: boolean;
   forceReason: string; setForceReason(value: string): void; forceKey: string; setForceKey(value: string): void;
   prize金额: string; setPrize金额(value: string): void; prizeKey: string; setPrizeKey(value: string): void;
   resumeKey: string; setResumeKey(value: string): void; pendingAction: string;
   onForceClose(event: FormEvent): void; onPrize(event: FormEvent): void; onResume(event: FormEvent): void;
 }) {
   const pending = Boolean(props.pendingAction);
-  return <section className="seckill-control-grid" aria-label="管理员秒杀控制动作"><div className="panel seckill-control-target"><div className="panel-heading"><div><p className="section-kicker">管理员操作</p><h2>目标场次</h2></div><ShieldCheck aria-hidden="true" /></div><label>场次编号<input pattern="0x[0-9a-fA-F]{64}" value={props.targetSessionId} onChange={(event) => props.setTargetSessionId(event.target.value)} disabled={pending} required /><small>从当前场次或历史场次复制，别手打。</small></label><p className="muted-copy">恢复购买需指向已完成强制截止的历史场次。</p></div>
+  const recoverySessionId = props.pendingRecovery?.forceClose.sessionId ?? '';
+  const hasRecoveryTargetMismatch = Boolean(recoverySessionId && props.targetSessionId.toLowerCase() !== recoverySessionId.toLowerCase());
+  const resumeInProgress = Boolean(props.pendingRecovery?.resumeAction && props.pendingRecovery.resumeAction.state !== 'FINAL');
+  const canCreateResume = props.actionsLoaded && Boolean(recoverySessionId) && !hasRecoveryTargetMismatch && !resumeInProgress;
+  const resumeButtonCopy = !props.actionsLoaded ? '正在读取操作记录' : resumeInProgress ? '已有恢复动作待处理' : recoverySessionId ? '创建恢复购买动作' : '没有需要恢复的场次';
+  return <section className="seckill-control-grid" aria-label="管理员秒杀控制动作"><div className="panel seckill-control-target"><div className="panel-heading"><div><p className="section-kicker">管理员操作</p><h2>目标场次</h2></div><ShieldCheck aria-hidden="true" /></div><label>场次编号<input pattern="0x[0-9a-fA-F]{64}" value={props.targetSessionId} onChange={(event) => props.setTargetSessionId(event.target.value)} disabled={pending} required /><small>{props.pendingRecovery ? `已自动填入要恢复的强制截止场次 ${shortHash(recoverySessionId)}。` : '从当前场次或历史场次复制，别手打。'}</small></label>{hasRecoveryTargetMismatch ? <p className="resource-state resource-state-error" role="alert"><AlertTriangle aria-hidden="true" />恢复购买必须选 {shortHash(recoverySessionId)} 这场，不是当前已结算场次。</p> : <p className="muted-copy">恢复购买需指向已完成强制截止的历史场次。</p>}</div>
     <form className="panel seckill-control-form" onSubmit={props.onForceClose}><div className="panel-heading"><div><p className="section-kicker">危险操作</p><h2>强制截止</h2></div><Ban aria-hidden="true" /></div><label>截止原因<input minLength={2} maxLength={128} value={props.forceReason} onChange={(event) => props.setForceReason(event.target.value.toUpperCase())} disabled={pending} required /></label><IdempotencyInput value={props.forceKey} setValue={props.setForceKey} pending={pending} /><button className="button button-danger" type="submit" disabled={pending || !props.targetSessionId}>{props.pendingAction === 'force-close' ? '创建中' : '创建强制截止动作'}</button></form>
     <form className="panel seckill-control-form" onSubmit={props.onPrize}><div className="panel-heading"><div><p className="section-kicker">奖池</p><h2>奖池注入</h2></div><WalletCards aria-hidden="true" /></div><label>金额（USDT）<input inputMode="decimal" value={props.prize金额} onChange={(event) => props.setPrize金额(event.target.value)} disabled={pending} required /></label><IdempotencyInput value={props.prizeKey} setValue={props.setPrizeKey} pending={pending} /><button className="button button-primary" type="submit" disabled={pending || !props.targetSessionId}>{props.pendingAction === 'prize' ? '创建中' : '创建奖池注入动作'}</button></form>
-    <form className="panel seckill-control-form" onSubmit={props.onResume}><div className="panel-heading"><div><p className="section-kicker">恢复</p><h2>恢复购买</h2></div><Send aria-hidden="true" /></div><IdempotencyInput value={props.resumeKey} setValue={props.setResumeKey} pending={pending} /><button className="button button-primary" type="submit" disabled={pending || !props.targetSessionId}>{props.pendingAction === 'resume' ? '创建中' : '创建恢复购买动作'}</button></form>
+    <form className="panel seckill-control-form" onSubmit={props.onResume}><div className="panel-heading"><div><p className="section-kicker">恢复</p><h2>恢复购买</h2></div><Send aria-hidden="true" /></div><IdempotencyInput value={props.resumeKey} setValue={props.setResumeKey} pending={pending} /><button className="button button-primary" type="submit" disabled={pending || !props.targetSessionId || !canCreateResume}>{props.pendingAction === 'resume' ? '创建中' : resumeButtonCopy}</button></form>
   </section>;
 }
 
@@ -865,6 +918,26 @@ function shortHash(value: string | null | undefined) {
 function shortAddress(value: string | null | undefined) {
   if (!value) return '—';
   return value.length > 12 ? `${value.slice(0, 6)}…${value.slice(-4)}` : value;
+}
+
+function pendingSeckillRecovery(actions: readonly SeckillGovernanceActionProjection[]): PendingSeckillRecovery | null {
+  const toMs = (value: string) => new Date(value).getTime();
+  const isTerminal = (state: SeckillGovernanceActionProjection['state']) => ['FAILED', 'REORGED', 'CANCELLED'].includes(state);
+  const sorted = [...actions].sort((left, right) => toMs(right.createdAt) - toMs(left.createdAt));
+  const latestFinalBreakerAction = sorted.find((action) => (
+    (action.actionKind === 'FORCE_CLOSE' || action.actionKind === 'RESUME_PURCHASES')
+    && action.state === 'FINAL'
+  )) ?? null;
+  if (!latestFinalBreakerAction || latestFinalBreakerAction.actionKind === 'RESUME_PURCHASES') return null;
+  const forceClose = latestFinalBreakerAction;
+  const resumeAction = sorted.find((action) => (
+    action.actionKind === 'RESUME_PURCHASES'
+    && action.sessionId.toLowerCase() === forceClose.sessionId.toLowerCase()
+    && toMs(action.createdAt) >= toMs(forceClose.createdAt)
+    && !isTerminal(action.state)
+  )) ?? null;
+  if (resumeAction?.state === 'FINAL') return null;
+  return { forceClose, resumeAction };
 }
 
 function isoToDateTimeLocal(value: string) {

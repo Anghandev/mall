@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { artifactVersion, chainIdentity, type ManagedCatalogProduct, type SeckillGovernanceActionProjection, type SeckillSessionPlanProjection } from '@abu24k/core-artifacts';
+import { artifactVersion, chainIdentity, type ManagedCatalogProduct, type SeckillGovernanceActionProjection, type SeckillSessionPlanProjection, type SeckillSessionProjection } from '@abu24k/core-artifacts';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../src/App';
@@ -222,6 +222,214 @@ describe('seckill governance workspace', () => {
     await waitFor(() => expect(captured.submitted).toBe(true));
   });
 
+  it('auto-targets the latest force-closed session before restoring seckill purchases', async () => {
+    const adminWallet = address('1');
+    const current = seckillSession({ sessionId: hash('1'), phase: 'SETTLED', storedPhase: 'SETTLED' });
+    const forceClosedSessionId = hash('9');
+    const forceClose = governanceAction({
+      actionId: hash('f'),
+      sessionId: forceClosedSessionId,
+      actionKind: 'FORCE_CLOSE',
+      state: 'FINAL',
+      confirmations: 15,
+      canonical: true,
+      sessionPlan: null,
+      allowedActions: [],
+      createdAt: '2026-08-01T05:06:04.000Z',
+      updatedAt: '2026-08-01T05:17:51.000Z',
+    });
+    const currentOpen = governanceAction({
+      actionId: hash('e'),
+      sessionId: current.sessionId,
+      state: 'FINAL',
+      confirmations: 15,
+      canonical: true,
+      allowedActions: [],
+      createdAt: '2026-08-01T04:00:00.000Z',
+      updatedAt: '2026-08-01T04:30:00.000Z',
+    });
+    const captured: { resumeBody?: Record<string, unknown> } = {};
+    window.ethereum = {
+      request: vi.fn(async ({ method }: { method: string }) => {
+        if (method === 'eth_requestAccounts') return [adminWallet];
+        if (method === 'personal_sign') return '0xsigned';
+        throw new Error(`Unexpected wallet method ${method}`);
+      }),
+    };
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/v2/seckill/sessions/current')) return jsonResponse(current);
+      if (url.includes('/v2/seckill/sessions/history')) return jsonResponse({ items: [seckillSession({ sessionId: forceClosedSessionId, phase: 'FORCE_CLOSED', storedPhase: 'FORCE_CLOSED' })], nextCursor: null });
+      if (url.includes(`/v2/seckill/sessions/${current.sessionId}/events`)) return jsonResponse({ items: [], nextCursor: '0' });
+      if (url.endsWith('/v2/auth/nonce')) return jsonResponse({ message: 'SIWE message', nonce: 'nonce', issuedAt: '2026-07-29T00:00:00.000Z', expiresAt: '2026-07-29T00:05:00.000Z' });
+      if (url.endsWith('/v2/auth/verify')) return jsonResponse({ token: 'jwt', walletAddress: adminWallet, roles: ['ADMIN'] });
+      if (url.endsWith('/v2/bootstrap')) return jsonResponse(coreBootstrap());
+      if (url.endsWith('/v2/admin/catalog/products')) return jsonResponse({ products: [catalogProduct()] });
+      if (url.endsWith('/v2/cms/public')) return jsonResponse([cmsPublicRules()]);
+      if (url.endsWith('/v2/admin/seckill/actions')) return jsonResponse([forceClose, currentOpen]);
+      if (url.endsWith(`/v2/admin/seckill/actions/${forceClose.actionId}`)) return jsonResponse(forceClose);
+      if (url.endsWith('/v2/admin/seckill/breaker/resume')) {
+        captured.resumeBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return jsonResponse(governanceAction({
+          actionId: hash('7'),
+          sessionId: forceClosedSessionId,
+          actionKind: 'RESUME_PURCHASES',
+          sessionPlan: null,
+        }), 201);
+      }
+      return jsonResponse({ error: { code: 'InvalidRequest', message: `unexpected ${url}` } }, 400);
+    });
+    const user = userEvent.setup();
+
+    renderAt('/seckill', fetchMock);
+    await user.click(await screen.findByRole('button', { name: /连接钱包/ }));
+
+    expect((await screen.findAllByText(/秒杀购买开关暂停/)).length).toBeGreaterThan(0);
+    expect(screen.getByText(/不要选当前已结算场次/)).toBeTruthy();
+    await waitFor(() => expect(screen.getByLabelText(/场次编号/)).toHaveProperty('value', forceClosedSessionId));
+    expect(screen.getByRole('button', { name: '先恢复秒杀购买开关' })).toHaveProperty('disabled', true);
+    await user.click(screen.getByRole('button', { name: '创建恢复购买动作' }));
+
+    await waitFor(() => expect(captured.resumeBody).toMatchObject({ sessionId: forceClosedSessionId }));
+    expect(captured.resumeBody?.sessionId).not.toBe(current.sessionId);
+  });
+
+  it('keeps restore disabled until seckill action records finish loading', async () => {
+    const adminWallet = address('1');
+    const current = seckillSession({ sessionId: hash('1'), phase: 'SETTLED', storedPhase: 'SETTLED' });
+    const forceClosedSessionId = hash('9');
+    const forceClose = governanceAction({
+      actionId: hash('f'),
+      sessionId: forceClosedSessionId,
+      actionKind: 'FORCE_CLOSE',
+      state: 'FINAL',
+      confirmations: 15,
+      canonical: true,
+      sessionPlan: null,
+      allowedActions: [],
+      createdAt: '2026-08-01T05:06:04.000Z',
+      updatedAt: '2026-08-01T05:17:51.000Z',
+    });
+    const actionsResponse = deferred<Response>();
+    const captured: { resumeBody?: Record<string, unknown> } = {};
+    window.ethereum = {
+      request: vi.fn(async ({ method }: { method: string }) => {
+        if (method === 'eth_requestAccounts') return [adminWallet];
+        if (method === 'personal_sign') return '0xsigned';
+        throw new Error(`Unexpected wallet method ${method}`);
+      }),
+    };
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/v2/seckill/sessions/current')) return jsonResponse(current);
+      if (url.includes('/v2/seckill/sessions/history')) return jsonResponse({ items: [seckillSession({ sessionId: forceClosedSessionId, phase: 'FORCE_CLOSED', storedPhase: 'FORCE_CLOSED' })], nextCursor: null });
+      if (url.includes(`/v2/seckill/sessions/${current.sessionId}/events`)) return jsonResponse({ items: [], nextCursor: '0' });
+      if (url.endsWith('/v2/auth/nonce')) return jsonResponse({ message: 'SIWE message', nonce: 'nonce', issuedAt: '2026-07-29T00:00:00.000Z', expiresAt: '2026-07-29T00:05:00.000Z' });
+      if (url.endsWith('/v2/auth/verify')) return jsonResponse({ token: 'jwt', walletAddress: adminWallet, roles: ['ADMIN'] });
+      if (url.endsWith('/v2/bootstrap')) return jsonResponse(coreBootstrap());
+      if (url.endsWith('/v2/admin/catalog/products')) return jsonResponse({ products: [catalogProduct()] });
+      if (url.endsWith('/v2/cms/public')) return jsonResponse([cmsPublicRules()]);
+      if (url.endsWith('/v2/admin/seckill/actions')) return actionsResponse.promise;
+      if (url.endsWith(`/v2/admin/seckill/actions/${forceClose.actionId}`)) return jsonResponse(forceClose);
+      if (url.endsWith('/v2/admin/seckill/breaker/resume')) {
+        captured.resumeBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return jsonResponse(governanceAction({ actionId: hash('7'), sessionId: forceClosedSessionId, actionKind: 'RESUME_PURCHASES', sessionPlan: null }), 201);
+      }
+      return jsonResponse({ error: { code: 'InvalidRequest', message: `unexpected ${url}` } }, 400);
+    });
+    const user = userEvent.setup();
+
+    renderAt('/seckill', fetchMock);
+    await user.click(await screen.findByRole('button', { name: /连接钱包/ }));
+
+    const loadingResume = await screen.findByRole('button', { name: '正在读取操作记录' });
+    expect(loadingResume).toHaveProperty('disabled', true);
+    await user.click(loadingResume);
+    expect(captured.resumeBody).toBeUndefined();
+
+    actionsResponse.resolve(jsonResponse([forceClose]));
+    await waitFor(() => expect(screen.getByLabelText(/场次编号/)).toHaveProperty('value', forceClosedSessionId));
+    expect(screen.getByRole('button', { name: '创建恢复购买动作' })).toHaveProperty('disabled', false);
+  });
+
+  it('does not block new sessions because of older already-superseded force closes', async () => {
+    const adminWallet = address('1');
+    const recoveredSessionId = hash('8');
+    const olderForceClosedSessionId = hash('6');
+    const recoveredForceClose = governanceAction({
+      actionId: hash('8'),
+      sessionId: recoveredSessionId,
+      actionKind: 'FORCE_CLOSE',
+      state: 'FINAL',
+      confirmations: 15,
+      canonical: true,
+      sessionPlan: null,
+      allowedActions: [],
+      createdAt: '2026-08-01T04:00:00.000Z',
+      updatedAt: '2026-08-01T04:30:00.000Z',
+    });
+    const recoveredResume = governanceAction({
+      actionId: hash('9'),
+      sessionId: recoveredSessionId,
+      actionKind: 'RESUME_PURCHASES',
+      state: 'FINAL',
+      confirmations: 15,
+      canonical: true,
+      sessionPlan: null,
+      allowedActions: [],
+      createdAt: '2026-08-01T05:00:00.000Z',
+      updatedAt: '2026-08-01T05:30:00.000Z',
+    });
+    const olderForceClose = governanceAction({
+      actionId: hash('6'),
+      sessionId: olderForceClosedSessionId,
+      actionKind: 'FORCE_CLOSE',
+      state: 'FINAL',
+      confirmations: 15,
+      canonical: true,
+      sessionPlan: null,
+      allowedActions: [],
+      createdAt: '2026-07-31T04:00:00.000Z',
+      updatedAt: '2026-07-31T04:30:00.000Z',
+    });
+    const captured: { createBody?: Record<string, unknown> } = {};
+    window.ethereum = {
+      request: vi.fn(async ({ method }: { method: string }) => {
+        if (method === 'eth_requestAccounts') return [adminWallet];
+        if (method === 'personal_sign') return '0xsigned';
+        throw new Error(`Unexpected wallet method ${method}`);
+      }),
+    };
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/v2/seckill/sessions/current')) return jsonResponse(null);
+      if (url.includes('/v2/seckill/sessions/history')) return jsonResponse({ items: [], nextCursor: null });
+      if (url.endsWith('/v2/auth/nonce')) return jsonResponse({ message: 'SIWE message', nonce: 'nonce', issuedAt: '2026-07-29T00:00:00.000Z', expiresAt: '2026-07-29T00:05:00.000Z' });
+      if (url.endsWith('/v2/auth/verify')) return jsonResponse({ token: 'jwt', walletAddress: adminWallet, roles: ['ADMIN'] });
+      if (url.endsWith('/v2/bootstrap')) return jsonResponse(coreBootstrap());
+      if (url.endsWith('/v2/admin/catalog/products')) return jsonResponse({ products: [catalogProduct()] });
+      if (url.endsWith('/v2/cms/public')) return jsonResponse([cmsPublicRules()]);
+      if (url.endsWith('/v2/admin/seckill/actions')) return jsonResponse([recoveredResume, recoveredForceClose, olderForceClose]);
+      if (url.endsWith(`/v2/admin/seckill/actions/${recoveredResume.actionId}`)) return jsonResponse(recoveredResume);
+      if (url.endsWith('/v2/admin/seckill/sessions')) {
+        captured.createBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return jsonResponse(governanceAction({ actionId: hash('5') }), 201);
+      }
+      return jsonResponse({ error: { code: 'InvalidRequest', message: `unexpected ${url}` } }, 400);
+    });
+    const user = userEvent.setup();
+
+    renderAt('/seckill', fetchMock);
+    await user.click(await screen.findByRole('button', { name: /连接钱包/ }));
+
+    expect(screen.queryByText(/秒杀购买开关暂停/)).toBeNull();
+    await user.selectOptions(await screen.findByRole('combobox', { name: '选择商品' }), 'product-1');
+    await user.click(screen.getByRole('button', { name: '1 小时后' }));
+    await user.click(screen.getByRole('button', { name: '创建并锁定活动库存' }));
+
+    await waitFor(() => expect(captured.createBody).toMatchObject({ productId: 'product-1', skuId: 'sku-1' }));
+  });
+
   it('does not offer execution for an expired secondary-signed seckill action', async () => {
     const adminWallet = address('1');
     window.ethereum = {
@@ -267,6 +475,16 @@ function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 function coreBootstrap(writesEnabled = true, runtimeBlockers: readonly string[] = []) {
   return {
     artifactVersion,
@@ -285,6 +503,43 @@ function coreBootstrap(writesEnabled = true, runtimeBlockers: readonly string[] 
       providers: {},
       writesEnabled,
     },
+  };
+}
+
+function seckillSession(overrides: Partial<SeckillSessionProjection> = {}): SeckillSessionProjection {
+  return {
+    artifactVersion,
+    sessionId: hash('a'),
+    policyVersion: '2',
+    merchantId: 'merchant-1',
+    product: {
+      productId: 'product-1',
+      skuId: 'sku-1',
+      title: 'car',
+      metadata: {},
+      attributes: {},
+      seckillListPriceUsdt: '2000000000000000000',
+    },
+    phase: 'LIVE',
+    storedPhase: 'LIVE',
+    serverTime: '2026-08-01T05:20:00.000Z',
+    startsAt: '2026-08-01T04:39:19.099Z',
+    mainDeadline: '2026-08-01T05:39:19.099Z',
+    relayDeadline: '2026-08-01T04:40:19.099Z',
+    settlementEarliestAt: '2026-08-01T05:45:19.099Z',
+    settlementDeadline: '2026-08-01T05:50:19.099Z',
+    timers: { mainDurationSeconds: 3600, relayInitialSeconds: 60, relayIncrementSeconds: 30, relayCapSeconds: 60 },
+    inventory: { total: '10', sold: '0', reserved: '0', available: '10' },
+    prizePoolUsdt: '0',
+    lastBuyerWallet: null,
+    winnerWallet: null,
+    prizeSettlement: null,
+    snapshot: {},
+    governanceActionId: hash('1'),
+    rulesContentHash: hash('2'),
+    publicationTxHash: hash('3'),
+    allowedActions: [],
+    ...overrides,
   };
 }
 
