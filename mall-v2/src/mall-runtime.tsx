@@ -580,7 +580,15 @@ export function MallRuntimeProvider({
     resolvePublicMedia,
 
     async reloadSeckill() {
-      await run(async () => loadSeckillSurface(() => true));
+      setCatalogState('loading');
+      await run(async () => {
+        const [products] = await Promise.all([
+          services.core.listCatalog(session?.token),
+          loadSeckillSurface(() => true),
+        ]);
+        setCatalog(products);
+        setCatalogState(products.length > 0 ? 'ready' : 'empty');
+      }, () => setCatalogState('error'));
     },
 
     selectSeckillSession() {

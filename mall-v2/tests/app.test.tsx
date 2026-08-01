@@ -1628,6 +1628,28 @@ describe('Mall V2 payment consumer', () => {
     expect(screen.getByLabelText('当前数量').textContent).toContain('1');
   });
 
+  it('refreshes catalog overlay when the seckill session turns live', async () => {
+    const preheatCatalog = {
+      ...product,
+      skus: product.skus.map((sku) => sku.seckill ? {
+        ...sku,
+        seckill: { ...sku.seckill, phase: 'PREHEAT' as const },
+      } : sku),
+    };
+    const listCatalog = vi.fn<CoreClient['listCatalog']>()
+      .mockResolvedValueOnce([preheatCatalog])
+      .mockResolvedValue([product]);
+    renderAt('/seckill', readyServices({
+      getCurrentSeckillSession: vi.fn().mockResolvedValue(seckillSession()),
+      listCatalog,
+    }));
+
+    await waitFor(() => expect(listCatalog).toHaveBeenCalledTimes(2));
+    expect(await screen.findByRole('heading', { name: '现在可以抢' })).toBeTruthy();
+    expect((screen.getByRole('button', { name: '立即抢购' }) as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByText('当前商品还没准备好，暂时不能抢')).toBeNull();
+  });
+
   it('keeps seckill entry disabled when the confirmed LIVE session mismatches the catalog overlay', async () => {
     const mismatchedProduct = {
       ...product,
