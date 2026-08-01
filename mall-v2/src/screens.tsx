@@ -47,6 +47,7 @@ import {
   type AllowedActionName,
   type BuyerSavedAddress,
   type CatalogCategory,
+  type CatalogProduct,
   type FulfillmentOrder,
   type FulfillmentTarget,
   type MerchantStore,
@@ -112,6 +113,10 @@ export function SeckillScreen() {
         && sku.seckill?.sessionId.toLowerCase() === session.sessionId.toLowerCase()
         && sku.seckill.phase === 'LIVE'
       ))));
+  const seckillProduct = session
+    ? runtime.catalog.find((product) => product.productId === session.product.productId) ?? null
+    : null;
+  const showCountdown = !session || session.phase === 'PREHEAT' || session.phase === 'LIVE';
   const canConfigure = Boolean(
     session?.phase === 'LIVE'
       && BigInt(session.inventory.available) > 0n
@@ -185,13 +190,19 @@ export function SeckillScreen() {
         </div>
       </section>
 
-      <div className="timer-grid" aria-label="活动计时">
-        <CountdownMetric
-          label={session?.phase === 'PREHEAT' ? '距主场开始' : '主场倒计时'}
-          value={mainCountdown}
-        />
-        <CountdownMetric label="接力倒计时" value={relayCountdown} />
-      </div>
+      {showCountdown ? (
+        <div className="timer-grid" aria-label="活动计时">
+          <CountdownMetric
+            label={session?.phase === 'PREHEAT' ? '距主场开始' : '主场倒计时'}
+            value={mainCountdown}
+          />
+          <CountdownMetric label="接力倒计时" value={relayCountdown} />
+        </div>
+      ) : (
+        <SeckillClosedStatus session={session} />
+      )}
+
+      <SeckillFeaturedProduct product={seckillProduct} session={session} />
 
       <SeckillActionCard
         canConfigure={canConfigure}
@@ -269,6 +280,63 @@ export function SeckillScreen() {
         }}
       />
     </div>
+  );
+}
+
+function SeckillClosedStatus({ session }: { session: PublishedSeckillSessionProjection }) {
+  const copy = session.phase === 'SETTLING'
+    ? `接力窗口已结束，本场正在结算，不能继续抢。预计 ${formatIso(session.settlementDeadline)} 前完成。`
+    : session.phase === 'SETTLED'
+      ? '本场已结束，不能继续抢。可以查看结果或等待下一场。'
+      : '本场已关闭，不能继续抢。';
+  return (
+    <section className="seckill-status-strip" aria-label="当前活动进度">
+      <Clock3 aria-hidden="true" size={18} />
+      <div>
+        <strong>{seckillPhaseText(session.phase)}</strong>
+        <p>{copy}</p>
+      </div>
+    </section>
+  );
+}
+
+function SeckillFeaturedProduct({
+  product,
+  session,
+}: {
+  product: CatalogProduct | null;
+  session: PublishedSeckillSessionProjection | null;
+}) {
+  if (!session) return null;
+  const imageAssetId = product?.mainImageAssetIds[0] ?? null;
+  const skuText = skuLabel(session.product.attributes, session.product.skuId);
+  return (
+    <section className="seckill-featured-product" aria-labelledby="seckill-product-title">
+      <div className="seckill-featured-product__media">
+        {imageAssetId && product ? (
+          <PublicCatalogMedia
+            alt={session.product.title}
+            assetId={imageAssetId}
+            expectedPurpose="PRODUCT_IMAGE"
+            expectedResourceId={product.productId}
+            expectedResourceType="PRODUCT"
+            kind="image"
+          />
+        ) : (
+          <PackageOpen aria-hidden="true" size={26} />
+        )}
+      </div>
+      <div className="seckill-featured-product__body">
+        <p className="eyebrow">当前抢购商品</p>
+        <h2 id="seckill-product-title">{session.product.title}</h2>
+        <span>{skuText}</span>
+        <dl>
+          <div><dt>秒杀价</dt><dd>{formatUsdtAmount(session.product.seckillListPriceUsdt)}</dd></div>
+          <div><dt>剩余</dt><dd>{session.inventory.available}</dd></div>
+          <div><dt>状态</dt><dd>{seckillPhaseText(session.phase)}</dd></div>
+        </dl>
+      </div>
+    </section>
   );
 }
 
