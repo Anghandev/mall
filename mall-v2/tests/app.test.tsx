@@ -1676,13 +1676,14 @@ describe('Mall V2 payment consumer', () => {
     };
     const listCatalog = vi.fn<CoreClient['listCatalog']>()
       .mockResolvedValueOnce([preheatCatalog])
+      .mockResolvedValueOnce([preheatCatalog])
       .mockResolvedValue([product]);
     renderAt('/seckill', readyServices({
       getCurrentSeckillSession: vi.fn().mockResolvedValue(seckillSession()),
       listCatalog,
     }));
 
-    await waitFor(() => expect(listCatalog).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(listCatalog).toHaveBeenCalledTimes(3));
     expect(await screen.findByRole('heading', { name: '现在可以抢' })).toBeTruthy();
     expect((screen.getByRole('button', { name: '立即抢购' }) as HTMLButtonElement).disabled).toBe(false);
     expect(screen.queryByText('当前商品还没准备好，暂时不能抢')).toBeNull();

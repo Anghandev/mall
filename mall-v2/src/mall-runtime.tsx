@@ -582,12 +582,13 @@ export function MallRuntimeProvider({
     async reloadSeckill() {
       setCatalogState('loading');
       await run(async () => {
-        const [products] = await Promise.all([
+        const [products, currentSession] = await Promise.all([
           services.core.listCatalog(session?.token),
           loadSeckillSurface(() => true),
         ]);
-        setCatalog(products);
-        setCatalogState(products.length > 0 ? 'ready' : 'empty');
+        const nextProducts = await refreshLiveSeckillCatalogOverlay(products, currentSession);
+        setCatalog(nextProducts);
+        setCatalogState(nextProducts.length > 0 ? 'ready' : 'empty');
       }, () => setCatalogState('error'));
     },
 
@@ -1793,7 +1794,7 @@ export function MallRuntimeProvider({
       if (!isActive()) return;
       setSeckillHistory(history.items);
       setSeckillSessionState((current) => current === 'loading' ? 'empty' : current);
-      return;
+      return undefined;
     }
     const [current, history] = await Promise.allSettled([
       services.core.getCurrentSeckillSession(),
@@ -1811,16 +1812,25 @@ export function MallRuntimeProvider({
         setSeckillSessionState('ready');
       }
       setSeckillRealtimeError(null);
-      return;
+      return current.value;
     }
     if (current.reason instanceof CoreClientError && current.reason.code === 'UnknownState') {
       setSeckillSession(null);
       setSeckillEvents([]);
       setSeckillSessionState('empty');
-      return;
+      return null;
     }
     setSeckillSessionState('error');
     throw current.reason;
+  }
+
+  async function refreshLiveSeckillCatalogOverlay(
+    products: readonly CatalogProduct[],
+    currentSession: PublishedSeckillSessionProjection | null | undefined,
+  ) {
+    if (hasLiveSeckillCatalogOverlay(products, currentSession)) return products;
+    const nextProducts = await services.core.listCatalog(session?.token);
+    return nextProducts;
   }
 
   async function loadNotificationBundle(activeSession: WalletSession, isActive: () => boolean = () => true) {
@@ -2352,6 +2362,19 @@ function looksLikeTechnicalEnglish(message: string) {
 
 function minBigInt(first: bigint, ...rest: bigint[]) {
   return rest.reduce((min, value) => value < min ? value : min, first);
+}
+
+function hasLiveSeckillCatalogOverlay(
+  products: readonly CatalogProduct[],
+  currentSession: PublishedSeckillSessionProjection | null | undefined,
+) {
+  if (!currentSession || currentSession.phase !== 'LIVE') return true;
+  return products.some((product) => product.productId === currentSession.product.productId
+    && product.skus.some((sku) => (
+      sku.skuId === currentSession.product.skuId
+      && sku.seckill?.sessionId.toLowerCase() === currentSession.sessionId.toLowerCase()
+      && sku.seckill.phase === 'LIVE'
+    )));
 }
 
 function firstOrdinaryPurchasableSkuId(product: CatalogProduct) {

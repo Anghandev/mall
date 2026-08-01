@@ -81,11 +81,18 @@ export function SeckillScreen() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [rulesDialogMode, setRulesDialogMode] = useState<'read' | 'confirm' | null>(null);
   const expiredReloadKeyRef = useRef<string | null>(null);
+  const expiryReloadTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const liveOverlayRetryRef = useRef<{ sessionId: string | null; attempts: number }>({ sessionId: null, attempts: 0 });
   const session = runtime.seckillSession;
   const mainTarget = session?.phase === 'PREHEAT' ? session.startsAt : session?.mainDeadline;
   const reloadExpiredDeadline = (deadlineKey: string) => {
     if (expiredReloadKeyRef.current === deadlineKey) return;
     expiredReloadKeyRef.current = deadlineKey;
+    expiryReloadTimersRef.current.forEach(clearTimeout);
+    expiryReloadTimersRef.current = [
+      setTimeout(() => void runtime.reloadSeckill(), 1_500),
+      setTimeout(() => void runtime.reloadSeckill(), 3_500),
+    ];
     void runtime.reloadSeckill();
   };
   const mainCountdown = useAuthoritativeCountdown(session?.serverTime, mainTarget, reloadExpiredDeadline);
@@ -116,6 +123,39 @@ export function SeckillScreen() {
       && runtime.bootstrap?.writesEnabled
       && !runtime.pendingSubmission,
   );
+
+  useEffect(() => () => {
+    expiryReloadTimersRef.current.forEach(clearTimeout);
+    expiryReloadTimersRef.current = [];
+  }, []);
+
+  useEffect(() => {
+    const sessionId = session?.sessionId ?? null;
+    if (liveOverlayRetryRef.current.sessionId !== sessionId) {
+      liveOverlayRetryRef.current = { sessionId, attempts: 0 };
+    }
+    const shouldRetryLiveOverlay = Boolean(
+      session?.phase === 'LIVE'
+        && BigInt(session.inventory.available) > 0n
+        && !productAvailable
+        && runtime.bootstrap?.writesEnabled
+        && runtime.seckillSessionState !== 'loading',
+    );
+    if (!shouldRetryLiveOverlay || liveOverlayRetryRef.current.attempts >= 3) return;
+    const delayMs = liveOverlayRetryRef.current.attempts === 0 ? 600 : 1_500;
+    const timer = setTimeout(() => {
+      liveOverlayRetryRef.current.attempts += 1;
+      void runtime.reloadSeckill();
+    }, delayMs);
+    return () => clearTimeout(timer);
+  }, [
+    productAvailable,
+    runtime.bootstrap?.writesEnabled,
+    runtime.seckillSessionState,
+    session?.sessionId,
+    session?.phase,
+    session?.inventory.available,
+  ]);
 
   return (
     <div className="screen screen--seckill">
