@@ -44,7 +44,7 @@ import { appendAuditEntry, verifyAuditChain, type AuditRow } from './audit-chain
 import { AuditQueryService, enqueueAudit } from './audit-service.ts';
 import { PostgresNonceStore, RedisNonceRateLimiter } from './auth-store.ts';
 import { CatalogPaymentService } from './catalog-payment-service.ts';
-import { CatalogManagementService } from './catalog-management-service.ts';
+import { CatalogManagementService, productWriteLock } from './catalog-management-service.ts';
 import { AdminGlobalOperationsService } from './admin-global-operations-service.ts';
 import { CoverageBreakerService } from './coverage-breaker-service.ts';
 import { CmsService, sanitizeStructuredContent } from './cms-service.ts';
@@ -8374,6 +8374,12 @@ test('fulfillment service keeps evidence append-only and unlocks every order lia
     const lockedBeforeReceipt = await liabilityStates(db, intent.orderId, 'LOCKED');
     assert.deepEqual(lockedBeforeReceipt, { BNM_POINTS: '100', NPL: '100', USDT: '69' });
     assert.deepEqual(await liabilityStates(db, intent.orderId, 'AVAILABLE'), {});
+    const lockedProduct = { product_id: 'product-1', lifecycle_state: 'ACTIVE' };
+    assert.deepEqual(await productWriteLock(adapter(db), lockedProduct, now), {
+      type: 'ORDER',
+      id: intent.orderId,
+      state: 'LOCKED',
+    });
 
     now = new Date(now.getTime() + 60_000);
     const fulfilled = await service.confirmReceipt(buyer, intent.orderId, {
@@ -8390,6 +8396,8 @@ test('fulfillment service keeps evidence append-only and unlocks every order lia
       NPL: '100',
       USDT: '62',
     });
+    assert.deepEqual(await purposeBalances(db, intent.orderId, 'SECKILL_PRIZE_LIABILITY'), { LOCKED: '7' });
+    assert.equal(await productWriteLock(adapter(db), lockedProduct, now), null);
     const projection = await service.getOrder(buyer, intent.orderId);
     assert.equal(projection.state, 'FULFILLED');
     assert.equal(projection.requests[0]?.state, 'RESOLVED');

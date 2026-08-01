@@ -1104,7 +1104,14 @@ async function lockedLiabilityForProduct(executor: SqlExecutor, productId: strin
      FROM core.ledger_journals journal
      JOIN core.orders orders ON orders.order_id = journal.order_id
      JOIN core.ledger_lines line ON line.journal_id = journal.journal_id
+     JOIN core.ledger_accounts account ON account.account_id = line.account_id
      WHERE orders.product_id = $1 AND line.balance_state IN ('LOCKED','DISPUTED')
+       AND NOT (
+         account.asset = 'USDT'
+         AND account.purpose = 'SECKILL_PRIZE_LIABILITY'
+         AND account.owner_type = 'SYSTEM'
+         AND account.owner_id = 'seckill-prize'
+       )
      GROUP BY journal.order_id, line.balance_state
      HAVING sum(CASE WHEN line.side = 'CREDIT' THEN line.amount ELSE -line.amount END) > 0
      ORDER BY journal.order_id LIMIT 1`,
