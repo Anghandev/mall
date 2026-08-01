@@ -1708,6 +1708,18 @@ a {
   object-fit: cover;
 }
 
+.store-media-gallery--placeholder {
+  min-height: 56px;
+  place-items: center;
+  gap: 5px;
+  border: 1px dashed var(--line);
+  border-radius: 5px;
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 750;
+}
+
 .store-media-gallery--compact .public-media {
   max-height: 72px;
 }

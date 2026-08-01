@@ -17,7 +17,7 @@ import { isCoreOrderActionExecutable, productBaseline } from '../src/bootstrap';
 import { CoreClientError, type CoreClient, type CorePaymentAvailability, type PublishedSeckillSessionProjection } from '../src/core-client';
 import { defaultMallServices, MallRuntimeProvider, useMallRuntime, validateSupportUrl, type MallServices, type PendingSubmission } from '../src/mall-runtime';
 import type { ApprovalStatus, WalletGateway } from '../src/wallet';
-import { catalogCategories, catalogTags, publicMediaAccess } from './catalog-fixtures';
+import { catalogCategories, catalogTags, categoryIconAssetId, publicMediaAccess } from './catalog-fixtures';
 import {
   authenticatedAvatarAccess,
   avatarAssetId,
@@ -138,7 +138,7 @@ describe('Mall V2 payment consumer', () => {
     await waitFor(() => expect(screen.getByText('暂无可买商品')).toBeTruthy());
   });
 
-  it('renders public taxonomy and short-lived Core media without constructing provider URLs', async () => {
+  it('renders public taxonomy while hiding product media on buyer pages', async () => {
     const user = userEvent.setup();
     const createPublicMediaReadAccess = vi.fn((assetId: string) => Promise.resolve(publicMediaAccess(assetId)));
     const services = readyServices({ createPublicMediaReadAccess });
@@ -153,9 +153,9 @@ describe('Mall V2 payment consumer', () => {
     expect(document.body.textContent).not.toMatch(/USDT 原子单位/);
     expect(screen.getByText(/秒杀进行中/)).toBeTruthy();
     expect(screen.getByText(/秒杀进行中，普通购买暂停，前往秒杀/)).toBeTruthy();
-    const productImage = await screen.findByRole('img', { name: product.title });
-    expect(productImage.getAttribute('src')).toBe(publicMediaAccess(product.mainImageAssetIds[0]!).readUrl);
-    expect(createPublicMediaReadAccess).toHaveBeenCalledWith(product.mainImageAssetIds[0]!.toLowerCase());
+    await waitFor(() => expect(createPublicMediaReadAccess).toHaveBeenCalledWith(categoryIconAssetId.toLowerCase()));
+    expect(createPublicMediaReadAccess).not.toHaveBeenCalledWith(product.mainImageAssetIds[0]!.toLowerCase());
+    expect(screen.queryByRole('img', { name: product.title })).toBeNull();
     expect(document.body.textContent).not.toMatch(/CDN|OSS|分类稍后批次发布/);
 
     await user.click(screen.getByRole('link', { name: `查看 ${product.title} 商品详情` }));
@@ -163,10 +163,8 @@ describe('Mall V2 payment consumer', () => {
     expect(screen.getByText('黑金鞋面，轻量缓震结构。')).toBeTruthy();
     expect(screen.getByText(/41码 \/ 秒杀黑金/)).toBeTruthy();
     expect(screen.getByText(/活动规格普通购买暂停，其他普通规格可继续购买/)).toBeTruthy();
-    const productVideo = await screen.findByLabelText(`${product.title} 商品视频`);
-    expect(productVideo.tagName).toBe('VIDEO');
-    expect(productVideo.getAttribute('src')).toBe(publicMediaAccess(product.videoAssetId!).readUrl);
-    expect(createPublicMediaReadAccess).toHaveBeenCalledWith(product.videoAssetId!.toLowerCase());
+    expect(screen.queryByLabelText(`${product.title} 商品视频`)).toBeNull();
+    expect(createPublicMediaReadAccess).not.toHaveBeenCalledWith(product.videoAssetId!.toLowerCase());
   });
 
   it('filters products only by the published category and tag associations', async () => {
@@ -193,35 +191,23 @@ describe('Mall V2 payment consumer', () => {
     expect(screen.getByRole('heading', { name: product.title })).toBeTruthy();
   });
 
-  it('fails media closed when the signed read target is bound to another product', async () => {
-    const mismatched = {
-      ...publicMediaAccess(product.mainImageAssetIds[0]!),
-      resourceId: 'another-product',
-    };
-    renderAt('/mall', readyServices({
-      createPublicMediaReadAccess: vi.fn((assetId: string) => Promise.resolve(
-        assetId === product.mainImageAssetIds[0] ? mismatched : publicMediaAccess(assetId),
-      )),
-    }));
+  it('does not request hidden product images from Core on buyer pages', async () => {
+    const createPublicMediaReadAccess = vi.fn((assetId: string) => Promise.resolve(publicMediaAccess(assetId)));
+    renderAt('/mall', readyServices({ createPublicMediaReadAccess }));
 
-    expect(await screen.findByRole('button', { name: '重新加载图片' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: product.title })).toBeTruthy();
     expect(screen.queryByRole('img', { name: product.title })).toBeNull();
+    expect(createPublicMediaReadAccess).not.toHaveBeenCalledWith(product.mainImageAssetIds[0]!.toLowerCase());
   });
 
-  it('rejects a product video read target with an image purpose and content type', async () => {
+  it('does not request hidden product videos from Core on buyer detail pages', async () => {
     const user = userEvent.setup();
-    renderAt('/mall', readyServices({
-      createPublicMediaReadAccess: vi.fn((assetId: string) => {
-        const access = publicMediaAccess(assetId);
-        return Promise.resolve(assetId === product.videoAssetId
-          ? { ...access, purpose: 'PRODUCT_IMAGE' as const, contentType: 'image/webp' as const }
-          : access);
-      }),
-    }));
+    const createPublicMediaReadAccess = vi.fn((assetId: string) => Promise.resolve(publicMediaAccess(assetId)));
+    renderAt('/mall', readyServices({ createPublicMediaReadAccess }));
 
     await user.click(await screen.findByRole('link', { name: `查看 ${product.title} 商品详情` }));
-    expect(await screen.findByRole('button', { name: '重新加载视频' })).toBeTruthy();
     expect(screen.queryByLabelText(`${product.title} 商品视频`)).toBeNull();
+    expect(createPublicMediaReadAccess).not.toHaveBeenCalledWith(product.videoAssetId!.toLowerCase());
   });
 
   it('keeps all five primary tabs reachable and preserves the existing shell', async () => {
@@ -1762,11 +1748,10 @@ describe('Mall V2 payment consumer', () => {
     expect(screen.queryByRole('heading', { name: fartherStore.name })).toBeNull();
     await user.selectOptions(screen.getByLabelText('区县'), '');
     expect(screen.getAllByText(store.businessHours).length).toBeGreaterThan(0);
-    const storeImages = await screen.findAllByRole('img', { name: new RegExp(`${store.name} 门店图片`) });
-    expect(storeImages).toHaveLength(storeImageAssetIds.length);
-    for (const [index, assetId] of storeImageAssetIds.entries()) {
-      expect(storeImages[index]?.getAttribute('src')).toBe(publicMediaAccess(assetId).readUrl);
-      expect(createPublicMediaReadAccess).toHaveBeenCalledWith(assetId.toLowerCase());
+    expect(within(storeArticle).getByText('门店信息')).toBeTruthy();
+    expect(screen.queryByRole('img', { name: new RegExp(`${store.name} 门店图片`) })).toBeNull();
+    for (const assetId of storeImageAssetIds) {
+      expect(createPublicMediaReadAccess).not.toHaveBeenCalledWith(assetId.toLowerCase());
     }
     expect(screen.getByRole('link', { name: `拨打 ${store.name} 电话` }).getAttribute('href')).toBe(`tel:${store.phone}`);
     expect(within(storeArticle).queryByRole('button', { name: /导航|距离/ })).toBeNull();
@@ -1844,7 +1829,8 @@ describe('Mall V2 payment consumer', () => {
     await user.click(screen.getByRole('button', { name: '到店自提' }));
     await waitFor(() => expect(listStores).toHaveBeenCalledWith(undefined, product.productId));
     expect(await screen.findByText(`营业时间：${store.businessHours}`)).toBeTruthy();
-    expect(await screen.findAllByRole('img', { name: new RegExp(`${store.name} 门店图片`) })).toHaveLength(storeImageAssetIds.length);
+    expect((await screen.findAllByText('自提门店')).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('img', { name: new RegExp(`${store.name} 门店图片`) })).toBeNull();
     const nearestSelection = await screen.findByRole('button', { name: `选择 ${store.name}` });
     expect(createPickupTarget).not.toHaveBeenCalled();
     await user.click(nearestSelection);
