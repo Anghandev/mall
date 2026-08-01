@@ -2951,33 +2951,47 @@ function seckillActionReason(
 }
 
 function ledgerStateSummaries(runtime: MallRuntimeValue) {
-  const readable = Boolean(runtime.session && (runtime.settlementsState === 'ready' || runtime.settlementsState === 'empty'));
+  const settlementReadable = Boolean(runtime.session && (runtime.settlementsState === 'ready' || runtime.settlementsState === 'empty'));
+  const orderBnmReadable = Boolean(runtime.session && (runtime.ordersState === 'ready' || runtime.ordersState === 'empty'));
   const points = runtime.settlements?.points ?? [];
+  const bnmPoints: readonly BnmSummaryBalance[] = settlementReadable ? points : orderBnmBalances(runtime);
+  const bnmReadable = settlementReadable || orderBnmReadable;
   const balances = runtime.settlements?.balances ?? [];
   const regionalSubtypes: readonly RewardSubtype[] = ['DISTRICT', 'CITY', 'PROVINCE', 'REGION'];
   return [
     {
       title: 'BNM 积分',
-      total: readable ? formatBnmAmount(sumAtomicStrings(points.map((point) => point.amount))) : '--',
-      available: readable ? formatBnmAmount(sumAtomicStrings(points.filter((point) => point.state === 'AVAILABLE').map((point) => point.amount))) : '--',
-      locked: readable ? formatBnmAmount(sumAtomicStrings(points.filter((point) => point.state === 'LOCKED').map((point) => point.amount))) : '--',
+      total: bnmReadable ? formatBnmAmount(sumAtomicStrings(bnmPoints.map((point) => point.amount))) : '--',
+      available: bnmReadable ? formatBnmAmount(sumAtomicStrings(bnmPoints.filter((point) => point.state === 'AVAILABLE').map((point) => point.amount))) : '--',
+      locked: bnmReadable ? formatBnmAmount(sumAtomicStrings(bnmPoints.filter((point) => point.state === 'LOCKED').map((point) => point.amount))) : '--',
       copy: 'BNM 是平台积分，履约完成后会从锁定变为可用积分。',
     },
     {
       title: '创世节点 NPL',
-      total: readable ? formatNplAmount(sumAtomicStrings(balances.filter((balance) => balance.rewardSubtype === 'GENESIS').map((balance) => balance.amount))) : '--',
-      available: readable ? formatNplAmount(sumAtomicStrings(balances.filter((balance) => balance.rewardSubtype === 'GENESIS' && balance.state === 'AVAILABLE').map((balance) => balance.amount))) : '--',
-      locked: readable ? formatNplAmount(sumAtomicStrings(balances.filter((balance) => balance.rewardSubtype === 'GENESIS' && balance.state === 'LOCKED').map((balance) => balance.amount))) : '--',
+      total: settlementReadable ? formatNplAmount(sumAtomicStrings(balances.filter((balance) => balance.rewardSubtype === 'GENESIS').map((balance) => balance.amount))) : '--',
+      available: settlementReadable ? formatNplAmount(sumAtomicStrings(balances.filter((balance) => balance.rewardSubtype === 'GENESIS' && balance.state === 'AVAILABLE').map((balance) => balance.amount))) : '--',
+      locked: settlementReadable ? formatNplAmount(sumAtomicStrings(balances.filter((balance) => balance.rewardSubtype === 'GENESIS' && balance.state === 'LOCKED').map((balance) => balance.amount))) : '--',
       copy: '节点收益到账后，可以在收益中心申请结算。',
     },
     {
       title: '区域代理 NPL',
-      total: readable ? formatNplAmount(sumAtomicStrings(balances.filter((balance) => balance.rewardSubtype && regionalSubtypes.includes(balance.rewardSubtype)).map((balance) => balance.amount))) : '--',
-      available: readable ? formatNplAmount(sumAtomicStrings(balances.filter((balance) => balance.rewardSubtype && regionalSubtypes.includes(balance.rewardSubtype) && balance.state === 'AVAILABLE').map((balance) => balance.amount))) : '--',
-      locked: readable ? formatNplAmount(sumAtomicStrings(balances.filter((balance) => balance.rewardSubtype && regionalSubtypes.includes(balance.rewardSubtype) && balance.state === 'LOCKED').map((balance) => balance.amount))) : '--',
+      total: settlementReadable ? formatNplAmount(sumAtomicStrings(balances.filter((balance) => balance.rewardSubtype && regionalSubtypes.includes(balance.rewardSubtype)).map((balance) => balance.amount))) : '--',
+      available: settlementReadable ? formatNplAmount(sumAtomicStrings(balances.filter((balance) => balance.rewardSubtype && regionalSubtypes.includes(balance.rewardSubtype) && balance.state === 'AVAILABLE').map((balance) => balance.amount))) : '--',
+      locked: settlementReadable ? formatNplAmount(sumAtomicStrings(balances.filter((balance) => balance.rewardSubtype && regionalSubtypes.includes(balance.rewardSubtype) && balance.state === 'LOCKED').map((balance) => balance.amount))) : '--',
       copy: '区域收益按下单时确认的地址归属统计。',
     },
   ] as const;
+}
+
+type BnmSummaryBalance = Readonly<{ state: 'LOCKED' | 'AVAILABLE'; amount: string }>;
+
+function orderBnmBalances(runtime: MallRuntimeValue): BnmSummaryBalance[] {
+  return runtime.orders.flatMap((order) => order.balances.flatMap<BnmSummaryBalance>((balance) => {
+    if (balance.asset !== 'BNM_POINTS') return [];
+    if (balance.state === 'AVAILABLE') return [{ state: 'AVAILABLE', amount: balance.amount }];
+    if (balance.state === 'LOCKED' || balance.state === 'DISPUTED') return [{ state: 'LOCKED', amount: balance.amount }];
+    return [];
+  }));
 }
 
 function sumAtomicStrings(values: readonly string[]) {

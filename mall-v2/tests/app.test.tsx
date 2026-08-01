@@ -458,6 +458,22 @@ describe('Mall V2 payment consumer', () => {
     expect(within(regional).getByText('0.00 NPL')).toBeTruthy();
   });
 
+  it('keeps BNM visible from order projections when the settlement ledger retry is needed', async () => {
+    const user = userEvent.setup();
+    renderAt('/assets', readyServices({
+      listOrders: vi.fn().mockResolvedValue({ orders: [deliveryOrder], nextCursor: null }),
+      getOrderTarget: vi.fn().mockResolvedValue(deliveryOrderTarget),
+      listSettlements: vi.fn().mockRejectedValue(new CoreClientError('ExternalBlocked', '收益账本同步失败')),
+    }));
+
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+    const summary = await screen.findByRole('heading', { name: '收益概览' });
+    const panel = summary.closest('section')!;
+    const bnm = within(panel).getByRole('heading', { name: 'BNM 积分' }).closest('article')!;
+    await waitFor(() => expect(within(bnm).getAllByText('120.00 BNM')).toHaveLength(2));
+    expect(within(bnm).getByText('0.00 BNM')).toBeTruthy();
+  });
+
   it('labels seckill and shopping counts as loaded-page statistics without placeholders', async () => {
     const user = userEvent.setup();
     const seckillOrder = { ...deliveryOrder, orderId: `0x${'e'.repeat(64)}`, orderKind: 'SECKILL' as const };
