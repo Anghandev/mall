@@ -4848,6 +4848,64 @@ test('seckill quote locks both inventories and final classification releases the
   }
 });
 
+test('public seckill current shows the next preheat session before stale settling sessions', async () => {
+  const db = await createBusinessDatabase();
+  try {
+    const now = new Date('2033-05-18T05:00:00.000Z');
+    await seedCatalog(db, 2);
+    await db.query(
+      `INSERT INTO core.products (
+         product_id, chain_product_id, merchant_id, version, title, lifecycle_state,
+         product_policy_hash, merchant_concession_bps, metadata, subtitle,
+         rich_detail, default_freight_usdt, fulfillment_modes
+       ) VALUES ('product-2', $1, 'merchant-1', 1, 'Upcoming Product', 'ACTIVE', $2, 2500,
+         '{}', 'Next session product', '{"blocks":[]}', 5, '["DELIVERY","PICKUP"]')`,
+      [`0x${'d'.repeat(64)}`, HASH],
+    );
+    await db.query(
+      `INSERT INTO core.skus (
+         sku_id, chain_sku_id, product_id, sku_version, attributes, list_price_usdt,
+         merchant_cost_usdt, stock_total, stock_available, lifecycle_state
+       ) VALUES ('sku-2', $1, 'product-2', 1, '{}', 100, 60, 1, 1, 'ACTIVE')`,
+      [`0x${'e'.repeat(64)}`],
+    );
+    const staleSettlingSessionId = `0x${'a'.repeat(64)}`;
+    const upcomingSessionId = `0x${'b'.repeat(64)}`;
+    await insertLiveSeckillSession(
+      db,
+      staleSettlingSessionId,
+      new Date(now.getTime() - 2 * 60 * 60_000),
+      90,
+      1,
+    );
+    await db.query(
+      `INSERT INTO core.seckill_sessions (
+         session_id, policy_version, merchant_id, product_id, sku_id,
+         product_policy_hash, starts_at, main_deadline, relay_deadline,
+         inventory, seckill_list_price_usdt, phase, snapshot
+       ) VALUES ($1, 1, 'merchant-1', 'product-2', 'sku-2', $2,
+         $3, $4, $5, 1, 90, 'PREHEAT', '{}')`,
+      [
+        upcomingSessionId,
+        HASH,
+        new Date(now.getTime() + 5 * 60_000),
+        new Date(now.getTime() + 65 * 60_000),
+        new Date(now.getTime() + 6 * 60_000),
+      ],
+    );
+
+    const currentSession = await new SeckillService({
+      transactions: transactionAdapter(db),
+      clock: () => now,
+    }).current();
+    assert.ok(currentSession);
+    assert.equal(currentSession.sessionId, upcomingSessionId);
+    assert.equal(currentSession.phase, 'PREHEAT');
+  } finally {
+    await db.close();
+  }
+});
+
 test('public seckill projections hide mainnet micro-test sessions', async () => {
   const db = await createBusinessDatabase();
   try {

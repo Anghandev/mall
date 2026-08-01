@@ -88,11 +88,15 @@ export class SeckillService {
            AND ${publicSessionPredicate()}
          ORDER BY
            CASE
+             WHEN session.phase <> 'SETTLED'
+               AND $1 >= session.starts_at
+               AND $1 < session.main_deadline
+               AND $1 < session.relay_deadline THEN 0
+             WHEN session.phase <> 'SETTLED' AND $1 < session.starts_at THEN 1
              WHEN session.phase = 'SETTLED' THEN 3
-             WHEN $1 < session.starts_at THEN 2
-             WHEN $1 < session.main_deadline AND $1 < session.relay_deadline THEN 0
-             ELSE 1
+             ELSE 2
            END,
+           CASE WHEN session.phase <> 'SETTLED' AND $1 < session.starts_at THEN session.starts_at END ASC,
            session.starts_at DESC
          LIMIT 1`,
         [now],
