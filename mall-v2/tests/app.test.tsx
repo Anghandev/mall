@@ -1566,6 +1566,44 @@ describe('Mall V2 payment consumer', () => {
     }));
   });
 
+  it('allows live seckill checkout when ordinary stock is fully locked into the session', async () => {
+    const createSeckillQuote = vi.fn<CoreClient['createSeckillQuote']>().mockResolvedValue(seckillQuote());
+    const lockedForSeckillProduct = {
+      ...product,
+      skus: product.skus.map((sku) => sku.seckill ? {
+        ...sku,
+        stockAvailable: '0',
+        seckill: {
+          ...sku.seckill,
+          inventory: { ...sku.seckill.inventory, total: '100', sold: '0', reserved: '0', available: '100' },
+        },
+      } : sku),
+    };
+    const user = userEvent.setup();
+    renderAt('/seckill', readyServices({
+      getCurrentSeckillSession: vi.fn().mockResolvedValue(seckillSession({
+        inventory: { total: '100', sold: '0', reserved: '0', available: '100' },
+      })),
+      listCatalog: vi.fn().mockResolvedValue([lockedForSeckillProduct]),
+      createSeckillQuote,
+    }));
+
+    await user.click(await screen.findByRole('button', { name: '立即抢购' }));
+    await user.click(screen.getByRole('button', { name: '我已阅读并确认规则' }));
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+    await prepareDeliveryTarget(user);
+
+    const quoteButton = await screen.findByRole('button', { name: '生成秒杀报价' });
+    expect((quoteButton as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByText('本场剩余库存不足，请减少购买数量。')).toBeNull();
+
+    await user.click(quoteButton);
+    await screen.findByRole('heading', { name: '付款明细' });
+    expect(createSeckillQuote).toHaveBeenCalledWith('buyer-session', seckillSessionId, expect.objectContaining({
+      skuId: product.skus[1]!.skuId,
+    }));
+  });
+
   it('blocks stale seckill checkout quotes when the selected activity SKU is sold out', async () => {
     const createSeckillQuote = vi.fn<CoreClient['createSeckillQuote']>().mockResolvedValue(seckillQuote());
     const soldOutProduct = {

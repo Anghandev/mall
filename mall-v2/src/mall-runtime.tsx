@@ -1142,7 +1142,6 @@ export function MallRuntimeProvider({
           const seckillAvailable = minBigInt(
             BigInt(seckillSession.inventory.available),
             BigInt(selectedSku.seckill.inventory.available),
-            BigInt(selectedSku.stockAvailable),
           );
           if (seckillAvailable === 0n) {
             throw new CoreClientError('InventoryUnavailable', '本场已抢完，请返回秒杀大厅查看下一场。');
@@ -1423,7 +1422,6 @@ export function MallRuntimeProvider({
       const seckillAvailable = minBigInt(
         BigInt(seckillSession?.inventory.available ?? '0'),
         BigInt(selectedSku.seckill.inventory.available),
-        BigInt(selectedSku.stockAvailable),
       );
       if (seckillAvailable === 0n) {
         throw new CoreClientError('InventoryUnavailable', '本场已抢完，请返回秒杀大厅查看下一场。');
@@ -1432,7 +1430,7 @@ export function MallRuntimeProvider({
         throw new CoreClientError('InventoryUnavailable', '本场剩余库存不足，请减少购买数量。');
       }
     }
-    if (BigInt(selectedSku.stockAvailable) < BigInt(quantity)) {
+    if (!selectedSeckillSessionId && BigInt(selectedSku.stockAvailable) < BigInt(quantity)) {
       throw new CoreClientError('InventoryUnavailable', '抱歉，该规格商品刚刚已被抢光，请重新选择规格！');
     }
     const target = checkoutTarget;

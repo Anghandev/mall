@@ -2768,7 +2768,7 @@ function checkoutQuantityLimit(runtime: MallRuntimeValue) {
   if (!runtime.selectedSeckillSessionId) return stockAvailable;
   const sessionAvailable = BigInt(runtime.seckillSession?.inventory.available ?? '0');
   const skuSeckillAvailable = BigInt(sku.seckill?.inventory.available ?? '0');
-  return [stockAvailable, sessionAvailable, skuSeckillAvailable].reduce((min, value) => value < min ? value : min);
+  return sessionAvailable < skuSeckillAvailable ? sessionAvailable : skuSeckillAvailable;
 }
 
 function quoteButtonLabel(runtime: MallRuntimeValue) {
