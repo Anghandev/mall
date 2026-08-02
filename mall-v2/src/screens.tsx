@@ -202,7 +202,7 @@ export function SeckillScreen() {
         <SeckillClosedStatus session={session} />
       )}
 
-      <SeckillFeaturedProduct session={session} />
+      <SeckillFeaturedProduct product={seckillProduct} session={session} />
 
       <SeckillActionCard
         canConfigure={canConfigure}
@@ -301,16 +301,30 @@ function SeckillClosedStatus({ session }: { session: PublishedSeckillSessionProj
 }
 
 function SeckillFeaturedProduct({
+  product,
   session,
 }: {
+  product: CatalogProduct | null;
   session: PublishedSeckillSessionProjection | null;
 }) {
   if (!session) return null;
+  const imageAssetId = product?.mainImageAssetIds[0] ?? null;
   const skuText = skuLabel(session.product.attributes, session.product.skuId);
   return (
     <section className="seckill-featured-product" aria-labelledby="seckill-product-title">
-      <div className="seckill-featured-product__media" aria-hidden="true">
-        <PackageOpen size={26} />
+      <div className="seckill-featured-product__media">
+        {imageAssetId && product ? (
+          <PublicCatalogMedia
+            alt={session.product.title}
+            assetId={imageAssetId}
+            expectedPurpose="PRODUCT_IMAGE"
+            expectedResourceId={product.productId}
+            expectedResourceType="PRODUCT"
+            kind="image"
+          />
+        ) : (
+          <PackageOpen aria-hidden="true" size={26} />
+        )}
       </div>
       <div className="seckill-featured-product__body">
         <p className="eyebrow">当前抢购商品</p>
@@ -532,8 +546,17 @@ export function MallScreen() {
               key={product.productId}
               to={productPath}
             >
-              <div className="product-card__visual" aria-hidden="true">
-                <ShoppingBag size={26} />
+              <div className="product-card__visual">
+                {product.mainImageAssetIds[0] ? (
+                  <PublicCatalogMedia
+                    alt={product.title}
+                    assetId={product.mainImageAssetIds[0]}
+                    expectedPurpose="PRODUCT_IMAGE"
+                    expectedResourceId={product.productId}
+                    expectedResourceType="PRODUCT"
+                    kind="image"
+                  />
+                ) : <ShoppingBag aria-hidden="true" size={26} />}
               </div>
               <div className="product-card__body">
                 <h2>{product.title}</h2>
@@ -582,7 +605,7 @@ export function ProductDetailScreen({ productId }: { productId: string }) {
 
   return (
     <div className="screen screen--detail screen--product-detail">
-      <ScreenHeader eyebrow="商品详情" title="商品详情" description="商品、规格与库存均由系统实时确认" backTo="/mall" />
+      <ScreenHeader eyebrow="商品详情" title="商品详情" description="商品、图片、规格与库存均由系统实时确认" backTo="/mall" />
 
       {runtime.catalogState === 'loading' ? <div className="product-detail-skeleton" aria-label="正在加载商品详情"><span /><span /><span /></div> : null}
       {runtime.catalogState === 'error' ? (
@@ -599,6 +622,31 @@ export function ProductDetailScreen({ productId }: { productId: string }) {
 
       {product ? (
         <>
+          <section className="product-detail-gallery" aria-label={`${product.title} 商品媒体`}>
+            {product.mainImageAssetIds.map((assetId, index) => (
+              <PublicCatalogMedia
+                alt={`${product.title} 商品图 ${index + 1}`}
+                assetId={assetId}
+                expectedPurpose="PRODUCT_IMAGE"
+                expectedResourceId={product.productId}
+                expectedResourceType="PRODUCT"
+                key={assetId}
+                kind="image"
+              />
+            ))}
+            {product.videoAssetId ? (
+              <PublicCatalogMedia
+                alt={`${product.title} 商品视频`}
+                assetId={product.videoAssetId}
+                expectedPurpose="PRODUCT_VIDEO"
+                expectedResourceId={product.productId}
+                expectedResourceType="PRODUCT"
+                kind="video"
+              />
+            ) : null}
+            {product.mainImageAssetIds.length === 0 && !product.videoAssetId ? <ImageOff aria-hidden="true" size={30} /> : null}
+          </section>
+
           <section className="product-detail-copy" aria-labelledby="product-detail-title">
             <div>
               <p className="eyebrow">商品编号 · {shortHash(product.productId)}</p>
@@ -807,14 +855,43 @@ function StoreRow({ store }: { store: MerchantStore }) {
   );
 }
 
-function StoreMediaGallery({ store, compact = false }: { store: MerchantStore; compact?: boolean }) {
+function StoreMediaGallery({
+  store,
+  compact = false,
+  hideImages = false,
+}: {
+  store: MerchantStore;
+  compact?: boolean;
+  hideImages?: boolean;
+}) {
+  if (hideImages || store.imageAssetIds.length === 0) {
+    return (
+      <div
+        className={`store-media-gallery store-media-gallery--placeholder${compact ? ' store-media-gallery--compact' : ''}`}
+        aria-label={`${store.name} 门店信息`}
+      >
+        <Store aria-hidden="true" size={compact ? 16 : 20} />
+        <span>{compact ? '自提门店' : '门店信息'}</span>
+      </div>
+    );
+  }
+
   return (
     <div
-      className={`store-media-gallery store-media-gallery--placeholder${compact ? ' store-media-gallery--compact' : ''}`}
-      aria-label={`${store.name} 门店信息`}
+      className={`store-media-gallery${compact ? ' store-media-gallery--compact' : ''}`}
+      aria-label={`${store.name} 门店图片`}
     >
-      <Store aria-hidden="true" size={compact ? 16 : 20} />
-      <span>{compact ? '自提门店' : '门店信息'}</span>
+      {store.imageAssetIds.map((assetId, index) => (
+        <PublicCatalogMedia
+          key={assetId}
+          alt={`${store.name} 门店图片 ${index + 1}`}
+          assetId={assetId}
+          expectedPurpose="STORE_IMAGE"
+          expectedResourceId={store.storeId}
+          expectedResourceType="STORE"
+          kind="image"
+        />
+      ))}
     </div>
   );
 }
@@ -2468,7 +2545,7 @@ function CheckoutTargetSelector() {
           {pickupStoreScopeReady && runtime.storesState === 'error' ? <p className="field-error">门店列表读取失败，无法创建自提目标。</p> : null}
           {pickupStores.map((store) => (
             <article className="pickup-option" key={store.storeId}>
-              <StoreMediaGallery store={store} compact />
+              <StoreMediaGallery store={store} compact hideImages />
               <div className="pickup-option__selection">
                 <span>
                   <strong>{store.name}</strong>
