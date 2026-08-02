@@ -223,26 +223,30 @@ describe('Mall V2 payment consumer', () => {
     expect(createPublicMediaReadAccess).toHaveBeenCalledWith(product.mainImageAssetIds[0]!.toLowerCase());
   });
 
-  it('keeps the V2 mall tabs reachable and excludes block blast from this release', async () => {
+  it('keeps all five primary tabs reachable and preserves the existing shell', async () => {
+    const user = userEvent.setup();
     renderAt();
 
     const navigation = screen.getByRole('navigation', { name: '主要导航' });
-    const labels = ['秒杀', '商城', '门店', '资产'];
+    const labels = ['秒杀', '商城', '门店', '爆区块', '资产'];
     for (const label of labels) {
       expect(within(navigation).getByRole('link', { name: label })).toBeTruthy();
     }
     expect(Array.from(navigation.querySelectorAll('a')).map((link) => link.textContent?.trim())).toEqual(labels);
-    expect(within(navigation).queryByRole('link', { name: '爆区块' })).toBeNull();
+    await user.click(within(navigation).getByRole('link', { name: '爆区块' }));
+    expect(await screen.findByRole('heading', { name: '爆区块' })).toBeTruthy();
+    expect(await screen.findByText(/DEFI共识顶层逻辑/)).toBeTruthy();
   });
 
-  it('does not mount the block blast write surface under the V2 mall shell', async () => {
-    renderAt('/block-blast', readyServices());
+  it('keeps the block burst route mounted and fail-closed without production config', async () => {
+    renderAt('/block-blast');
 
-    expect(await screen.findByRole('heading', { name: '页面不存在' })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: '打入 NPL' })).toBeNull();
-    expect(screen.queryByRole('button', { name: '领取本金' })).toBeNull();
-    expect(screen.queryByRole('button', { name: '领取奖励' })).toBeNull();
-    expect(screen.queryByRole('button', { name: '爆区块' })).toBeNull();
+    expect(await screen.findByRole('heading', { name: '爆区块' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: '生产合约未配置' })).toBeTruthy();
+    expect(await screen.findByText(/测试入口不作为生产入口/)).toBeTruthy();
+    for (const label of ['打入 NPL', '领取本金', '领取奖励', '爆区块']) {
+      expect(screen.getByRole('button', { name: label }).hasAttribute('disabled')).toBe(true);
+    }
   });
 
   it('renders the real buyer profile, UID and canonical overview counts', async () => {

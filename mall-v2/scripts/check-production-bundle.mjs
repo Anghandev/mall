@@ -40,9 +40,6 @@ for (const root of roots) {
     if (file.startsWith('dist/') && /@abu24k\/core-artifacts\/contracts/.test(content)) {
       throw new Error(`Core contract artifact bare specifier entered browser bundle: ${file}`);
     }
-    if (file.startsWith('dist/') && /block-blast|BlockBurst|claimPrincipal|claimReward|explode\(\)|生产写链/.test(content)) {
-      throw new Error(`Block blast write surface entered Mall V2 production bundle: ${file}`);
-    }
   }
 }
 

@@ -4,6 +4,7 @@ import {
   MapPin,
   ShoppingBag,
   WalletCards,
+  Zap,
 } from 'lucide-react';
 import { lazy, Suspense, useEffect } from 'react';
 import { BrowserRouter, Link, Navigate, useLocation } from 'react-router-dom';
@@ -12,6 +13,7 @@ import { productBaseline } from './bootstrap';
 import { brandAssetUrl, mallBasePath } from './deployment-paths';
 import { MallRuntimeProvider, useMallRuntime, type MallServices } from './mall-runtime';
 
+const BlockBurstScreen = lazy(() => import('./block-burst').then((module) => ({ default: module.BlockBurstScreen })));
 const ActivityScreen = lazy(() => import('./screens').then((module) => ({ default: module.ActivityScreen })));
 const AddressScreen = lazy(() => import('./screens').then((module) => ({ default: module.AddressScreen })));
 const AssetsScreen = lazy(() => import('./screens').then((module) => ({ default: module.AssetsScreen })));
@@ -30,6 +32,7 @@ const tabs = [
   { path: '/seckill', label: '秒杀', icon: Flame },
   { path: '/mall', label: '商城', icon: ShoppingBag },
   { path: '/stores', label: '门店', icon: MapPin },
+  { path: '/block-blast', label: '爆区块', icon: Zap },
   { path: '/assets', label: '资产', icon: CircleDollarSign },
 ] as const;
 
@@ -135,6 +138,11 @@ function MallShell() {
                 <StoresScreen />
               </section>
             ) : null}
+            {isPrimary && activeRoot === '/block-blast' ? (
+              <section aria-label="爆区块">
+                <BlockBurstScreen />
+              </section>
+            ) : null}
             {isPrimary && activeRoot === '/assets' ? (
               <section aria-label="我的资产">
                 <AssetsScreen />
@@ -219,6 +227,7 @@ function getActiveRoot(pathname: string) {
   if (pathname.startsWith('/checkout')) return '/mall';
   if (pathname.startsWith('/products')) return '/mall';
   if (pathname.startsWith('/stores')) return '/stores';
+  if (pathname.startsWith('/block-blast')) return '/block-blast';
   if (pathname.startsWith('/mall')) return '/mall';
   return '/seckill';
 }
