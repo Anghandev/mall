@@ -14,7 +14,7 @@
       "deployedCodeHash": "0xcfb17955f5e5c39c98db32d45ffc0079f7501e7621e2fb71bce13a4310d5e079",
       "normalizedRuntimeBytecodeHash": "0x43e83e1b072303cf71f58353698e458d4fbca796345133bf789ae8c138775337",
       "deploymentTxHash": "0xb427f9e8d77aa17d0d8f8a27f871cb8ffd48b24726162cc1114e33e87ea0d0ad",
-      "sourceVerified": false
+      "sourceVerified": true
     },
     "BeneficiaryRegistryV2": {
       "address": "0x07F9c2758FADc2aE5bd6341a763d2A00a4092E0F",
@@ -22,7 +22,7 @@
       "deployedCodeHash": "0xb084592cd8fc591f3e2c27f1844dbfdc11219c5d9b21aa7337fe7bce1c834808",
       "normalizedRuntimeBytecodeHash": "0xa2bc0200111bf3dc1d538bd66388d2f3339d207d704e208b8ef0c3365200aada",
       "deploymentTxHash": "0xee22cbfe9af4a4639713c685d7b7b16f2f23939be6ea4db0f9e7aff1d921c6e4",
-      "sourceVerified": false
+      "sourceVerified": true
     },
     "PaymentRouterV2": {
       "address": "0xaA943a60d44725D4D4a5E1C35C5C4a39ed544a7d",
@@ -30,7 +30,7 @@
       "deployedCodeHash": "0x45f2fe4a1aba464c00fa8ae9f83d9619299c7cd122a2092fa002efd7ad3b876d",
       "normalizedRuntimeBytecodeHash": "0xa8f0e155baef3b9ce58932a613dfdb2b75c4ad3bc8a7e5e4f3915741420d9deb",
       "deploymentTxHash": "0x7b82dd65b88595062145e12d4556719f4e2b5ecc923d8881bb781e497cab61a9",
-      "sourceVerified": false
+      "sourceVerified": true
     }
   },
   "routerCutover": {

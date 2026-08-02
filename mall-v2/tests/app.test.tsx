@@ -8,7 +8,6 @@ import {
   type NotificationInboxItem,
   type PaymentQuoteResponse,
 } from '@abu24k/core-artifacts';
-import { Interface } from 'ethers';
 import { MemoryRouter } from 'react-router-dom';
 import { vi } from 'vitest';
 
@@ -210,208 +209,26 @@ describe('Mall V2 payment consumer', () => {
     expect(createPublicMediaReadAccess).not.toHaveBeenCalledWith(product.videoAssetId!.toLowerCase());
   });
 
-  it('keeps all five primary tabs reachable and preserves the existing shell', async () => {
-    const user = userEvent.setup();
+  it('keeps the V2 mall tabs reachable and excludes block blast from this release', async () => {
     renderAt();
 
     const navigation = screen.getByRole('navigation', { name: '主要导航' });
-    const labels = ['秒杀', '商城', '门店', '爆区块', '资产'];
+    const labels = ['秒杀', '商城', '门店', '资产'];
     for (const label of labels) {
       expect(within(navigation).getByRole('link', { name: label })).toBeTruthy();
     }
     expect(Array.from(navigation.querySelectorAll('a')).map((link) => link.textContent?.trim())).toEqual(labels);
-    await user.click(within(navigation).getByRole('link', { name: '爆区块' }));
-    expect(await screen.findByRole('heading', { name: '爆区块' })).toBeTruthy();
-    expect(await screen.findByText(/DEFI共识顶层逻辑/)).toBeTruthy();
-    const accountHeading = await screen.findByRole('heading', { name: '我的本金权重' });
-    const nextHeading = await screen.findByRole('heading', { name: '下一次爆区块' });
-    expect(Boolean(accountHeading.compareDocumentPosition(nextHeading) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(within(navigation).queryByRole('link', { name: '爆区块' })).toBeNull();
   });
 
-  it('fails the block burst page closed until a production contract is configured', async () => {
-    renderAt('/block-blast');
+  it('does not mount the block blast write surface under the V2 mall shell', async () => {
+    renderAt('/block-blast', readyServices());
 
-    expect(await screen.findByRole('heading', { name: '爆区块' })).toBeTruthy();
-    expect(await screen.findByRole('heading', { name: '生产合约未配置' })).toBeTruthy();
-    expect(await screen.findByText(/测试入口不作为生产入口/)).toBeTruthy();
-    for (const label of ['打入 NPL', '领取本金', '领取奖励', '爆区块']) {
-      expect(screen.getByRole('button', { name: label }).hasAttribute('disabled')).toBe(true);
-    }
-  });
-
-  it('shows block burst RPC failures in plain Chinese', async () => {
-    vi.stubEnv('VITE_BLOCK_BURST_CHAIN_ID', '56');
-    vi.stubEnv('VITE_BLOCK_BURST_NPL_TOKEN', BLOCK_BURST_NPL);
-    vi.stubEnv('VITE_BLOCK_BURST_PROXY', BLOCK_BURST_PROXY);
-    vi.stubEnv('VITE_BLOCK_BURST_RPC_URL', '/block-burst/rpc');
-    vi.stubEnv('VITE_BLOCK_BURST_ENABLE_WRITES', 'false');
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
-      const body = JSON.parse(String(init?.body ?? '{}')) as { method: string };
-      if (body.method === 'eth_chainId') {
-        return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: '0x38' }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        });
-      }
-      return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, error: { message: 'execution reverted: Pool is paused' } }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      });
-    });
-
-    try {
-      renderAt('/block-blast', readyServices());
-
-      expect(await screen.findByRole('heading', { name: '链上读取失败' })).toBeTruthy();
-      expect(screen.getByText(/链上合约没有接受这次请求/)).toBeTruthy();
-      expect(document.body.textContent).not.toMatch(/execution reverted|Pool is paused/i);
-      expect(document.body.textContent).not.toMatch(/VITE_BLOCK_BURST_ENABLE_WRITES/);
-    } finally {
-      fetchSpy.mockRestore();
-      vi.unstubAllEnvs();
-    }
-  });
-
-  it('reads configured block burst pool and wallet state without Core coupling', async () => {
-    const user = userEvent.setup();
-    vi.stubEnv('VITE_BLOCK_BURST_CHAIN_ID', '56');
-    vi.stubEnv('VITE_BLOCK_BURST_NPL_TOKEN', BLOCK_BURST_NPL);
-    vi.stubEnv('VITE_BLOCK_BURST_PROXY', BLOCK_BURST_PROXY);
-    vi.stubEnv('VITE_BLOCK_BURST_RPC_URL', '/block-burst/rpc');
-    vi.stubEnv('VITE_BLOCK_BURST_ENABLE_WRITES', 'false');
-    const fetchSpy = mockBlockBurstRpc({ wallet: BLOCK_BURST_GUEST });
-    const authenticate = vi.fn().mockRejectedValue(new Error('Core login blocked'));
-    const previousEthereum = (globalThis as typeof globalThis & { ethereum?: unknown }).ethereum;
-    Object.defineProperty(globalThis, 'ethereum', {
-      configurable: true,
-      value: {
-        request: vi.fn(async ({ method }: { method: string }) => {
-          if (method === 'eth_chainId') return '0x38';
-          if (method === 'eth_requestAccounts') return [BLOCK_BURST_GUEST];
-          throw new Error(`unexpected wallet method ${method}`);
-        }),
-      },
-    });
-
-    try {
-      renderAt('/block-blast', readyServices({ authenticate }));
-
-      const nextSection = screen.getByRole('heading', { name: '下一次爆区块' }).closest('section')!;
-      expect(await within(nextSection).findByLabelText('当前期数2 / 10')).toBeTruthy();
-      expect(within(nextSection).getByLabelText('已入本金150.00 NPL')).toBeTruthy();
-      expect(within(nextSection).getByLabelText('本期目标200 万亿')).toBeTruthy();
-      expect(within(nextSection).getByLabelText('本期进度 0%')).toBeTruthy();
-      expect(within(nextSection).getByText('暂停中')).toBeTruthy();
-
-      await user.click(screen.getByRole('button', { name: '连接爆区块钱包' }));
-      expect(authenticate).not.toHaveBeenCalled();
-      expect(await screen.findByRole('button', { name: '切换爆区块钱包' })).toBeTruthy();
-      const accountSection = screen.getByRole('heading', { name: '我的本金权重' }).closest('section')!;
-      expect(await within(accountSection).findByLabelText('未领取本金25.00 NPL')).toBeTruthy();
-      expect(within(accountSection).getByLabelText('待领奖励3.00 NPL')).toBeTruthy();
-      expect(within(accountSection).getByLabelText('本金单数1')).toBeTruthy();
-      expect(await screen.findByText('本金单 #7')).toBeTruthy();
-      expect(fetchSpy).toHaveBeenCalled();
-      const rpcCalls = fetchSpy.mock.calls.map((call) => JSON.parse(String(call[1]?.body ?? '{}')) as { method: string; params?: [{ to?: string }] });
-      expect(new Set(rpcCalls.map((call) => call.method))).toEqual(new Set(['eth_chainId', 'eth_call']));
-      expect(rpcCalls.filter((call) => call.method === 'eth_call').every((call) => call.params?.[0]?.to?.toLowerCase() === BLOCK_BURST_PROXY.toLowerCase())).toBe(true);
-      expect(fetchSpy.mock.calls.every((call) => call[0] === '/block-burst/rpc')).toBe(true);
-    } finally {
-      fetchSpy.mockRestore();
-      if (previousEthereum === undefined) {
-        Reflect.deleteProperty(globalThis, 'ethereum');
-      } else {
-        Object.defineProperty(globalThis, 'ethereum', { configurable: true, value: previousEthereum });
-      }
-      vi.unstubAllEnvs();
-    }
-  });
-
-  it('colors the block burst tank by live progress thresholds', async () => {
-    vi.stubEnv('VITE_BLOCK_BURST_CHAIN_ID', '56');
-    vi.stubEnv('VITE_BLOCK_BURST_NPL_TOKEN', BLOCK_BURST_NPL);
-    vi.stubEnv('VITE_BLOCK_BURST_PROXY', BLOCK_BURST_PROXY);
-    vi.stubEnv('VITE_BLOCK_BURST_RPC_URL', '/block-burst/rpc');
-    vi.stubEnv('VITE_BLOCK_BURST_ENABLE_WRITES', 'false');
-    const fetchSpy = mockBlockBurstRpc({
-      activePrincipal: blockBurstNpl(140_000_000_000_000n),
-      currentTarget: blockBurstNpl(200_000_000_000_000n),
-    });
-
-    try {
-      renderAt('/block-blast', readyServices());
-
-      const tank = await screen.findByLabelText('本期进度 70%');
-      expect(tank.className).toContain('block-burst-tank--green');
-    } finally {
-      fetchSpy.mockRestore();
-      vi.unstubAllEnvs();
-    }
-  });
-
-  it('enables block burst approve and deposit only after explicit production write config', async () => {
-    const user = userEvent.setup();
-    vi.stubEnv('VITE_BLOCK_BURST_CHAIN_ID', '56');
-    vi.stubEnv('VITE_BLOCK_BURST_NPL_TOKEN', BLOCK_BURST_NPL);
-    vi.stubEnv('VITE_BLOCK_BURST_PROXY', BLOCK_BURST_PROXY);
-    vi.stubEnv('VITE_BLOCK_BURST_RPC_URL', '/block-burst/rpc');
-    vi.stubEnv('VITE_BLOCK_BURST_ENABLE_WRITES', 'true');
-    let allowance = 0n;
-    const fetchSpy = mockBlockBurstRpc({
-      wallet: BLOCK_BURST_GUEST,
-      getAllowance: () => allowance,
-      getBalance: () => blockBurstNpl(50n),
-    });
-    const sentTransactions: { from: string; to: string; data: string }[] = [];
-    const previousEthereum = (globalThis as typeof globalThis & { ethereum?: unknown }).ethereum;
-    Object.defineProperty(globalThis, 'ethereum', {
-      configurable: true,
-      value: {
-        request: vi.fn(async ({ method, params }: { method: string; params?: readonly unknown[] }) => {
-          if (method === 'eth_chainId') return '0x38';
-          if (method === 'eth_requestAccounts') return [BLOCK_BURST_GUEST];
-          if (method === 'eth_sendTransaction') {
-            const tx = params?.[0] as { from: string; to: string; data: string };
-            sentTransactions.push(tx);
-            if (tx.to.toLowerCase() === BLOCK_BURST_NPL.toLowerCase()) {
-              allowance = blockBurstNpl(10n);
-              return BLOCK_BURST_APPROVE_TX;
-            }
-            return BLOCK_BURST_DEPOSIT_TX;
-          }
-          throw new Error(`unexpected wallet method ${method}`);
-        }),
-      },
-    });
-
-    try {
-      const authenticate = vi.fn().mockRejectedValue(new Error('Core login blocked'));
-      renderAt('/block-blast', readyServices({ authenticate }));
-
-      await user.click(screen.getByRole('button', { name: '连接爆区块钱包' }));
-      expect(authenticate).not.toHaveBeenCalled();
-      expect(await screen.findByLabelText('未领取本金25.00 NPL')).toBeTruthy();
-      expect(await screen.findByText('钱包余额')).toBeTruthy();
-      await user.type(screen.getByLabelText('打入 NPL 数量'), '1.25');
-      await user.click(screen.getByRole('button', { name: /授权并打入 NPL|打入 NPL/ }));
-
-      expect(await screen.findByText(/已打入 1.25 NPL/)).toBeTruthy();
-      expect(sentTransactions).toHaveLength(2);
-      expect(sentTransactions[0]?.from.toLowerCase()).toBe(BLOCK_BURST_GUEST.toLowerCase());
-      expect(sentTransactions[0]?.to.toLowerCase()).toBe(BLOCK_BURST_NPL.toLowerCase());
-      expect(sentTransactions[0]?.data.startsWith(blockBurstTokenInterface.getFunction('approve')!.selector)).toBe(true);
-      expect(sentTransactions[1]?.to.toLowerCase()).toBe(BLOCK_BURST_PROXY.toLowerCase());
-      expect(sentTransactions[1]?.data.startsWith(blockBurstTestInterface.getFunction('deposit')!.selector)).toBe(true);
-      expect(fetchSpy.mock.calls.some((call) => JSON.parse(String(call[1]?.body ?? '{}')).method === 'eth_getTransactionReceipt')).toBe(true);
-    } finally {
-      fetchSpy.mockRestore();
-      if (previousEthereum === undefined) {
-        Reflect.deleteProperty(globalThis, 'ethereum');
-      } else {
-        Object.defineProperty(globalThis, 'ethereum', { configurable: true, value: previousEthereum });
-      }
-      vi.unstubAllEnvs();
-    }
+    expect(await screen.findByRole('heading', { name: '页面不存在' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '打入 NPL' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '领取本金' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '领取奖励' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '爆区块' })).toBeNull();
   });
 
   it('renders the real buyer profile, UID and canonical overview counts', async () => {
@@ -2663,158 +2480,6 @@ describe('Mall V2 payment consumer', () => {
 
 const HASH_3 = `0x${'3'.repeat(64)}`;
 
-const BLOCK_BURST_NPL = '0x4e8277ab31e4956b2cd48449793a57656dfc03d2';
-const BLOCK_BURST_PROXY = '0x8151d38ea70Cd39A99872C50C861cDDEC00a6770';
-const BLOCK_BURST_OWNER = '0x7003BBCE2b3f83F5b2dDC5A8C1b9b5b5289a1b83';
-const BLOCK_BURST_APPROVE_TX = `0x${'a'.repeat(64)}`;
-const BLOCK_BURST_DEPOSIT_TX = `0x${'b'.repeat(64)}`;
-const blockBurstTestInterface = new Interface([
-  'function getPoolState() view returns (tuple(address token,address owner,uint256 currentPhase,uint256 maxPhases,uint256 initialTarget,uint256 currentTarget,uint256 rewardBps,uint256 releaseDuration,uint256 accRewardPerShare,uint256 totalActivePrincipal,uint256 totalDeposited,uint256 reservedRewards,uint256 unallocatedNpl,bool pausedDeposit,bool pausedExplode,bool pausedClaimPrincipal,bool pausedClaimReward))',
-  'function getNextExplosionState() view returns (tuple(uint256 phase,uint256 target,uint256 reward,uint256 activePrincipal,uint256 unallocatedNpl,bool principalReady,bool rewardReady,bool canExplode))',
-  'function getUserState(address user) view returns (tuple(address wallet,uint256 activePrincipal,uint256 rewardCredit,uint256 rewardDebt,uint256 pendingReward,uint256 positionCount))',
-  'function getUserPositions(address user) view returns (tuple(uint256 id,uint256 amount,uint256 claimedPrincipal,uint256 activePrincipal,uint256 depositedAt,uint256 joinedPhase,bool closed,uint256 claimablePrincipal)[])',
-  'function deposit(uint256 amount) returns (uint256 positionId,uint256 received)',
-  'function claimPrincipal(uint256[] positionIds) returns (uint256 amount)',
-  'function claimReward() returns (uint256 amount)',
-  'function explode() returns (uint256 phase,uint256 reward)',
-]);
-const blockBurstTokenInterface = new Interface([
-  'function allowance(address owner,address spender) view returns (uint256)',
-  'function approve(address spender,uint256 amount) returns (bool)',
-  'function balanceOf(address owner) view returns (uint256)',
-]);
-
-function mockBlockBurstRpc(options: {
-  wallet?: string;
-  getAllowance?: () => bigint;
-  getBalance?: () => bigint;
-  initialTarget?: bigint;
-  currentTarget?: bigint;
-  currentPhase?: bigint;
-  maxPhases?: bigint;
-  activePrincipal?: bigint;
-  nextCanExplode?: boolean;
-  receiptForTx?: (txHash: string) => { transactionHash: string; status: string; blockNumber: string; from?: string; to?: string; blockHash?: string };
-} = {}) {
-  const {
-    wallet = BUYER,
-    getAllowance = () => blockBurstNpl(100n),
-    getBalance = () => blockBurstNpl(100n),
-    initialTarget = blockBurstNpl(100_000_000_000_000n),
-    currentTarget = blockBurstNpl(200_000_000_000_000n),
-    currentPhase = 2n,
-    maxPhases = 10n,
-    activePrincipal = blockBurstNpl(150n),
-    nextCanExplode = false,
-    receiptForTx = (txHash: string) => ({
-      transactionHash: txHash,
-      from: wallet,
-      to: txHash === BLOCK_BURST_APPROVE_TX ? BLOCK_BURST_NPL : BLOCK_BURST_PROXY,
-      status: '0x1',
-      blockNumber: '0x1234',
-      blockHash: `0x${'4'.repeat(64)}`,
-    }),
-  } = options;
-  const selectors = {
-    pool: blockBurstTestInterface.getFunction('getPoolState')!.selector,
-    next: blockBurstTestInterface.getFunction('getNextExplosionState')!.selector,
-    user: blockBurstTestInterface.getFunction('getUserState')!.selector,
-    positions: blockBurstTestInterface.getFunction('getUserPositions')!.selector,
-    allowance: blockBurstTokenInterface.getFunction('allowance')!.selector,
-    balance: blockBurstTokenInterface.getFunction('balanceOf')!.selector,
-  };
-  return vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
-    const body = JSON.parse(String(init?.body ?? '{}')) as { method: string; params?: unknown[] };
-    let result: unknown;
-    if (body.method === 'eth_chainId') {
-      result = '0x38';
-    } else if (body.method === 'eth_getTransactionReceipt') {
-      result = receiptForTx(String(body.params?.[0] ?? ''));
-    } else if (body.method === 'eth_getTransactionByHash') {
-      const txHash = String(body.params?.[0] ?? '');
-      result = {
-        hash: txHash,
-        from: wallet,
-        to: txHash === BLOCK_BURST_APPROVE_TX ? BLOCK_BURST_NPL : BLOCK_BURST_PROXY,
-        input: txHash === BLOCK_BURST_APPROVE_TX
-          ? blockBurstTokenInterface.encodeFunctionData('approve', [BLOCK_BURST_PROXY, blockBurstNpl(10n)])
-          : blockBurstTestInterface.encodeFunctionData('deposit', [blockBurstNpl(1n)]),
-      };
-    } else if (body.method === 'eth_call') {
-      const call = body.params?.[0] as { data?: string; to?: string } | undefined;
-      const to = call?.to?.toLowerCase();
-      const data = call?.data ?? '';
-      if (to === BLOCK_BURST_PROXY.toLowerCase() && data.startsWith(selectors.pool)) {
-        result = blockBurstTestInterface.encodeFunctionResult('getPoolState', [[
-          BLOCK_BURST_NPL,
-          BLOCK_BURST_OWNER,
-          currentPhase,
-          maxPhases,
-          initialTarget,
-          currentTarget,
-          1000n,
-          8640000n,
-          0n,
-          activePrincipal,
-          blockBurstNpl(160n),
-          blockBurstNpl(20n),
-          blockBurstNpl(4n),
-          false,
-          true,
-          false,
-          true,
-        ]]);
-      } else if (to === BLOCK_BURST_PROXY.toLowerCase() && data.startsWith(selectors.next)) {
-        result = blockBurstTestInterface.encodeFunctionResult('getNextExplosionState', [[
-          currentPhase >= maxPhases ? 0n : currentPhase + 1n,
-          currentTarget,
-          blockBurstNpl(20_000_000_000_000n),
-          activePrincipal,
-          blockBurstNpl(4n),
-          nextCanExplode,
-          nextCanExplode,
-          nextCanExplode,
-        ]]);
-      } else if (to === BLOCK_BURST_PROXY.toLowerCase() && data.startsWith(selectors.user)) {
-        result = blockBurstTestInterface.encodeFunctionResult('getUserState', [[
-          wallet,
-          blockBurstNpl(25n),
-          0n,
-          0n,
-          blockBurstNpl(3n),
-          1n,
-        ]]);
-      } else if (to === BLOCK_BURST_PROXY.toLowerCase() && data.startsWith(selectors.positions)) {
-        result = blockBurstTestInterface.encodeFunctionResult('getUserPositions', [[[
-          7n,
-          blockBurstNpl(30n),
-          blockBurstNpl(5n),
-          blockBurstNpl(25n),
-          1_721_000_000n,
-          1n,
-          false,
-          blockBurstNpl(2n),
-        ]]]);
-      } else if (to === BLOCK_BURST_NPL.toLowerCase() && data.startsWith(selectors.allowance)) {
-        result = blockBurstTokenInterface.encodeFunctionResult('allowance', [getAllowance()]);
-      } else if (to === BLOCK_BURST_NPL.toLowerCase() && data.startsWith(selectors.balance)) {
-        result = blockBurstTokenInterface.encodeFunctionResult('balanceOf', [getBalance()]);
-      } else {
-        throw new Error(`unexpected block burst calldata ${data}`);
-      }
-    } else {
-      throw new Error(`unexpected block burst rpc method ${body.method}`);
-    }
-    return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result }), {
-      status: 200,
-      headers: { 'content-type': 'application/json' },
-    });
-  });
-}
-
-function blockBurstNpl(amount: bigint) {
-  return amount * (10n ** 18n);
-}
 
 
 function offlineServices(): MallServices {
@@ -3014,4 +2679,3 @@ function testSessionToken(walletAddress: string, exp: number, jti = 'test-sessio
 }
 
 const BUYER = '0x1111111111111111111111111111111111111111';
-const BLOCK_BURST_GUEST = '0x2222222222222222222222222222222222222222';

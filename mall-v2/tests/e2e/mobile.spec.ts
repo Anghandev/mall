@@ -17,7 +17,6 @@ const screenshotRoutes = [
   { path: '/mall/seckill', name: 'seckill' },
   { path: '/mall/mall', name: 'mall' },
   { path: '/mall/stores', name: 'stores' },
-  { path: '/mall/block-blast', name: 'block-blast' },
   { path: '/mall/assets', name: 'assets' },
 ] as const;
 
@@ -38,13 +37,6 @@ test('primary mobile shell is usable and does not overflow', async ({ page }, te
       await expect(page.getByText(/00:00:[0-5][0-9]/)).toBeVisible();
     }
 
-    if (route.path === '/mall/block-blast') {
-      await expect(page.getByRole('heading', { name: '爆区块', exact: true })).toBeVisible();
-      await expect(page.getByRole('heading', { name: '生产合约未配置' })).toBeVisible();
-      for (const label of ['打入 NPL', '领取本金', '领取奖励', '爆区块']) {
-        await expect(page.getByRole('button', { name: label, exact: true })).toBeDisabled();
-      }
-    }
 
     if (route.path === '/mall/seckill' || testInfo.project.name === 'mobile-393') {
       await page.screenshot({
