@@ -838,6 +838,23 @@ describe('settlement-admin.16 Core HTTP consumer', () => {
     }));
   });
 
+  it('accepts delivery target snapshots without map coordinates', async () => {
+    const deliveryTargetWithoutCoordinates = {
+      ...deliveryTarget,
+      payload: {
+        ...deliveryTarget.payload,
+        longitude: null,
+        latitude: null,
+      },
+    };
+    globalThis.fetch = vi.fn(async () => jsonResponse({ target: deliveryTargetWithoutCoordinates })) as typeof fetch;
+
+    await expect(createCoreApi('https://core.example.test').getOrderFulfillmentTarget(
+      deliveryOrderId,
+      'merchant-session',
+    )).resolves.toEqual(deliveryTargetWithoutCoordinates);
+  });
+
   it('reads the stable filtered order page, complete rows and immutable target snapshots', async () => {
     const nextCursor = { createdAt: '2026-07-01T07:59:00.000Z', orderId: deliveryOrderId };
     const fetchMock = vi.fn()

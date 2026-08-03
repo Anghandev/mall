@@ -2249,8 +2249,8 @@ function parseFulfillmentTarget(input: unknown): FulfillmentTarget {
         recipientName: string(payload.recipientName, 'target.payload.recipientName'),
         phone: string(payload.phone, 'target.payload.phone'),
         address: string(payload.address, 'target.payload.address'),
-        longitude: finiteNumber(payload.longitude, 'target.payload.longitude'),
-        latitude: finiteNumber(payload.latitude, 'target.payload.latitude'),
+        longitude: nullableFiniteNumber(payload.longitude, 'target.payload.longitude'),
+        latitude: nullableFiniteNumber(payload.latitude, 'target.payload.latitude'),
         regionCode: regionCode(payload.regionCode, 'target.payload.regionCode'),
       },
     };
@@ -3318,6 +3318,10 @@ function regionCode(input: unknown, name: string) {
 function finiteNumber(input: unknown, name: string) {
   if (typeof input !== 'number' || !Number.isFinite(input)) invalid(`${name} must be a finite number`);
   return input;
+}
+
+function nullableFiniteNumber(input: unknown, name: string) {
+  return input === null ? null : finiteNumber(input, name);
 }
 
 function bps(input: unknown, name: string) {
