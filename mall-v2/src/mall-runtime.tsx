@@ -67,8 +67,6 @@ type SignedQuote = PaymentQuoteResponse | SeckillQuoteResponse;
 type LoadState = 'loading' | 'ready' | 'empty' | 'error';
 type CheckoutBusyKind = 'PICKUP_TARGET' | 'QUOTE' | 'PAYMENT';
 
-const VISIBLE_MERCHANT_ID = 'merchant:685108d6-c0dc-457b-8272-ae8bf9886501';
-const VISIBLE_MERCHANT_NAME = '尚至然一卡通';
 
 export interface PickupCredentialView {
   code: string;
@@ -1511,30 +1509,19 @@ export function MallRuntimeProvider({
   }
 
   function visibleCatalogProducts(products: readonly CatalogProduct[]) {
-    return products.filter((product) => {
-      const merchantId = catalogProductMerchantId(product);
-      if (merchantId) return merchantId === VISIBLE_MERCHANT_ID;
-      return product.title.includes(VISIBLE_MERCHANT_NAME) || product.subtitle.includes(VISIBLE_MERCHANT_NAME);
-    });
-  }
-
-  function catalogProductMerchantId(product: CatalogProduct) {
-    const direct = (product as CatalogProduct & { merchantId?: unknown }).merchantId;
-    if (typeof direct === 'string') return direct;
-    const metadataMerchantId = product.metadata.merchantId;
-    return typeof metadataMerchantId === 'string' ? metadataMerchantId : null;
+    return products;
   }
 
   function visibleMerchantStores(stores: readonly MerchantStore[]) {
-    return stores.filter((store) => store.merchantId === VISIBLE_MERCHANT_ID);
+    return stores;
   }
 
   function visibleSeckillSession(session: PublishedSeckillSessionProjection | null) {
-    return session?.merchantId === VISIBLE_MERCHANT_ID ? session : null;
+    return session;
   }
 
   function visibleSeckillSessions(sessions: readonly PublishedSeckillSessionProjection[]) {
-    return sessions.filter((session) => session.merchantId === VISIBLE_MERCHANT_ID);
+    return sessions;
   }
 
 function assertPickupTargetMatchesStore(target: PickupTarget, store: MerchantStore) {
