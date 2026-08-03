@@ -1,5 +1,5 @@
 import type { PolicyDraftProjection } from '@abu24k/core-artifacts';
-import { AlertTriangle, Ban, Check, FileDiff, KeyRound, LockKeyhole, Plus, RefreshCw, Save, ShieldCheck, Trash2, WalletCards } from 'lucide-react';
+import { AlertTriangle, Ban, Check, FileDiff, KeyRound, LockKeyhole, Plus, RefreshCw, Save, ShieldCheck, WalletCards } from 'lucide-react';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { CoreApiError, signTypedDataWithWallet } from '../coreApi';
 import { commonStateLabel, formatUsdtInput, humanizeError, shortId } from '../display';
@@ -14,7 +14,7 @@ import {
 } from '../settlementAdminApi';
 
 type Destination = { account: string; weightBps: string };
-type PolicyField = { name: string; label: string; kind: 'number' | 'percent' | 'usdt' | 'address' | 'hash'; locked?: boolean };
+type PolicyField = { name: string; label?: string; kind: 'number' | 'percent' | 'usdt' | 'address' | 'hash'; locked?: boolean };
 
 const governanceSteps = [
   { label: '平台权限检查', detail: '只有管理员可以发布新规则', icon: ShieldCheck },
@@ -51,18 +51,20 @@ const policyGroups: readonly { title: string; fields: readonly PolicyField[] }[]
     { name: 'requiredConfirmations', label: '最终确认数', kind: 'number', locked: true },
     { name: 'merchantGuaranteeMinimumUsdt', label: '历史链上资金字段（不作为经营门槛）', kind: 'usdt', locked: true },
   ] },
-  { title: '钱包与证据', fields: [
-    { name: 'platformServiceFeeWallet', label: '平台服务费收款钱包', kind: 'address' },
-    { name: 'usdtSettlementWallet', label: 'USDT 货款结算钱包', kind: 'address' },
-    { name: 'nplRewardWallet', label: 'NPL 奖励发放钱包', kind: 'address' },
-    { name: 'operationsWallet', label: '运营钱包', kind: 'address' },
-    { name: 'circulationPool', label: '流通池账户', kind: 'address' },
-    { name: 'concessionDestinationSetHash', label: '让利分配凭证', kind: 'hash' },
-    { name: 'decisionEvidenceHash', label: '商业决定凭证', kind: 'hash' },
-  ] },
 ] as const;
 
-const allPolicyFields = policyGroups.flatMap((group) => group.fields);
+const hiddenPolicyFields: readonly PolicyField[] = [
+  { name: 'platformServiceFeeWallet', kind: 'address' },
+  { name: 'usdtSettlementWallet', kind: 'address' },
+  { name: 'nplRewardWallet', kind: 'address' },
+  { name: 'operationsWallet', kind: 'address' },
+  { name: 'circulationPool', kind: 'address' },
+  { name: 'concessionDestinationSetHash', kind: 'hash' },
+  { name: 'decisionEvidenceHash', kind: 'hash' },
+];
+
+const editablePolicyGroups = policyGroups;
+const allPolicyFields = [...policyGroups.flatMap((group) => group.fields), ...hiddenPolicyFields];
 const frozenDefaults: Record<string, string> = {
   usdtPaymentBps: '7000', nplPaymentBps: '3000', nplBurnListPriceBps: '2000', nplRewardListPriceBps: '1000',
   platformFeeBps: '100', seckillPrizeBps: '0',
@@ -150,12 +152,10 @@ export function PolicyPage() {
             : <><div className="table-scroll"><table className="data-table"><thead><tr><th>草稿编号</th><th>版本</th><th>状态</th><th>校验</th><th>更新时间</th></tr></thead><tbody>{drafts.map((draft) => <tr key={draft.draftId} className={selectedId === draft.draftId ? 'is-selected' : undefined}><td><button className="table-link" type="button" onClick={() => setSelectedId(draft.draftId)} title={draft.draftId}>{shortId(draft.draftId)}</button></td><td>{draft.nextPolicyVersion}</td><td>{commonStateLabel(draft.state)}</td><td>{draft.validationErrors.length ? `${draft.validationErrors.length} 项需要处理` : '通过'}</td><td>{draft.updatedAt}</td></tr>)}</tbody></table></div>{!drafts.length && !loading ? <p className="muted-copy">当前没有政策草稿。</p> : null}</>}
         {canEdit ? <form className="governed-form" onSubmit={createDraft}>
           <fieldset><legend>版本绑定</legend><div className="form-grid"><label>规则文件编号<input value={rulesContentHash} onChange={(event) => setRulesContentHash(event.target.value)} placeholder="0x…" required /><small className="field-help">从内容中心已发布规则复制；系统保存完整编号。</small></label></div></fieldset>
-          {policyGroups.map((group) => <fieldset key={group.title}><legend>{group.title}</legend><div className="governed-field-grid">{group.fields.map((field) => <label key={field.name}>{field.label}<input inputMode={field.kind === 'number' ? 'numeric' : field.kind === 'percent' || field.kind === 'usdt' ? 'decimal' : undefined} value={fields[field.name] ?? ''} onChange={(event) => {
+          {editablePolicyGroups.map((group) => <fieldset key={group.title}><legend>{group.title}</legend><div className="governed-field-grid">{group.fields.map((field) => <label key={field.name}>{field.label}<input inputMode={field.kind === 'number' ? 'numeric' : field.kind === 'percent' || field.kind === 'usdt' ? 'decimal' : undefined} value={fields[field.name] ?? ''} onChange={(event) => {
             if (field.locked) return;
             setFields((current) => ({ ...current, [field.name]: event.target.value }));
           }} disabled={field.locked} readOnly={field.locked} />{field.locked ? <small className="field-help">固定规则，不可修改。</small> : null}</label>)}</div></fieldset>)}
-          <DestinationEditor title="创世节点奖励目的账户" value={genesisNodeDestinations} onChange={setGenesisNodeDestinations} />
-          <DestinationEditor title="运营奖励目的账户" value={operationsDestinations} onChange={setOperationsDestinations} />
           <div className="governed-form-actions"><button className="button button-primary" type="submit" disabled={loading}><Plus aria-hidden="true" />创建新草稿</button><button className="button button-quiet" type="button" onClick={() => void saveDraft()} disabled={!selected || !hasUnsavedChanges || loading}><Save aria-hidden="true" />保存选中草稿</button><span className={hasUnsavedChanges ? 'status-chip status-warning' : 'status-chip status-ready'}>{hasUnsavedChanges ? '存在未保存修改' : '编辑值与草稿一致'}</span></div>
         </form> : null}
       </article>
@@ -167,7 +167,6 @@ export function PolicyPage() {
           <details className="technical-details">
             <summary>发布核验信息</summary>
             <dl className="definition-grid"><div><dt>草稿凭证</dt><dd><code>{selected.policyHash ?? '待校验'}</code></dd></div><div><dt>执行记录</dt><dd><code>{selected.executionTxHash ?? '待执行'}</code></dd></div></dl>
-            <div className="value-comparison"><div><span>系统保存的草稿值</span><code>{canonicalJson(selected.payload)}</code></div><div><span>当前编辑值</span><code>{canonicalJson(editedPayload)}</code></div></div>
           </details>
         </> : null}
         <button className="button button-primary button-full" type="button" onClick={() => void signSecondary()} disabled={!isAdmin || !selected || hasUnsavedChanges || selected.validationErrors.length > 0 || loading}><Check aria-hidden="true" />请求并提交二次确认</button>
@@ -178,10 +177,6 @@ export function PolicyPage() {
     {error ? <ErrorView error={error} /> : null}{notice ? <p className="healthy-copy" role="status"><Check aria-hidden="true" />{notice}</p> : null}
     <section className="snapshot-rule"><LockKeyhole aria-hidden="true" /><div><strong>不可变快照边界</strong><p>新版本只影响未来报价、新订单和新场次；历史订单与进行中场次永久使用原快照。</p></div></section>
   </>;
-}
-
-function DestinationEditor({ title, value, onChange }: { title: string; value: Destination[]; onChange: (value: Destination[]) => void }) {
-  return <fieldset><legend>{title}</legend><div className="destination-list">{value.map((item, index) => <div className="destination-row" key={`${title}-${index}`}><label>账户 {index + 1}<input aria-label={`${title}账户 ${index + 1}`} value={item.account} onChange={(event) => onChange(value.map((entry, child) => child === index ? { ...entry, account: event.target.value } : entry))} placeholder="0x…" /></label><label>权重比例（%）<input aria-label={`${title}权重 ${index + 1}`} inputMode="decimal" value={item.weightBps} onChange={(event) => onChange(value.map((entry, child) => child === index ? { ...entry, weightBps: event.target.value } : entry))} /></label><button className="icon-button" type="button" title="删除目的账户" aria-label={`删除${title} ${index + 1}`} onClick={() => onChange(value.filter((_, child) => child !== index))}><Trash2 aria-hidden="true" /></button></div>)}</div><button className="button button-quiet" type="button" onClick={() => onChange([...value, { account: '', weightBps: '' }])}><Plus aria-hidden="true" />添加目的账户</button></fieldset>;
 }
 
 function initialFields() { return Object.fromEntries(allPolicyFields.map((field) => [field.name, frozenDefaults[field.name] ?? ''])); }
