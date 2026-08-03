@@ -154,9 +154,18 @@ export function FulfillmentCommandPanel({
           }, token);
           break;
         }
-        case 'RECORD_DELIVERY':
-          result = await recordDelivery(order.orderId, base, token);
+        case 'RECORD_DELIVERY': {
+          const evidence = await createOrderActionEvidence(order.orderId, {
+            action: 'RECORD_DELIVERY',
+            reasonCode: 'DELIVERY_CONFIRMED',
+            idempotencyKey: `${nextIdempotencyKey}:evidence`,
+          }, token);
+          result = await recordDelivery(order.orderId, {
+            idempotencyKey: `${nextIdempotencyKey}:command`,
+            evidenceHash: evidence.evidenceHash,
+          }, token);
           break;
+        }
         case 'DECIDE_FULFILLMENT_REQUEST':
           result = await decideFulfillmentRequest(order.orderId, {
             ...base,
@@ -221,7 +230,7 @@ export function FulfillmentCommandPanel({
         })}
       </select>
 
-      {definition.action !== 'RECORD_SHIPMENT' && definition.action !== 'OPEN_ARBITRATION' ? (
+      {definition.action !== 'RECORD_SHIPMENT' && definition.action !== 'RECORD_DELIVERY' && definition.action !== 'OPEN_ARBITRATION' ? (
         <>
           <label htmlFor="fulfillment-evidence">系统凭证编号</label>
           <input id="fulfillment-evidence" value={evidenceHash} onChange={(event) => setEvidenceHash(event.target.value)} autoComplete="off" placeholder="从系统证据里复制 0x 编号" />
@@ -320,7 +329,7 @@ function commandDisabledReason(input: {
   if (input.actionsLoading) return '正在读取当前订单能做什么。';
   if (!input.action) return `请先选择要执行的操作。`;
   if (!input.action.enabled) return `系统暂不允许“${input.definition.label}”：${reasonLabel(input.action.reasonCode)}${input.action.deadline ? ` · 截止 ${input.action.deadline}` : ''}`;
-  if (!['RECORD_SHIPMENT', 'OPEN_ARBITRATION'].includes(input.definition.action)
+  if (!['RECORD_SHIPMENT', 'RECORD_DELIVERY', 'OPEN_ARBITRATION'].includes(input.definition.action)
     && !bytes32Pattern.test(input.evidenceHash.trim())) return '请从系统证据里复制 0x 凭证编号；没有编号不要手填。';
   if (input.definition.action === 'RECORD_SHIPMENT') {
     if (!['SF', 'JD', 'YTO', 'ZTO', 'STO', 'EMS'].includes(input.carrierCode)) return '请选择快递公司。';

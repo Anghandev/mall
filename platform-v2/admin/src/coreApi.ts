@@ -312,7 +312,7 @@ export async function createOrderTrackingEvidence(
 
 export async function createOrderActionEvidence(
   orderId: string,
-  input: { action: 'OPEN_ARBITRATION'; reasonCode: string; idempotencyKey: string },
+  input: { action: 'OPEN_ARBITRATION' | 'RECORD_DELIVERY'; reasonCode: string; idempotencyKey: string },
   token: string,
 ): Promise<EvidenceEnvelopeProjection> {
   if (
@@ -1131,7 +1131,7 @@ function isShipmentResult(value: unknown): value is ShipmentResult {
 function isOrderEvidence(
   value: unknown,
   orderId: string,
-  action: 'RECORD_SHIPMENT' | 'OPEN_ARBITRATION',
+  action: 'RECORD_SHIPMENT' | 'OPEN_ARBITRATION' | 'RECORD_DELIVERY',
 ): value is EvidenceEnvelopeProjection {
   return isRecord(value)
     && value.artifactVersion === artifactVersion
