@@ -1743,14 +1743,14 @@ describe('04 store controls', () => {
     await user.click(await screen.findByRole('button', { name: '新增门店' }));
     const createForm = screen.getByRole('heading', { name: '新建门店草稿' }).closest('form')!;
     await user.type(within(createForm).getByLabelText('门店名称'), '浦东黄金店');
-    await user.type(within(createForm).getByLabelText('服务电话'), '021-87654321');
+    await user.type(within(createForm).getByLabelText('服务电话'), '（021） 8765-4321');
     await user.type(within(createForm).getByLabelText('营业时间'), '10:00-20:00');
     await user.type(within(createForm).getByLabelText('省'), '上海市');
     await user.type(within(createForm).getByLabelText('市'), '上海市');
     await user.type(within(createForm).getByLabelText('区县'), '浦东新区');
-    await user.type(within(createForm).getByLabelText('地区代码（6 位）'), '310115');
-    await user.type(within(createForm).getByLabelText('经度'), '121.500000');
-    await user.type(within(createForm).getByLabelText('纬度'), '31.200000');
+    await user.type(within(createForm).getByLabelText('地区代码（6 位）'), '３１０１１５');
+    expect(within(createForm).queryByLabelText('经度')).toBeNull();
+    expect(within(createForm).queryByLabelText('纬度')).toBeNull();
     await user.type(within(createForm).getByLabelText('详细地址'), '上海市浦东新区世纪大道 24 号');
     await user.click(within(createForm).getByRole('button', { name: '创建草稿' }));
 
@@ -1762,9 +1762,10 @@ describe('04 store controls', () => {
       province: '上海市',
       city: '上海市',
       district: '浦东新区',
+      phone: '0218765-4321',
       regionCode: '310115',
-      longitude: 121.5,
-      latitude: 31.2,
+      longitude: 116.397128,
+      latitude: 39.916527,
       idempotencyKey: expect.stringMatching(/^merchant-create-store-/),
     }), 'test-session');
     expect(screen.getByText('地址已固定')).toBeTruthy();
@@ -1810,7 +1811,7 @@ describe('04 store controls', () => {
     }), 'test-session');
   });
 
-  it('requires the full manual location and stays fail closed when Core rejects creation', async () => {
+  it('uses default hidden coordinates and stays fail closed when Core rejects creation', async () => {
     const createMerchantStore = vi.fn(async () => {
       throw new CoreApiError('ConfigurationRequired', '门店位置配置不可用');
     });
@@ -1829,9 +1830,8 @@ describe('04 store controls', () => {
 
     expect(createButton.disabled).toBe(true);
     await user.type(within(createForm).getByLabelText('地区代码（6 位）'), '310115');
-    expect(createButton.disabled).toBe(true);
-    await user.type(within(createForm).getByLabelText('经度'), '121.500000');
-    await user.type(within(createForm).getByLabelText('纬度'), '31.200000');
+    expect(within(createForm).queryByLabelText('经度')).toBeNull();
+    expect(within(createForm).queryByLabelText('纬度')).toBeNull();
     expect(createButton.disabled).toBe(false);
     await user.click(createButton);
 

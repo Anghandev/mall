@@ -7,7 +7,6 @@ import {
   type UpdateMerchantStoreRequest,
 } from '@abu24k/core-artifacts';
 import {
-  Crosshair,
   ImagePlus,
   MapPin,
   Plus,
@@ -53,8 +52,6 @@ type CreateDraft = {
   city: string;
   district: string;
   regionCode: string;
-  longitude: string;
-  latitude: string;
 };
 
 const emptyCreateDraft: CreateDraft = {
@@ -66,9 +63,9 @@ const emptyCreateDraft: CreateDraft = {
   city: '',
   district: '',
   regionCode: '',
-  longitude: '',
-  latitude: '',
 };
+
+const DEFAULT_STORE_COORDINATES = { longitude: 116.397128, latitude: 39.916527 } as const;
 
 const actionLabels: Record<MerchantStoreAction, string> = {
   UPDATE_PROFILE: '保存门店资料',
@@ -161,9 +158,8 @@ export function StoresPage() {
   const canClose = capabilityEnabled(selectedStore, 'CLOSE');
   const storeFormValid = Boolean(draft && validName(draft.name) && validPhone(draft.phone)
     && validBusinessHours(draft.businessHours) && draft.imageAssetIds.length <= 5);
-  const createFormValid = validName(createDraft.name) && validPhone(createDraft.phone)
-    && validBusinessHours(createDraft.businessHours)
-    && validManualRegion(createDraft);
+  const createFormProblems = createStoreValidationProblems(createDraft);
+  const createFormValid = createFormProblems.length === 0;
 
   function selectStore(storeId: string) {
     setSelectedStoreId(storeId);
@@ -194,15 +190,15 @@ export function StoresPage() {
     if (!session || !createFormValid || storeBusy) return;
     const value = {
       name: createDraft.name.trim(),
-      phone: createDraft.phone.trim(),
+      phone: normalizePhone(createDraft.phone),
       businessHours: createDraft.businessHours.trim(),
       address: createDraft.address.trim(),
       province: createDraft.province.trim(),
       city: createDraft.city.trim(),
       district: createDraft.district.trim(),
-      regionCode: createDraft.regionCode.trim(),
-      longitude: Number(createDraft.longitude.trim()),
-      latitude: Number(createDraft.latitude.trim()),
+      regionCode: normalizeRegionCode(createDraft.regionCode),
+      longitude: DEFAULT_STORE_COORDINATES.longitude,
+      latitude: DEFAULT_STORE_COORDINATES.latitude,
     };
     const scope = 'create-store';
     const input: CreateMerchantStoreRequest = { ...value, idempotencyKey: commandKey(scope, value) };
@@ -367,22 +363,20 @@ export function StoresPage() {
 
       {createOpen ? (
         <form className="section-block form-section store-create-panel" onSubmit={(event) => { event.preventDefault(); void createStore(); }} aria-labelledby="create-store-title">
-          <div className="section-heading"><div><p className="eyebrow">位置锁定</p><h2 id="create-store-title">新建门店草稿</h2></div><MapPin aria-hidden="true" size={19} /></div>
+          <div className="section-heading"><div><p className="eyebrow">门店资料</p><h2 id="create-store-title">新建门店草稿</h2></div><MapPin aria-hidden="true" size={19} /></div>
           <div className="store-create-grid">
             <div className="field"><label htmlFor="create-store-name">门店名称</label><input id="create-store-name" maxLength={100} onChange={(event) => setCreateDraft((current) => ({ ...current, name: event.target.value }))} required value={createDraft.name} /></div>
-            <div className="field"><label htmlFor="create-store-phone">服务电话</label><input id="create-store-phone" inputMode="tel" maxLength={20} onChange={(event) => setCreateDraft((current) => ({ ...current, phone: event.target.value }))} pattern="[+]?[0-9-]{7,20}" required value={createDraft.phone} /></div>
+            <div className="field"><label htmlFor="create-store-phone">服务电话</label><input id="create-store-phone" inputMode="tel" maxLength={24} onChange={(event) => setCreateDraft((current) => ({ ...current, phone: normalizePhone(event.target.value) }))} required value={createDraft.phone} /><FieldHelp>可直接粘贴手机号或座机号，空格、括号会自动处理。</FieldHelp></div>
             <div className="field"><label htmlFor="create-business-hours">营业时间</label><input id="create-business-hours" maxLength={240} onChange={(event) => setCreateDraft((current) => ({ ...current, businessHours: event.target.value }))} placeholder="09:00-18:00" required value={createDraft.businessHours} /></div>
             <div className="field"><label htmlFor="create-province">省</label><input id="create-province" maxLength={64} onChange={(event) => setCreateDraft((current) => ({ ...current, province: event.target.value }))} required value={createDraft.province} /></div>
             <div className="field"><label htmlFor="create-city">市</label><input id="create-city" maxLength={64} onChange={(event) => setCreateDraft((current) => ({ ...current, city: event.target.value }))} required value={createDraft.city} /></div>
             <div className="field"><label htmlFor="create-district">区县</label><input id="create-district" maxLength={64} onChange={(event) => setCreateDraft((current) => ({ ...current, district: event.target.value }))} required value={createDraft.district} /></div>
-            <div className="field"><label htmlFor="create-region-code">地区代码（6 位）</label><input id="create-region-code" inputMode="numeric" maxLength={6} onChange={(event) => setCreateDraft((current) => ({ ...current, regionCode: event.target.value }))} pattern="[0-9]{6}" required value={createDraft.regionCode} /><FieldHelp>不知道就找平台要，不要随便填。</FieldHelp></div>
-            <div className="field"><label htmlFor="create-longitude">经度</label><input id="create-longitude" inputMode="decimal" onChange={(event) => setCreateDraft((current) => ({ ...current, longitude: event.target.value }))} placeholder="例如 121.6147" required value={createDraft.longitude} /><FieldHelp>从地图复制门店真实经度，不能乱填。</FieldHelp></div>
-            <div className="field"><label htmlFor="create-latitude">纬度</label><input id="create-latitude" inputMode="decimal" onChange={(event) => setCreateDraft((current) => ({ ...current, latitude: event.target.value }))} placeholder="例如 38.9140" required value={createDraft.latitude} /><FieldHelp>从地图复制门店真实纬度。</FieldHelp></div>
+            <div className="field"><label htmlFor="create-region-code">地区代码（6 位）</label><input id="create-region-code" inputMode="numeric" maxLength={6} onChange={(event) => setCreateDraft((current) => ({ ...current, regionCode: normalizeRegionCode(event.target.value) }))} pattern="[0-9]{6}" required value={createDraft.regionCode} /><FieldHelp>只填 6 位地区代码；全角数字会自动处理。</FieldHelp></div>
           </div>
           <div className="field"><label htmlFor="create-address">详细地址</label><input id="create-address" maxLength={300} minLength={5} onChange={(event) => setCreateDraft((current) => ({ ...current, address: event.target.value }))} required value={createDraft.address} /></div>
-          <div className="signature-note"><Crosshair aria-hidden="true" size={17} />经纬度会写进门店证据，请从地图复制真实位置。创建后地址不能直接改，搬店请新建门店。</div>
+          <div className="signature-note"><MapPin aria-hidden="true" size={17} />定位坐标由平台默认写入，商家不用填写。地址创建后不能直接改，搬店请新建门店。</div>
           {storeFeedback ? <p className={`command-notice ${storeFeedback.tone}`} role={storeFeedback.tone === 'error' ? 'alert' : 'status'}>{storeFeedback.message}</p> : null}
-          {!createFormValid ? <p className="field-help" role="status">请先补齐名称、电话、营业时间、省市区、6 位地区代码、详细地址和真实经纬度，按钮才会亮。</p> : null}
+          {createFormProblems.length > 0 ? <p className="field-help" role="status">还差：{createFormProblems.join('、')}。</p> : null}
           <button className="button primary" disabled={!createFormValid || Boolean(storeBusy)} type="submit">{storeBusy === 'create' ? '创建中…' : '创建草稿'}</button>
         </form>
       ) : null}
@@ -434,10 +428,7 @@ export function StoresPage() {
               <div className="immutable-fieldset">
                 <div className="immutable-heading"><MapPin aria-hidden="true" size={20} /><div><strong>地址已固定</strong><span>这里不能直接改地址；门店搬迁请新建门店。</span></div></div>
                 <div className="field"><label htmlFor="store-address">详细地址</label><input disabled id="store-address" readOnly value={selectedStore.address} /></div>
-                <div className="two-column-fields">
-                  <div className="field"><label htmlFor="region-code">地区代码</label><input disabled id="region-code" readOnly value={selectedStore.regionCode} /></div>
-                  <details className="technical-details compact"><summary>定位信息</summary><code>{selectedStore.longitude}, {selectedStore.latitude}</code></details>
-                </div>
+                <div className="field"><label htmlFor="region-code">地区代码</label><input disabled id="region-code" readOnly value={selectedStore.regionCode} /></div>
               </div>
 
               <div className="store-capabilities" aria-label="现在能做的门店操作">{selectedStore.allowedActions.map((capability) => (
@@ -526,19 +517,30 @@ function validBusinessHours(value: string) {
   return value.trim().length >= 1 && value.trim().length <= 240;
 }
 
-function validManualRegion(draft: CreateDraft) {
-  return draft.address.trim().length >= 5
-    && draft.address.length <= 300
-    && [draft.province, draft.city, draft.district].every((value) => value.trim().length >= 1 && value.length <= 64)
-    && /^[0-9]{6}$/.test(draft.regionCode.trim())
-    && validCoordinate(draft.longitude, -180, 180)
-    && validCoordinate(draft.latitude, -90, 90);
+function createStoreValidationProblems(draft: CreateDraft) {
+  const problems: string[] = [];
+  if (!validName(draft.name)) problems.push('门店名称');
+  if (!validPhone(normalizePhone(draft.phone))) problems.push('服务电话');
+  if (!validBusinessHours(draft.businessHours)) problems.push('营业时间');
+  if ([draft.province, draft.city, draft.district].some((value) => value.trim().length < 1 || value.length > 64)) problems.push('省市区');
+  if (!/^[0-9]{6}$/.test(normalizeRegionCode(draft.regionCode))) problems.push('6 位地区代码');
+  if (draft.address.trim().length < 5 || draft.address.length > 300) problems.push('详细地址');
+  return problems;
 }
 
-function validCoordinate(value: string, min: number, max: number) {
-  if (!/^-?(?:0|[1-9][0-9]*)(?:\.[0-9]{1,8})?$/.test(value.trim())) return false;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed >= min && parsed <= max;
+function normalizePhone(value: string) {
+  const cleaned = toHalfWidth(value)
+    .replace(/[‐‑‒–—―−]/g, '-')
+    .replace(/[^0-9+\-]/g, '');
+  return cleaned.startsWith('+') ? `+${cleaned.slice(1).replace(/[+]/g, '')}` : cleaned.replace(/[+]/g, '');
+}
+
+function normalizeRegionCode(value: string) {
+  return toHalfWidth(value).replace(/[^0-9]/g, '').slice(0, 6);
+}
+
+function toHalfWidth(value: string) {
+  return value.replace(/[！-～]/g, (char) => String.fromCharCode(char.charCodeAt(0) - 0xfee0)).replace(/　/g, ' ');
 }
 
 function validImage(file: File) {
