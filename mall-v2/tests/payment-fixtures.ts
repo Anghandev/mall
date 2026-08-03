@@ -20,7 +20,7 @@ export const product: CatalogProduct = {
   chainProductId: hash('a'),
   title: '阿步 24K 黑金运动鞋',
   subtitle: '城市通勤与门店自提可选',
-  metadata: {},
+  metadata: { merchantId: 'merchant:685108d6-c0dc-457b-8272-ae8bf9886501' },
   mainImageAssetIds: [productImageAssetId],
   videoAssetId: productVideoAssetId,
   richDetail: { summary: '黑金鞋面，轻量缓震结构。' },

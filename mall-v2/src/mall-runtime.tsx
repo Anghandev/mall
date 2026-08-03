@@ -67,6 +67,9 @@ type SignedQuote = PaymentQuoteResponse | SeckillQuoteResponse;
 type LoadState = 'loading' | 'ready' | 'empty' | 'error';
 type CheckoutBusyKind = 'PICKUP_TARGET' | 'QUOTE' | 'PAYMENT';
 
+const VISIBLE_MERCHANT_ID = 'merchant:685108d6-c0dc-457b-8272-ae8bf9886501';
+const VISIBLE_MERCHANT_NAME = '尚至然一卡通';
+
 export interface PickupCredentialView {
   code: string;
   idempotencyKey?: string;
@@ -312,8 +315,9 @@ export function MallRuntimeProvider({
       .then(([nextBootstrap, products]) => {
         if (!active) return;
         setBootstrap(nextBootstrap);
-        setCatalog(products);
-        setCatalogState(products.length > 0 ? 'ready' : 'empty');
+        const visibleProducts = visibleCatalogProducts(products);
+        setCatalog(visibleProducts);
+        setCatalogState(visibleProducts.length > 0 ? 'ready' : 'empty');
       })
       .catch((reason: unknown) => {
         if (!active) return;
@@ -370,7 +374,11 @@ export function MallRuntimeProvider({
           ? current
           : [event, ...current].slice(0, 50));
         void services.core.getSeckillSession(sessionId)
-          .then((next) => setSeckillSession((current) => current?.sessionId === sessionId ? next : current))
+          .then((next) => {
+            const visible = visibleSeckillSession(next);
+            setSeckillSession((current) => current?.sessionId === sessionId ? visible : current);
+            if (!visible) setSeckillSessionState('empty');
+          })
           .catch((reason: unknown) => setSeckillRealtimeError(errorMessage(reason)));
       },
       onState: setSeckillRealtimeState,
@@ -415,9 +423,10 @@ export function MallRuntimeProvider({
     void services.core.listStores()
       .then((nextStores) => {
         if (!active || requestId !== storeListRequestId.current) return;
-        setStores(nextStores);
+        const visibleStores = visibleMerchantStores(nextStores);
+        setStores(visibleStores);
         setStoresScope({ productId: null });
-        setStoresState(nextStores.length > 0 ? 'ready' : 'empty');
+        setStoresState(visibleStores.length > 0 ? 'ready' : 'empty');
       })
       .catch(() => {
         if (!active || requestId !== storeListRequestId.current) return;
@@ -437,9 +446,10 @@ export function MallRuntimeProvider({
     void services.core.listStores(undefined, selectedProduct.productId)
       .then((nextStores) => {
         if (!active || requestId !== storeListRequestId.current) return;
-        setStores(nextStores);
+        const visibleStores = visibleMerchantStores(nextStores);
+        setStores(visibleStores);
         setStoresScope({ productId: selectedProduct.productId });
-        setStoresState(nextStores.length > 0 ? 'ready' : 'empty');
+        setStoresState(visibleStores.length > 0 ? 'ready' : 'empty');
       })
       .catch(() => {
         if (!active || requestId !== storeListRequestId.current) return;
@@ -546,8 +556,9 @@ export function MallRuntimeProvider({
         setSubmittedTxHash(recovered?.txHash ?? null);
         setSession(nextSession);
         setPickupCredentials(loadCachedPickupCredentials(nextSession.walletAddress));
-        setCatalog(products);
-        setCatalogState(products.length > 0 ? 'ready' : 'empty');
+        const visibleProducts = visibleCatalogProducts(products);
+        setCatalog(visibleProducts);
+        setCatalogState(visibleProducts.length > 0 ? 'ready' : 'empty');
         postLoginAttempt = connectionAttempt;
         postLoginSession = nextSession;
       });
@@ -559,8 +570,9 @@ export function MallRuntimeProvider({
       setCatalogState('loading');
       await run(async () => {
         const products = await services.core.listCatalog(session?.token);
-        setCatalog(products);
-        setCatalogState(products.length > 0 ? 'ready' : 'empty');
+        const visibleProducts = visibleCatalogProducts(products);
+        setCatalog(visibleProducts);
+        setCatalogState(visibleProducts.length > 0 ? 'ready' : 'empty');
       }, () => setCatalogState('error'));
     },
 
@@ -626,9 +638,10 @@ export function MallRuntimeProvider({
       await run(async () => {
         const nextStores = await services.core.listStores(regionCode, productId);
         if (requestId !== storeListRequestId.current) return;
-        setStores(nextStores);
+        const visibleStores = visibleMerchantStores(nextStores);
+        setStores(visibleStores);
         setStoresScope({ productId: productId ?? null });
-        setStoresState(nextStores.length > 0 ? 'ready' : 'empty');
+        setStoresState(visibleStores.length > 0 ? 'ready' : 'empty');
       }, () => {
         if (requestId !== storeListRequestId.current) return;
         setStores([]);
@@ -1497,7 +1510,34 @@ export function MallRuntimeProvider({
     assertIntent(nextQuote.dual.fallback, '普通兜底报价');
   }
 
-  function assertPickupTargetMatchesStore(target: PickupTarget, store: MerchantStore) {
+  function visibleCatalogProducts(products: readonly CatalogProduct[]) {
+    return products.filter((product) => {
+      const merchantId = catalogProductMerchantId(product);
+      if (merchantId) return merchantId === VISIBLE_MERCHANT_ID;
+      return product.title.includes(VISIBLE_MERCHANT_NAME) || product.subtitle.includes(VISIBLE_MERCHANT_NAME);
+    });
+  }
+
+  function catalogProductMerchantId(product: CatalogProduct) {
+    const direct = (product as CatalogProduct & { merchantId?: unknown }).merchantId;
+    if (typeof direct === 'string') return direct;
+    const metadataMerchantId = product.metadata.merchantId;
+    return typeof metadataMerchantId === 'string' ? metadataMerchantId : null;
+  }
+
+  function visibleMerchantStores(stores: readonly MerchantStore[]) {
+    return stores.filter((store) => store.merchantId === VISIBLE_MERCHANT_ID);
+  }
+
+  function visibleSeckillSession(session: PublishedSeckillSessionProjection | null) {
+    return session?.merchantId === VISIBLE_MERCHANT_ID ? session : null;
+  }
+
+  function visibleSeckillSessions(sessions: readonly PublishedSeckillSessionProjection[]) {
+    return sessions.filter((session) => session.merchantId === VISIBLE_MERCHANT_ID);
+  }
+
+function assertPickupTargetMatchesStore(target: PickupTarget, store: MerchantStore) {
     if (
       target.storeId !== store.storeId
       || target.store.storeId !== store.storeId
@@ -1792,7 +1832,7 @@ export function MallRuntimeProvider({
     if (!includeCurrent) {
       const history = await services.core.listSeckillSessionHistory(undefined, 20);
       if (!isActive()) return;
-      setSeckillHistory(history.items);
+      setSeckillHistory(visibleSeckillSessions(history.items));
       setSeckillSessionState((current) => current === 'loading' ? 'empty' : current);
       return undefined;
     }
@@ -1801,18 +1841,19 @@ export function MallRuntimeProvider({
       services.core.listSeckillSessionHistory(undefined, 20),
     ]);
     if (!isActive()) return;
-    if (history.status === 'fulfilled') setSeckillHistory(history.value.items);
+    if (history.status === 'fulfilled') setSeckillHistory(visibleSeckillSessions(history.value.items));
     if (current.status === 'fulfilled') {
-      if (current.value === null) {
+      const visibleCurrent = visibleSeckillSession(current.value);
+      if (!visibleCurrent) {
         setSeckillSession(null);
         setSeckillEvents([]);
         setSeckillSessionState('empty');
       } else {
-        setSeckillSession(current.value);
+        setSeckillSession(visibleCurrent);
         setSeckillSessionState('ready');
       }
       setSeckillRealtimeError(null);
-      return current.value;
+      return visibleCurrent;
     }
     if (current.reason instanceof CoreClientError && current.reason.code === 'UnknownState') {
       setSeckillSession(null);
@@ -1828,9 +1869,10 @@ export function MallRuntimeProvider({
     products: readonly CatalogProduct[],
     currentSession: PublishedSeckillSessionProjection | null | undefined,
   ) {
-    if (hasLiveSeckillCatalogOverlay(products, currentSession)) return products;
+    const visibleProducts = visibleCatalogProducts(products);
+    if (hasLiveSeckillCatalogOverlay(visibleProducts, currentSession)) return visibleProducts;
     const nextProducts = await services.core.listCatalog(session?.token);
-    return nextProducts;
+    return visibleCatalogProducts(nextProducts);
   }
 
   async function loadNotificationBundle(activeSession: WalletSession, isActive: () => boolean = () => true) {

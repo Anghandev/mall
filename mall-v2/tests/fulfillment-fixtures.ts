@@ -15,7 +15,7 @@ export const storeImageAssetIds = [hash('a'), hash('b')] as const;
 
 export const store: MerchantStore = {
   storeId: 'store-dalian-001',
-  merchantId: 'merchant-001',
+  merchantId: 'merchant:685108d6-c0dc-457b-8272-ae8bf9886501',
   name: '阿步 24K 大连自提店',
   regionCode: '210202',
   longitude: 121.6389,
