@@ -1988,6 +1988,52 @@ describe('05 asset rails', () => {
     }, 'test-session');
   });
 
+
+  it('lets a merchant wallet request available NPL rewards from the asset page without changing USDT settlement', async () => {
+    const rewardAmount = '6315';
+    const rewardIntent = {
+      ...settlementIntent,
+      intent: {
+        ...settlementIntent.intent,
+        rail: 'REWARD_NPL' as const,
+        amount: rewardAmount,
+      },
+      typedData: {
+        ...settlementIntent.typedData,
+        message: {
+          ...settlementIntent.typedData.message,
+          rail: 'REWARD_NPL',
+          amount: rewardAmount,
+        },
+      },
+    };
+    const createSettlementIntent = vi.fn(async (input: Parameters<CoreApi['createSettlementIntent']>[0]) => (
+      input.rail === 'REWARD_NPL' ? rewardIntent : settlementIntent
+    ));
+    const submitSettlementRequest = vi.fn(createMockCoreApi().submitSettlementRequest);
+    const { user, walletRequest } = await enterAssets(createMockCoreApi({
+      createSettlementIntent,
+      submitSettlementRequest,
+    }));
+
+    const button = await screen.findByRole('button', { name: /签名申请 NPL 奖励结算/ });
+    await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+    await user.click(button);
+
+    expect(await screen.findByText(/NPL 奖励结算请求已提交/)).toBeTruthy();
+    expect(createSettlementIntent).toHaveBeenCalledWith({
+      rail: 'REWARD_NPL',
+      amount: rewardAmount,
+      idempotencyKey: expect.stringMatching(/^merchant-reward_npl-settlement-intent-/),
+    }, 'test-session');
+    const typedDataCall = walletRequest.mock.calls.find(([request]) => request.method === 'eth_signTypedData_v4');
+    expect(JSON.parse(String(typedDataCall?.[0].params?.[1])).message.rail).toBe('REWARD_NPL');
+    expect(submitSettlementRequest).toHaveBeenCalledWith({
+      intentId: rewardIntent.intent.intentId,
+      signature: `0x${'12'.repeat(65)}`,
+    }, 'test-session');
+  });
+
   it('fills the exact available settlement amount instead of the rounded display amount', async () => {
     const preciseSettlementList = structuredClone(settlementList);
     preciseSettlementList.balances = preciseSettlementList.balances.map((balance) => (
@@ -1995,7 +2041,22 @@ describe('05 asset rails', () => {
         ? { ...balance, amount: '655569000000000000' }
         : balance
     ));
-    const createSettlementIntent = vi.fn(createMockCoreApi().createSettlementIntent);
+    const createSettlementIntent = vi.fn(async (input: Parameters<CoreApi['createSettlementIntent']>[0]) => ({
+      ...settlementIntent,
+      intent: {
+        ...settlementIntent.intent,
+        rail: input.rail,
+        amount: input.amount,
+      },
+      typedData: {
+        ...settlementIntent.typedData,
+        message: {
+          ...settlementIntent.typedData.message,
+          rail: input.rail,
+          amount: input.amount,
+        },
+      },
+    }));
     const { user } = await enterAssets(createMockCoreApi({
       listSettlements: async () => preciseSettlementList,
       createSettlementIntent,

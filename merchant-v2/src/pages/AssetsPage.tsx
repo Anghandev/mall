@@ -52,7 +52,9 @@ export function AssetsPage() {
   const [receivablePageError, setReceivablePageError] = useState<string>();
   const [settlementAmount, setSettlementAmount] = useState('');
   const [settlementCommand, setSettlementCommand] = useState<CommandState>({ phase: 'idle' });
+  const [rewardSettlementCommand, setRewardSettlementCommand] = useState<CommandState>({ phase: 'idle' });
   const settlementKey = useRef<string | undefined>(undefined);
+  const rewardSettlementKey = useRef<string | undefined>(undefined);
   const sessionTokenRef = useRef(session?.token);
   sessionTokenRef.current = session?.token;
 
@@ -151,12 +153,17 @@ export function AssetsPage() {
   )) === true;
   const lockedMerchantBalanceAmount = sumAssetAmounts(merchantBalances.filter((balance) => balance.state === 'LOCKED'));
   const availableMerchantBalanceAmount = sumAssetAmounts(merchantBalances.filter((balance) => balance.state === 'AVAILABLE'));
+  const lockedNplRewardAmount = sumAssetAmounts(nplBalances.filter((balance) => balance.state === 'LOCKED'));
+  const availableNplRewardAmount = sumAssetAmounts(nplBalances.filter((balance) => balance.state === 'AVAILABLE'));
   const lockedMerchantBalanceInput = formatExactTokenInput(lockedMerchantBalanceAmount);
   const availableMerchantBalanceInput = formatExactTokenInput(availableMerchantBalanceAmount);
   const hasLockedMerchantBalance = BigInt(lockedMerchantBalanceAmount) > 0n;
   const hasAvailableMerchantBalance = BigInt(availableMerchantBalanceAmount) > 0n;
+  const hasLockedNplReward = BigInt(lockedNplRewardAmount) > 0n;
+  const hasAvailableNplReward = BigInt(availableNplRewardAmount) > 0n;
   const settlementValid = isPositiveUsdtInput(settlementAmount);
   const settlementSubmitting = settlementCommand.phase === 'submitting';
+  const rewardSettlementSubmitting = rewardSettlementCommand.phase === 'submitting';
   const canRequestSettlement = Boolean(
     session
     && settlements
@@ -197,36 +204,47 @@ export function AssetsPage() {
     }
   }
 
-  async function submitSettlement(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!session || !canRequestSettlement) return;
+  async function submitSettlementRequest(input: {
+    rail: 'MERCHANT_USDT' | 'REWARD_NPL';
+    amount: string;
+    idempotencyRef: React.MutableRefObject<string | undefined>;
+    setCommand: (state: CommandState) => void;
+    successPrefix: string;
+    resetAmount?: () => void;
+  }) {
+    if (!session) return;
     const token = session.token;
-    const idempotencyKey = settlementKey.current ?? createIdempotencyKey('settlement-intent');
-    settlementKey.current = idempotencyKey;
-    setSettlementCommand({ phase: 'submitting' });
+    const idempotencyKind = input.rail === 'MERCHANT_USDT'
+      ? 'settlement-intent'
+      : `${input.rail.toLowerCase()}-settlement-intent`;
+    const idempotencyKey = input.idempotencyRef.current ?? createIdempotencyKey(idempotencyKind);
+    input.idempotencyRef.current = idempotencyKey;
+    input.setCommand({ phase: 'submitting' });
     try {
-      const requestedAmount = parseUsdtInput(settlementAmount, '结算申请金额', true);
       let idempotencyKeyForAttempt = idempotencyKey;
       let projection = await api.createSettlementIntent({
-        rail: 'MERCHANT_USDT',
-        amount: requestedAmount,
+        rail: input.rail,
+        amount: input.amount,
         idempotencyKey: idempotencyKeyForAttempt,
       }, token);
       if (settlementIntentNeedsRefresh(projection.intent.deadline)) {
-        idempotencyKeyForAttempt = createIdempotencyKey('settlement-intent');
-        settlementKey.current = idempotencyKeyForAttempt;
+        idempotencyKeyForAttempt = createIdempotencyKey(idempotencyKind);
+        input.idempotencyRef.current = idempotencyKeyForAttempt;
         projection = await api.createSettlementIntent({
-          rail: 'MERCHANT_USDT',
-          amount: requestedAmount,
+          rail: input.rail,
+          amount: input.amount,
           idempotencyKey: idempotencyKeyForAttempt,
         }, token);
       }
       if (settlementIntentNeedsRefresh(projection.intent.deadline)) {
-        settlementKey.current = undefined;
+        input.idempotencyRef.current = undefined;
         throw new CoreApiError('NonceExpired', '结算签名已过期，请重新点击提交。');
       }
       if (projection.intent.wallet.toLowerCase() !== session.walletAddress.toLowerCase()) {
         throw new CoreApiError('InvalidResponse', '结算意图绑定了其他钱包。');
+      }
+      if (projection.intent.rail !== input.rail || projection.intent.amount !== input.amount) {
+        throw new CoreApiError('InvalidResponse', '结算意图和当前申请类型或金额不一致。');
       }
       const signature = await signSettlementTypedData(projection.typedData);
       const request = await api.submitSettlementRequest({
@@ -236,14 +254,39 @@ export function AssetsPage() {
       if (request.wallet_address.toLowerCase() !== session.walletAddress.toLowerCase()) {
         throw new CoreApiError('InvalidResponse', '结算请求返回了其他钱包。');
       }
-      settlementKey.current = undefined;
-      setSettlementAmount('');
-      setSettlementCommand({ phase: 'success', message: `结算请求已提交，状态：${statusLabel(request.state)}，记录号：${shortId(request.request_id)}` });
+      input.idempotencyRef.current = undefined;
+      input.resetAmount?.();
+      input.setCommand({ phase: 'success', message: `${input.successPrefix}已提交，状态：${statusLabel(request.state)}，记录号：${shortId(request.request_id)}` });
       void loadData(true);
     } catch (error) {
-      if (isStaleSettlementAttempt(error)) settlementKey.current = undefined;
-      setSettlementCommand({ phase: 'error', message: readableError(error) });
+      if (isStaleSettlementAttempt(error)) input.idempotencyRef.current = undefined;
+      input.setCommand({ phase: 'error', message: readableError(error) });
     }
+  }
+
+  async function submitSettlement(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!canRequestSettlement) return;
+    const requestedAmount = parseUsdtInput(settlementAmount, '结算申请金额', true);
+    await submitSettlementRequest({
+      rail: 'MERCHANT_USDT',
+      amount: requestedAmount,
+      idempotencyRef: settlementKey,
+      setCommand: setSettlementCommand,
+      successPrefix: '货款结算请求',
+      resetAmount: () => setSettlementAmount(''),
+    });
+  }
+
+  async function submitRewardSettlement() {
+    if (!session || !settlements || !hasAvailableNplReward || rewardSettlementSubmitting) return;
+    await submitSettlementRequest({
+      rail: 'REWARD_NPL',
+      amount: availableNplRewardAmount,
+      idempotencyRef: rewardSettlementKey,
+      setCommand: setRewardSettlementCommand,
+      successPrefix: 'NPL 奖励结算请求',
+    });
   }
 
   return (
@@ -379,6 +422,25 @@ export function AssetsPage() {
           <p className="command-block-reason" role="status">{hasLockedMerchantBalance ? `有 ${lockedMerchantBalanceInput} USDT 已付款锁定中，暂时不能提。自提订单要先让买家出示 6 位核销码，商家在履约交付页核销后才会变成可申请；邮寄订单要先完成发货/履约确认。` : '当前没有可申请结算的货款。'}</p>
         ) : null}
         <CommandNotice state={settlementCommand} />
+
+        <div className="finance-command-form finance-command-form--reward" aria-labelledby="reward-settlement-title">
+          <div className="field">
+            <label id="reward-settlement-title">NPL 奖励结算</label>
+            <div className="reward-settlement-summary">
+              <span>可申请 {formatNpl(availableNplRewardAmount)}</span>
+              <span>锁定中 {formatNpl(lockedNplRewardAmount)}</span>
+            </div>
+            <span className="field-help">创世节点、直推、区域等 NPL 奖励都在这里一键申请；锁定中金额暂不能申请。</span>
+          </div>
+          <button className="button primary" disabled={!session || !settlements || !hasAvailableNplReward || rewardSettlementSubmitting} onClick={() => void submitRewardSettlement()} type="button">
+            {rewardSettlementSubmitting ? <LoaderCircle aria-hidden="true" className="spin" size={16} /> : <Coins aria-hidden="true" size={16} />}
+            {rewardSettlementSubmitting ? '等待钱包与系统确认' : `签名申请 NPL 奖励结算 ${formatNpl(availableNplRewardAmount)}`}
+          </button>
+          {!hasAvailableNplReward && settlements ? (
+            <p className="command-block-reason" role="status">{hasLockedNplReward ? `有 ${formatNpl(lockedNplRewardAmount)} 奖励锁定中，暂时不能提。` : '当前没有可申请的 NPL 奖励。'}</p>
+          ) : null}
+          <CommandNotice state={rewardSettlementCommand} />
+        </div>
       </section>
 
       <section className="section-block finance-section" aria-labelledby="settlement-history-title">

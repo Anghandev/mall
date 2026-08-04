@@ -2758,6 +2758,26 @@ td .empty-state {
   grid-template-columns: minmax(240px, 1fr) auto;
 }
 
+.finance-command-form--reward {
+  margin-top: 14px;
+}
+
+.reward-settlement-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.reward-settlement-summary span {
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text);
+  background: var(--surface);
+  font-size: 0.75rem;
+  font-weight: 750;
+}
+
 .finance-command-form .button {
   min-height: 40px;
 }
