@@ -307,6 +307,10 @@ describe('Mall V2 payment consumer', () => {
     const bnm = within(panel).getByRole('heading', { name: 'BNM 积分' }).closest('article')!;
     await waitFor(() => expect(within(bnm).getAllByText('120.00 BNM')).toHaveLength(2));
     expect(within(bnm).getByText('0.00 BNM')).toBeTruthy();
+    const genesis = within(panel).getByRole('heading', { name: '创世节点 NPL' }).closest('article')!;
+    expect(within(genesis).getAllByText('0.00 NPL')).toHaveLength(3);
+    const regional = within(panel).getByRole('heading', { name: '区域代理 NPL' }).closest('article')!;
+    expect(within(regional).getAllByText('0.00 NPL')).toHaveLength(3);
   });
 
   it('labels seckill and shopping counts as loaded-page statistics without placeholders', async () => {
