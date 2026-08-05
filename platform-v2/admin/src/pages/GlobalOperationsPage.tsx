@@ -39,8 +39,9 @@ import {
   searchAdminGlobalResources,
   type AdminGlobalSearchFilters,
 } from '../adminGlobalOperationsApi';
+import { CopyableWallet } from '../components/CopyableWallet';
 import { fetchAdminCatalogTags } from '../catalogAdminApi';
-import { CoreApiError } from '../coreApi';
+import { CoreApiError, searchAdminOrders } from '../coreApi';
 import { useCoreSession } from '../coreSession';
 import { commonStateLabel, humanizeError, shortId } from '../display';
 
@@ -95,6 +96,7 @@ export function GlobalOperationsPage() {
   const [tagsLoading, setTagsLoading] = useState(false);
   const [tagsError, setTagsError] = useState<CoreApiError | null>(null);
   const [searching, setSearching] = useState(false);
+  const [orderBuyerWallets, setOrderBuyerWallets] = useState<Readonly<Record<string, string | null>>>({});
   const [searchError, setSearchError] = useState<CoreApiError | null>(null);
   const [operationError, setOperationError] = useState<CoreApiError | null>(null);
   const [operationNotice, setOperationNotice] = useState('');
@@ -114,6 +116,7 @@ export function GlobalOperationsPage() {
     setResponse(null);
     setActiveFilters(null);
     setSelectedKeys(new Set());
+    setOrderBuyerWallets({});
     setSearchError(null);
     setOperationError(null);
     setOperationNotice('');
@@ -160,6 +163,27 @@ export function GlobalOperationsPage() {
     setOperationError(null);
   };
 
+  const loadOrderBuyerWallets = async (resources: readonly AdminResourceSummary[]) => {
+    if (!session) return;
+    const orderIds = resources
+      .filter((resource) => resource.resourceType === 'ORDER')
+      .map((resource) => resource.resourceId);
+    if (!orderIds.length) return;
+    const entries: Array<readonly [string, string | null]> = [];
+    for (let index = 0; index < orderIds.length; index += 6) {
+      const batch = orderIds.slice(index, index + 6);
+      entries.push(...await Promise.all(batch.map(async (orderId) => {
+        try {
+          const page = await searchAdminOrders(session.token, { orderId, limit: 1 });
+          return [orderId, page.orders.find((order) => order.orderId === orderId)?.buyerWallet ?? null] as const;
+        } catch {
+          return [orderId, null] as const;
+        }
+      })));
+    }
+    setOrderBuyerWallets((current) => ({ ...current, ...Object.fromEntries(entries) }));
+  };
+
   const runSearch = async (filters: AdminGlobalSearchFilters) => {
     if (!session || !canRead) return;
     setSearching(true);
@@ -167,12 +191,15 @@ export function GlobalOperationsPage() {
     setOperationError(null);
     setOperationNotice('');
     setSelectedKeys(new Set());
+    setOrderBuyerWallets({});
     try {
       const next = await searchAdminGlobalResources(filters, session.token);
       setResponse(next);
       setActiveFilters(filters);
+      void loadOrderBuyerWallets(next.resources);
     } catch (cause) {
       setResponse(null);
+      setOrderBuyerWallets({});
       setSearchError(asCoreError(cause, '全局资源检索暂时无法连接'));
     } finally {
       setSearching(false);
@@ -271,7 +298,7 @@ export function GlobalOperationsPage() {
       ) : !canRead ? (
         <ErrorView error={new CoreApiError({ code: 'Forbidden', message: '当前会话没有全局资源读取权限', status: 403 })} />
       ) : (
-        <GlobalResourceSearch enabled={!searching && !pendingOperation} loading={searching} onSearch={(filters) => void runSearch(filters)} onReset={() => { setResponse(null); setActiveFilters(null); setSelectedKeys(new Set()); }} />
+        <GlobalResourceSearch enabled={!searching && !pendingOperation} loading={searching} onSearch={(filters) => void runSearch(filters)} onReset={() => { setResponse(null); setActiveFilters(null); setOrderBuyerWallets({}); setSelectedKeys(new Set()); }} />
       )}
 
       {sessionError ? <p className="inline-notice" role="alert">{sessionError}</p> : null}
@@ -281,6 +308,7 @@ export function GlobalOperationsPage() {
         <>
           {response.truncated ? <p className="global-truncated" role="status"><AlertTriangle aria-hidden="true" /><span><strong>结果已截断</strong>当前仅显示前 {response.resources.length} 项，请增加精确条件后重新查询。</span></p> : null}
           <ResourceResults
+            orderBuyerWallets={orderBuyerWallets}
             relation={response.relation}
             resources={response.resources}
             selectionDisabled={Boolean(pendingOperation)}
@@ -398,7 +426,8 @@ function GlobalResourceSearch({ enabled, loading, onSearch, onReset }: {
   );
 }
 
-function ResourceResults({ relation, resources, selectionDisabled, selectedKeys, tags, onSelectionChange }: {
+function ResourceResults({ orderBuyerWallets, relation, resources, selectionDisabled, selectedKeys, tags, onSelectionChange }: {
+  orderBuyerWallets: Readonly<Record<string, string | null>>;
   relation: 'AND' | 'OR';
   resources: readonly AdminResourceSummary[];
   selectionDisabled: boolean;
@@ -418,17 +447,19 @@ function ResourceResults({ relation, resources, selectionDisabled, selectedKeys,
   return (
     <section className="panel global-results" aria-labelledby="global-results-title">
       <div className="panel-heading"><div><p className="section-kicker">查询结果</p><h2 id="global-results-title">资源结果</h2></div><span className="status-chip status-ready"><Check aria-hidden="true" />{resources.length} 项</span></div>
-      <div className="data-table-wrap"><table className="data-table global-resource-table"><thead><tr><th><input type="checkbox" checked={allSelected} onChange={toggleAll} aria-label="选择当前全部结果" disabled={selectionDisabled} /></th><th>类型 / 状态</th><th>资源</th><th>归属</th><th>标签</th><th>逐行权限</th><th>创建时间</th></tr></thead><tbody>{resources.map((resource) => (
-        <tr key={resourceKey(resource)} className={selectedKeys.has(resourceKey(resource)) ? 'is-selected' : undefined}>
+      <div className="data-table-wrap"><table className="data-table global-resource-table"><thead><tr><th><input type="checkbox" checked={allSelected} onChange={toggleAll} aria-label="选择当前全部结果" disabled={selectionDisabled} /></th><th>类型 / 状态</th><th>资源</th><th>买家钱包</th><th>归属</th><th>标签</th><th>逐行权限</th><th>创建时间</th></tr></thead><tbody>{resources.map((resource) => {
+        const buyerWallet = resource.resourceType === 'ORDER' ? orderBuyerWallets[resource.resourceId] : undefined;
+        return <tr key={resourceKey(resource)} className={selectedKeys.has(resourceKey(resource)) ? 'is-selected' : undefined}>
           <td><input type="checkbox" checked={selectedKeys.has(resourceKey(resource))} onChange={() => toggle(resource)} aria-label={`选择 ${resource.resourceType} ${resource.resourceId}`} disabled={selectionDisabled} /></td>
           <td><span className={`global-type global-type-${resource.resourceType.toLowerCase()}`}>{resourceTypeLabel(resource.resourceType)}</span><small>{commonStateLabel(resource.status)}</small></td>
           <td><strong>{resource.title}</strong><code title={resource.resourceId}>{shortId(resource.resourceId)}</code></td>
+          <td>{resource.resourceType === 'ORDER' ? buyerWallet ? <CopyableWallet label="买家钱包" value={buyerWallet} /> : <small>{buyerWallet === null ? '未返回' : '读取中'}</small> : <small>—</small>}</td>
           <td><small>商家</small><code title={resource.merchantId ?? undefined}>{resource.merchantId ? shortId(resource.merchantId) : '—'}</code><small>商品</small><code title={resource.productId ?? undefined}>{resource.productId ? shortId(resource.productId) : '—'}</code></td>
           <td>{resource.tagIds.length ? <div className="global-tag-list">{resource.tagIds.map((tagId) => <span key={tagId}>{tags.find((tag) => tag.tagId === tagId)?.name ?? tagId}</span>)}</div> : <small>无标签</small>}</td>
           <td><div className="global-capabilities">{resource.allowedBatchActions.map((capability) => <span key={capability.action} className={capability.enabled ? 'is-enabled' : 'is-blocked'}>{batchActionLabel(capability.action)}<small>{capability.enabled ? '可执行' : reasonLabel(capability.reasonCode)}</small></span>)}</div></td>
           <td>{formatDate(resource.createdAt)}</td>
-        </tr>
-      ))}</tbody></table></div>
+        </tr>;
+      })}</tbody></table></div>
     </section>
   );
 }

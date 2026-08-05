@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { BatchActionBar } from '../components/BatchActionBar';
+import { CopyableWallet } from '../components/CopyableWallet';
 import { FulfillmentCommandPanel } from '../components/FulfillmentCommandPanel';
 import { GlobalSearch } from '../components/GlobalSearch';
 import { TakeoverCaseWorkspace } from '../components/TakeoverCaseWorkspace';
@@ -221,6 +222,7 @@ export function TakeoverPage() {
                   <div className="takeover-evidence">
                     <p className="section-kicker">履约详情</p><h3>{orderStateLabel(selectedOrder.state)} · {fulfillmentModeLabel(selectedOrder.fulfillmentMode)}</h3>
                     <dl className="definition-grid">
+                      <div><dt>买家钱包</dt><dd><CopyableWallet label="买家钱包" value={selectedOrder.buyerWallet} /></dd></div>
                       <div><dt>发货凭证</dt><dd>{selectedOrder.shipments.length}</dd></div>
                       <div><dt>物流记录</dt><dd>{selectedOrder.logistics.length}</dd></div>
                       <div><dt>处理中申请</dt><dd>{selectedOrder.requests.filter((request) => request.state === 'OPEN').length}</dd></div>

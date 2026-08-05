@@ -1391,3 +1391,13 @@ input::placeholder { color: #8b8b82; }
   .notification-variable-row .icon-button { width: 100%; }
   .notification-form-heading > small { align-self: flex-start; }
 }
+
+
+.copyable-wallet { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.copyable-wallet code { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.copyable-wallet-button { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 4px; min-height: 30px; padding: 0 9px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink-soft); background: var(--surface); font-size: 10px; font-weight: 700; cursor: pointer; }
+.copyable-wallet-button:hover { border-color: var(--gold-dark); color: var(--ink); }
+.copyable-wallet-button:focus-visible { outline: 2px solid var(--gold-dark); outline-offset: 2px; }
+.copyable-wallet-button svg { width: 13px; height: 13px; }
+.global-resource-table .copyable-wallet { max-width: 290px; }
+.global-resource-table .copyable-wallet code { display: block; max-width: none; margin-top: 0; }
