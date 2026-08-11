@@ -622,6 +622,27 @@ describe('Mall V2 payment consumer', () => {
     expect(screen.queryByText(/Order not found/i)).toBeNull();
   });
 
+  it('clears a stale payment pause checkout warning after runtime recovery is confirmed', async () => {
+    const user = userEvent.setup();
+    const getBootstrap = vi.fn<CoreClient['getBootstrap']>().mockResolvedValue(bootstrap(true));
+    const createOrdinaryQuote = vi.fn<CoreClient['createOrdinaryQuote']>()
+      .mockRejectedValue(new CoreClientError('BreakerActive', 'New payment quote is paused'));
+    renderAt('/mall', readyServices({ getBootstrap, createOrdinaryQuote }));
+
+    await screen.findByRole('heading', { name: product.title });
+    await user.click(screen.getByRole('button', { name: '连接钱包' }));
+    await screen.findByRole('button', { name: /0x1111/ });
+    await openProductCheckout(user);
+    await user.click(screen.getByRole('button', { name: /42码 \/ 黑金/ }));
+    await prepareDeliveryTarget(user);
+    await user.click(screen.getByRole('button', { name: '生成付款报价' }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain('平台支付开关暂停中，暂时不能下单。');
+    await waitFor(() => expect(screen.queryByText('平台支付开关暂停中，暂时不能下单。')).toBeNull(), { timeout: 3000 });
+    expect(createOrdinaryQuote).toHaveBeenCalledTimes(1);
+    expect(getBootstrap).toHaveBeenCalledTimes(2);
+  });
+
   it('reuses an unexpired wallet session after refresh instead of requesting another SIWE challenge', async () => {
     window.sessionStorage.clear();
     try {

@@ -225,6 +225,8 @@ export interface MallRuntimeValue {
 
 const RuntimeContext = createContext<MallRuntimeValue | null>(null);
 
+const PAYMENT_PAUSED_MESSAGE = '平台支付开关暂停中，暂时不能下单。';
+
 export function MallRuntimeProvider({
   children,
   services = defaultMallServices,
@@ -326,6 +328,23 @@ export function MallRuntimeProvider({
       active = false;
     };
   }, [services]);
+
+  useEffect(() => {
+    if (!bootstrap?.writesEnabled || error !== PAYMENT_PAUSED_MESSAGE) return undefined;
+    const timer = window.setTimeout(() => {
+      void services.core.getBootstrap()
+        .then((nextBootstrap) => {
+          setBootstrap(nextBootstrap);
+          if (nextBootstrap.writesEnabled) {
+            setError((current) => (current === PAYMENT_PAUSED_MESSAGE ? null : current));
+          }
+        })
+        .catch(() => {
+          // Keep the visible error if the lightweight recheck cannot prove recovery.
+        });
+    }, 1200);
+    return () => window.clearTimeout(timer);
+  }, [bootstrap?.writesEnabled, error, services]);
 
   useEffect(() => {
     let active = true;
@@ -2371,7 +2390,7 @@ function translateMallError(message: string, code?: string) {
   if (code === 'Forbidden' || /Forbidden/i.test(cleaned)) return '当前钱包没有权限，请切换正确钱包后重试。';
   if (/New payment quotes are blocked by unresolved payment policy/i.test(cleaned)) return '付款资金规则还没准备好，暂时不能下单。';
   if (/New payment quotes are blocked by unavailable payment infrastructure|fresh verified runtime readiness snapshot/i.test(cleaned)) return '付款确认服务还没准备好，暂时不能下单。';
-  if (/New payment quote is paused/i.test(cleaned)) return '平台支付开关暂停中，暂时不能下单。';
+  if (/New payment quote is paused/i.test(cleaned)) return PAYMENT_PAUSED_MESSAGE;
   if (code === 'DecisionBlocked' || code === 'ExternalBlocked' || code === 'ConfigurationRequired') return '当前暂时不能付款，请稍后再试。';
   if (/Invalid idempotency key|idempotencyKey|idempotency key|Idempotency key/i.test(cleaned)) return '系统提交编号异常，请刷新页面后重试。';
   if (/canonical integer string|must be a canonical atomic amount|canonical atomic amount|balance\.amount|amount must/i.test(cleaned)) return '系统返回的金额格式异常，请刷新或联系平台处理。';
