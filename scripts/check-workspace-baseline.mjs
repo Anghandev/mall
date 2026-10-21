@@ -25,7 +25,7 @@ const requiredRootScripts = [
   'verify',
 ];
 // Sanitized Phase 1 checkpoint after the credential-history rewrite.
-const legacyCheckpoint = '135cf790bbca0fbca61e30eae24b6d0a435fd362';
+const legacyCheckpoint = '0430c2407a7b87b65958578795ec45ff07c0febd';
 
 const rootPackage = readJson('package.json');
 if (rootPackage.packageManager !== 'pnpm@10.30.2') {
