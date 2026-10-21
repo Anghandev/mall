@@ -68,12 +68,14 @@ test('sanitized legacy checkpoint and removed-credential markers pass', () => {
   assert.equal(result.status, 0, result.output);
 });
 
-test('tracked environment files are rejected', () => {
-  withFile('.env', 'PUBLICATION_TEST=synthetic-only\n', true, (result) => {
-    assert.notEqual(result.status, 0);
-    assert.match(result.output, /Tracked secret file/);
+for (const filename of ['.env', 'platform-v2/.env.production', 'merchant-v2/.env.wallets.local']) {
+  test(`tracked environment file ${filename} is rejected`, () => {
+    withFile(filename, 'PUBLICATION_TEST=synthetic-only\n', true, (result) => {
+      assert.notEqual(result.status, 0);
+      assert.match(result.output, /Tracked secret file/);
+    });
   });
-});
+}
 
 test('tracked generated runtime evidence is rejected', () => {
   withFile('test-artifacts/publication-guard.txt', 'synthetic-only\n', true, (result) => {

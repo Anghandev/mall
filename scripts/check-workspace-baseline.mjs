@@ -61,7 +61,10 @@ for (const path of working) {
   }
 }
 for (const path of tracked) {
-  if (/(^|\/)\.env$/.test(path)) throw new Error(`Tracked secret file: ${path}`);
+  const filename = path.split('/').at(-1);
+  if (/^\.env(?:\.|$)/.test(filename) && !filename.endsWith('.example')) {
+    throw new Error(`Tracked secret file: ${path}`);
+  }
   if (/(^|\/)(node_modules|dist|test-artifacts|test-results|playwright-report|coverage)\//.test(path)
     || /^(output|outputs)\//.test(path)
     || /(^|\/)\.DS_Store$|\.(?:db|sqlite3?)(?:-wal|-shm)?$|\.dump(?:\.sha256)?$/.test(path)) {
