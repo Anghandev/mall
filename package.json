@@ -10,6 +10,7 @@
   },
   "scripts": {
     "baseline:check": "./scripts/node scripts/check-workspace-baseline.mjs",
+    "baseline:test": "./scripts/node --test scripts/check-workspace-baseline.test.mjs",
     "brand:check": "./scripts/node scripts/check-visible-branding.mjs",
     "typecheck": "pnpm -r --if-present typecheck",
     "contracts:test": "pnpm --filter @abu24k/core contracts:test",

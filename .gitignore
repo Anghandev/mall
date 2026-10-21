@@ -35,6 +35,9 @@
 **/playwright-report/
 **/test-results/
 output/
+outputs/
+*.log
+*.har
 platform-v2/deploy/config/
 **/deployments/*private*
 .DS_Store
