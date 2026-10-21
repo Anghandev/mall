@@ -27,6 +27,7 @@ Use Node.js 24 (`>=24.14.0 <25`) and pnpm 10.30.2:
 ```bash
 pnpm install --frozen-lockfile --ignore-scripts
 pnpm baseline:check
+pnpm baseline:test
 pnpm requirements:check
 pnpm typecheck
 pnpm micro:guard:test

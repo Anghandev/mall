@@ -12,6 +12,7 @@ Use Node.js 24 and pnpm 10.30.2. Install dependencies without lifecycle scripts:
 ```sh
 pnpm install --frozen-lockfile --ignore-scripts
 pnpm baseline:check
+pnpm baseline:test
 pnpm requirements:check
 pnpm typecheck
 pnpm micro:guard:test

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const environment = isolatedGitEnvironment(process.env);
-const temporary = mkdtempSync(path.join(tmpdir(), 'mall-publication-guard-'));
+const temporary = realpathSync(mkdtempSync(path.join(tmpdir(), 'mall-publication-guard-')));
 const checkout = path.join(temporary, 'checkout');
 const clone = spawnSync('git', ['clone', '--quiet', '--shared', root, checkout], { encoding: 'utf8', env: environment });
 assert.equal(clone.status, 0, 'isolated local clone must succeed');
